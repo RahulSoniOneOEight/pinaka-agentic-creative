@@ -1,0 +1,26 @@
+{
+  "project": {
+    "name": "[MISSING: pilot project name]",
+    "objective": "[MISSING: measurable creative objective]",
+    "mode": "product",
+    "audience": "[MISSING: target audience]",
+    "output_format": "9:16",
+    "language": "[MISSING: language]",
+    "duration_seconds": "25",
+    "max_budget": {
+      "amount": "0.00",
+      "currency": "INR"
+    }
+  },
+  "approved_fact_source": null,
+  "rights_policy": null,
+  "llm_model": null,
+  "generation_endpoint": null,
+  "voice_provider": null,
+  "acceptance_targets": {
+    "maximum_operator_minutes": null,
+    "maximum_cost_per_approved_video": null,
+    "required_delivery_spec": null,
+    "creative_acceptance_owner": null
+  }
+}

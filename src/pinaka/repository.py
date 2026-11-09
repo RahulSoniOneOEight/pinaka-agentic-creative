@@ -1,0 +1,1194 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections import deque
+from collections.abc import Iterable
+from decimal import Decimal
+from typing import Any
+
+from .database import Database
+from .enums import (
+    ApprovalStatus,
+    ArtifactStatus,
+    BudgetEntryKind,
+    JobStatus,
+    ProjectStatus,
+)
+from .errors import BudgetExceededError, ConflictError, IntegrityError, NotFoundError
+from .models import (
+    ApprovalRequest,
+    ArtifactCreate,
+    CapabilityResult,
+    DependencyRef,
+    FactSetCreate,
+    JobRecord,
+    JobRequest,
+    Money,
+    ProjectCreate,
+    ProjectRecord,
+    ShotCreate,
+    SlotCreate,
+)
+from .utils import canonical_json, new_id, sha256_json, slugify, utc_now
+
+
+class Repository:
+    """Atomic persistence operations and append-only audit events."""
+
+    def __init__(self, database: Database):
+        self.database = database
+
+    @staticmethod
+    def _event(
+        connection: sqlite3.Connection,
+        *,
+        project_id: str | None,
+        entity_type: str,
+        entity_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO events(id, project_id, entity_type, entity_id, event_type, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("evt"),
+                project_id,
+                entity_type,
+                entity_id,
+                event_type,
+                canonical_json(payload),
+                utc_now(),
+            ),
+        )
+
+    @staticmethod
+    def _project_from_row(row: sqlite3.Row) -> ProjectRecord:
+        currency = row["currency"]
+        return ProjectRecord(
+            id=row["id"],
+            slug=row["slug"],
+            name=row["name"],
+            objective=row["objective"],
+            mode=row["mode"],
+            audience=row["audience"],
+            output_format=row["output_format"],
+            language=row["language"],
+            duration_seconds=Decimal(row["duration_seconds"]),
+            status=row["status"],
+            max_budget=Money.from_minor(row["max_budget_minor"], currency),
+            reserved=Money.from_minor(row["reserved_minor"], currency),
+            spent=Money.from_minor(row["spent_minor"], currency),
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _job_from_row(row: sqlite3.Row) -> JobRecord:
+        currency = row["currency"]
+        return JobRecord(
+            id=row["id"],
+            project_id=row["project_id"],
+            provider=row["provider"],
+            endpoint=row["endpoint"],
+            operation=row["operation"],
+            idempotency_key=row["idempotency_key"],
+            status=row["status"],
+            estimated_cost=Money.from_minor(row["estimated_cost_minor"], currency),
+            reserved_cost=Money.from_minor(row["reserved_cost_minor"], currency),
+            actual_cost=Money.from_minor(row["actual_cost_minor"], currency),
+            provider_job_id=row["provider_job_id"],
+            request_hash=row["request_hash"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _require_project(
+        connection: sqlite3.Connection, project_id: str
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if not row:
+            raise NotFoundError(f"Project not found: {project_id}")
+        return row
+
+    @staticmethod
+    def _require_job(connection: sqlite3.Connection, job_id: str) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT * FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        if not row:
+            raise NotFoundError(f"Job not found: {job_id}")
+        return row
+
+    def create_project(self, request: ProjectCreate) -> ProjectRecord:
+        project_id = new_id("prj")
+        now = utc_now()
+        slug = slugify(request.name)
+        with self.database.transaction() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO projects(
+                        id, slug, name, objective, mode, audience, output_format, language,
+                        duration_seconds, status, max_budget_minor, currency, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project_id,
+                        slug,
+                        request.name,
+                        request.objective,
+                        request.mode.value,
+                        request.audience,
+                        request.output_format,
+                        request.language,
+                        str(request.duration_seconds),
+                        ProjectStatus.DRAFT.value,
+                        request.max_budget.minor,
+                        request.max_budget.currency,
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"A project with slug '{slug}' already exists"
+                ) from error
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="project",
+                entity_id=project_id,
+                event_type="project.created",
+                payload={"slug": slug, "status": ProjectStatus.DRAFT.value},
+            )
+            return self._project_from_row(self._require_project(connection, project_id))
+
+    def get_project(self, project_id: str) -> ProjectRecord:
+        with self.database.read() as connection:
+            return self._project_from_row(self._require_project(connection, project_id))
+
+    def list_projects(self) -> list[ProjectRecord]:
+        with self.database.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM projects ORDER BY created_at"
+            ).fetchall()
+            return [self._project_from_row(row) for row in rows]
+
+    def set_project_status(
+        self,
+        project_id: str,
+        status: ProjectStatus,
+        *,
+        reason: str,
+        expected_status: ProjectStatus | None = None,
+    ) -> ProjectRecord:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            if expected_status and project["status"] != expected_status.value:
+                raise ConflictError(
+                    f"Project status changed: expected {expected_status.value}, "
+                    f"observed {project['status']}"
+                )
+            previous = project["status"]
+            connection.execute(
+                """
+                UPDATE projects
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (status.value, now, project_id),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="project",
+                entity_id=project_id,
+                event_type="project.status_changed",
+                payload={"from": previous, "to": status.value, "reason": reason},
+            )
+            return self._project_from_row(self._require_project(connection, project_id))
+
+    @staticmethod
+    def _fact_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "version": row["version"],
+            "source_ref": row["source_ref"],
+            "effective_from": row["effective_from"],
+            "values": json.loads(row["values_json"]),
+            "evidence_refs": json.loads(row["evidence_refs_json"]),
+            "content_hash": row["content_hash"],
+            "is_current": bool(row["is_current"]),
+            "created_at": row["created_at"],
+        }
+
+    def current_fact_set(self, project_id: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM fact_sets WHERE project_id = ? AND is_current = 1",
+                (project_id,),
+            ).fetchone()
+            return self._fact_dict(row) if row else None
+
+    def add_fact_set(self, project_id: str, request: FactSetCreate) -> dict[str, Any]:
+        now = utc_now()
+        fact_id = new_id("fact")
+        content = {
+            "source_ref": request.source_ref,
+            "effective_from": request.effective_from,
+            "values": request.values,
+            "evidence_refs": request.evidence_refs,
+        }
+        content_hash = sha256_json(content)
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            previous = connection.execute(
+                "SELECT * FROM fact_sets WHERE project_id = ? AND is_current = 1",
+                (project_id,),
+            ).fetchone()
+            if previous and previous["content_hash"] == content_hash:
+                return self._fact_dict(previous)
+
+            version = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(version), 0) + 1 FROM fact_sets WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()[0]
+            )
+            if previous:
+                connection.execute(
+                    "UPDATE fact_sets SET is_current = 0 WHERE id = ?",
+                    (previous["id"],),
+                )
+            connection.execute(
+                """
+                INSERT INTO fact_sets(
+                    id, project_id, version, source_ref, effective_from, values_json,
+                    evidence_refs_json, content_hash, is_current, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    fact_id,
+                    project_id,
+                    version,
+                    request.source_ref,
+                    request.effective_from,
+                    canonical_json(request.values),
+                    canonical_json(request.evidence_refs),
+                    content_hash,
+                    now,
+                ),
+            )
+            invalidated = {"approvals": [], "artifacts": []}
+            if previous:
+                invalidated = self._invalidate_dependency_graph(
+                    connection,
+                    project_id=project_id,
+                    entity_type="fact_set",
+                    entity_id=previous["id"],
+                    reason=f"Fact set replaced by version {version}",
+                )
+                self._rollback_status_after_fact_change(connection, project_id, now)
+            if project["status"] == ProjectStatus.BRIEF_APPROVED.value:
+                connection.execute(
+                    """
+                    UPDATE projects
+                    SET status = ?, version = version + 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (ProjectStatus.FACTS_LOCKED.value, now, project_id),
+                )
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="project",
+                    entity_id=project_id,
+                    event_type="project.status_changed",
+                    payload={
+                        "from": ProjectStatus.BRIEF_APPROVED.value,
+                        "to": ProjectStatus.FACTS_LOCKED.value,
+                        "reason": f"Fact set v{version} locked",
+                    },
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="fact_set",
+                entity_id=fact_id,
+                event_type="fact_set.created",
+                payload={
+                    "version": version,
+                    "content_hash": content_hash,
+                    "replaces": previous["id"] if previous else None,
+                    "invalidated": invalidated,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM fact_sets WHERE id = ?", (fact_id,)
+            ).fetchone()
+            return self._fact_dict(row)
+
+    def _rollback_status_after_fact_change(
+        self, connection: sqlite3.Connection, project_id: str, now: str
+    ) -> None:
+        project = self._require_project(connection, project_id)
+        pipeline_order = [
+            ProjectStatus.DRAFT,
+            ProjectStatus.PLANNED,
+            ProjectStatus.BRIEF_APPROVED,
+            ProjectStatus.FACTS_LOCKED,
+            ProjectStatus.SOURCING,
+            ProjectStatus.ANIMATIC_READY,
+            ProjectStatus.ANIMATIC_APPROVED,
+            ProjectStatus.FINAL_CANDIDATE,
+            ProjectStatus.FINAL_APPROVED,
+            ProjectStatus.ARCHIVED,
+        ]
+        current = ProjectStatus(project["status"])
+        if current in pipeline_order and pipeline_order.index(
+            current
+        ) > pipeline_order.index(ProjectStatus.FACTS_LOCKED):
+            connection.execute(
+                """
+                UPDATE projects
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (ProjectStatus.FACTS_LOCKED.value, now, project_id),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="project",
+                entity_id=project_id,
+                event_type="project.rolled_back",
+                payload={
+                    "from": current.value,
+                    "to": ProjectStatus.FACTS_LOCKED.value,
+                    "reason": "Current fact set changed",
+                },
+            )
+
+    def _invalidate_dependency_graph(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        project_id: str,
+        entity_type: str,
+        entity_id: str,
+        reason: str,
+    ) -> dict[str, list[str]]:
+        queue = deque([(entity_type, entity_id)])
+        visited: set[tuple[str, str]] = set()
+        invalidated_approvals: list[str] = []
+        stale_artifacts: list[str] = []
+        now = utc_now()
+
+        while queue:
+            dependency_type, dependency_id = queue.popleft()
+            if (dependency_type, dependency_id) in visited:
+                continue
+            visited.add((dependency_type, dependency_id))
+
+            approval_rows = connection.execute(
+                """
+                SELECT a.id
+                FROM approvals a
+                JOIN approval_dependencies d ON d.approval_id = a.id
+                WHERE a.project_id = ? AND a.status = ?
+                  AND d.entity_type = ? AND d.entity_id = ?
+                """,
+                (
+                    project_id,
+                    ApprovalStatus.ACTIVE.value,
+                    dependency_type,
+                    dependency_id,
+                ),
+            ).fetchall()
+            for approval in approval_rows:
+                approval_id = approval["id"]
+                connection.execute(
+                    """
+                    UPDATE approvals
+                    SET status = ?, invalidated_at = ?, invalidation_reason = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        ApprovalStatus.INVALIDATED.value,
+                        now,
+                        reason,
+                        approval_id,
+                        ApprovalStatus.ACTIVE.value,
+                    ),
+                )
+                invalidated_approvals.append(approval_id)
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="approval",
+                    entity_id=approval_id,
+                    event_type="approval.invalidated",
+                    payload={
+                        "dependency_type": dependency_type,
+                        "dependency_id": dependency_id,
+                        "reason": reason,
+                    },
+                )
+                queue.append(("approval", approval_id))
+
+            artifact_rows = connection.execute(
+                """
+                SELECT a.id
+                FROM artifacts a
+                JOIN artifact_dependencies d ON d.artifact_id = a.id
+                WHERE a.project_id = ? AND a.status = ?
+                  AND d.entity_type = ? AND d.entity_id = ?
+                """,
+                (
+                    project_id,
+                    ArtifactStatus.CURRENT.value,
+                    dependency_type,
+                    dependency_id,
+                ),
+            ).fetchall()
+            for artifact in artifact_rows:
+                artifact_id = artifact["id"]
+                connection.execute(
+                    "UPDATE artifacts SET status = ?, stale_reason = ? WHERE id = ?",
+                    (ArtifactStatus.STALE.value, reason, artifact_id),
+                )
+                stale_artifacts.append(artifact_id)
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="artifact",
+                    entity_id=artifact_id,
+                    event_type="artifact.marked_stale",
+                    payload={
+                        "dependency_type": dependency_type,
+                        "dependency_id": dependency_id,
+                        "reason": reason,
+                    },
+                )
+                queue.append(("artifact", artifact_id))
+
+        return {"approvals": invalidated_approvals, "artifacts": stale_artifacts}
+
+    @staticmethod
+    def _shot_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "stable_key": row["stable_key"],
+            "ordinal": row["ordinal"],
+            "beat": row["beat"],
+            "duration_seconds": row["duration_seconds"],
+            "narrative": row["narrative"],
+            "requirements": json.loads(row["requirements_json"]),
+            "version": row["version"],
+        }
+
+    def add_shot(self, project_id: str, request: ShotCreate) -> dict[str, Any]:
+        shot_id = new_id("shot")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO shots(
+                        id, project_id, stable_key, ordinal, beat, duration_seconds,
+                        narrative, requirements_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        shot_id,
+                        project_id,
+                        request.stable_key,
+                        request.ordinal,
+                        request.beat,
+                        str(request.duration_seconds),
+                        request.narrative,
+                        canonical_json(request.requirements),
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"Shot key or ordinal already exists: {request.stable_key}/{request.ordinal}"
+                ) from error
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="shot",
+                entity_id=shot_id,
+                event_type="shot.created",
+                payload=request.model_dump(mode="json"),
+            )
+            row = connection.execute(
+                "SELECT * FROM shots WHERE id = ?", (shot_id,)
+            ).fetchone()
+            return self._shot_dict(row)
+
+    def add_slot(self, project_id: str, request: SlotCreate) -> dict[str, Any]:
+        slot_id = new_id("slot")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            shot = connection.execute(
+                "SELECT id FROM shots WHERE id = ? AND project_id = ?",
+                (request.shot_id, project_id),
+            ).fetchone()
+            if not shot:
+                raise NotFoundError(f"Shot not found in project: {request.shot_id}")
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO slots(
+                        id, project_id, shot_id, stable_key, role, identity_requirement,
+                        fact_requirement, transformation_permission, text_zone,
+                        approved_sources_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        slot_id,
+                        project_id,
+                        request.shot_id,
+                        request.stable_key,
+                        request.role,
+                        request.identity_requirement,
+                        request.fact_requirement,
+                        request.transformation_permission,
+                        request.text_zone,
+                        canonical_json(request.approved_sources),
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"Slot key already exists: {request.stable_key}"
+                ) from error
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="slot",
+                entity_id=slot_id,
+                event_type="slot.created",
+                payload=request.model_dump(mode="json"),
+            )
+            return {
+                "id": slot_id,
+                "project_id": project_id,
+                **request.model_dump(mode="json"),
+                "version": 1,
+            }
+
+    def active_approval(self, project_id: str, stage: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM approvals WHERE project_id = ? AND stage = ? AND status = ?",
+                (project_id, stage, ApprovalStatus.ACTIVE.value),
+            ).fetchone()
+            return self._approval_dict(connection, row) if row else None
+
+    @staticmethod
+    def _approval_dict(
+        connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict[str, Any]:
+        dependencies = connection.execute(
+            """
+            SELECT entity_type, entity_id, entity_hash
+            FROM approval_dependencies WHERE approval_id = ?
+            """,
+            (row["id"],),
+        ).fetchall()
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "stage": row["stage"],
+            "status": row["status"],
+            "approved_by": row["approved_by"],
+            "scope": json.loads(row["scope_json"]),
+            "subject_hash": row["subject_hash"],
+            "output_hash": row["output_hash"],
+            "approved_at": row["approved_at"],
+            "invalidated_at": row["invalidated_at"],
+            "invalidation_reason": row["invalidation_reason"],
+            "dependencies": [dict(item) for item in dependencies],
+        }
+
+    def create_approval(
+        self,
+        project_id: str,
+        request: ApprovalRequest,
+        dependencies: Iterable[DependencyRef],
+        subject_hash: str,
+        *,
+        expected_project_status: ProjectStatus,
+        resulting_project_status: ProjectStatus | None,
+    ) -> dict[str, Any]:
+        approval_id = new_id("appr")
+        now = utc_now()
+        dependencies = tuple(dependencies)
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            if project["status"] != expected_project_status.value:
+                raise ConflictError(
+                    f"Project status changed: expected {expected_project_status.value}, "
+                    f"observed {project['status']}"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO approvals(
+                        id, project_id, stage, status, approved_by, scope_json,
+                        subject_hash, output_hash, approved_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        approval_id,
+                        project_id,
+                        request.stage.value,
+                        ApprovalStatus.ACTIVE.value,
+                        request.approved_by,
+                        canonical_json(request.scope),
+                        subject_hash,
+                        request.output_hash,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"An active {request.stage.value} approval already exists"
+                ) from error
+            for dependency in dependencies:
+                connection.execute(
+                    """
+                    INSERT INTO approval_dependencies(approval_id, entity_type, entity_id, entity_hash)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        approval_id,
+                        dependency.entity_type,
+                        dependency.entity_id,
+                        dependency.entity_hash,
+                    ),
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="approval",
+                entity_id=approval_id,
+                event_type="approval.created",
+                payload={
+                    "stage": request.stage.value,
+                    "approved_by": request.approved_by,
+                    "subject_hash": subject_hash,
+                    "dependency_count": len(dependencies),
+                },
+            )
+            if resulting_project_status:
+                connection.execute(
+                    """
+                    UPDATE projects
+                    SET status = ?, version = version + 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (resulting_project_status.value, now, project_id),
+                )
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="project",
+                    entity_id=project_id,
+                    event_type="project.status_changed",
+                    payload={
+                        "from": project["status"],
+                        "to": resulting_project_status.value,
+                        "reason": f"{request.stage.value} approval {approval_id} recorded",
+                    },
+                )
+            row = connection.execute(
+                "SELECT * FROM approvals WHERE id = ?", (approval_id,)
+            ).fetchone()
+            return self._approval_dict(connection, row)
+
+    def register_artifact(
+        self, project_id: str, request: ArtifactCreate
+    ) -> dict[str, Any]:
+        artifact_id = new_id("art")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            if request.parent_artifact_id:
+                parent = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (request.parent_artifact_id, project_id),
+                ).fetchone()
+                if not parent:
+                    raise NotFoundError(
+                        f"Parent artifact not found in project: {request.parent_artifact_id}"
+                    )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO artifacts(
+                        id, project_id, kind, relative_path, content_hash, parent_artifact_id,
+                        operation_json, immutable, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        artifact_id,
+                        project_id,
+                        request.kind.value,
+                        request.relative_path,
+                        request.content_hash,
+                        request.parent_artifact_id,
+                        canonical_json(request.operation),
+                        int(request.immutable),
+                        ArtifactStatus.CURRENT.value,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"Artifact path already registered: {request.relative_path}"
+                ) from error
+            dependencies = list(request.dependencies)
+            if request.parent_artifact_id:
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact", entity_id=request.parent_artifact_id
+                    )
+                )
+            for dependency in dependencies:
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO artifact_dependencies(
+                        artifact_id, entity_type, entity_id, entity_hash
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        artifact_id,
+                        dependency.entity_type,
+                        dependency.entity_id,
+                        dependency.entity_hash,
+                    ),
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="artifact",
+                entity_id=artifact_id,
+                event_type="artifact.registered",
+                payload={
+                    "kind": request.kind.value,
+                    "relative_path": request.relative_path,
+                    "content_hash": request.content_hash,
+                    "immutable": request.immutable,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            return self._artifact_dict(connection, row)
+
+    @staticmethod
+    def _artifact_dict(
+        connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict[str, Any]:
+        dependencies = connection.execute(
+            """
+            SELECT entity_type, entity_id, entity_hash
+            FROM artifact_dependencies WHERE artifact_id = ?
+            """,
+            (row["id"],),
+        ).fetchall()
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "kind": row["kind"],
+            "relative_path": row["relative_path"],
+            "content_hash": row["content_hash"],
+            "parent_artifact_id": row["parent_artifact_id"],
+            "operation": json.loads(row["operation_json"]),
+            "immutable": bool(row["immutable"]),
+            "status": row["status"],
+            "stale_reason": row["stale_reason"],
+            "created_at": row["created_at"],
+            "dependencies": [dict(item) for item in dependencies],
+        }
+
+    def get_artifact(self, artifact_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Artifact not found: {artifact_id}")
+            return self._artifact_dict(connection, row)
+
+    def artifact_by_path(
+        self, project_id: str, relative_path: str
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE project_id = ? AND relative_path = ?",
+                (project_id, relative_path),
+            ).fetchone()
+            return self._artifact_dict(connection, row) if row else None
+
+    def list_artifacts(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM artifacts WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            ).fetchall()
+            return [self._artifact_dict(connection, row) for row in rows]
+
+    @staticmethod
+    def _ledger(
+        connection: sqlite3.Connection,
+        *,
+        project_id: str,
+        job_id: str,
+        kind: BudgetEntryKind,
+        amount_minor: int,
+        currency: str,
+        note: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO budget_ledger(id, project_id, job_id, kind, amount_minor, currency, note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id("led"),
+                project_id,
+                job_id,
+                kind.value,
+                amount_minor,
+                currency,
+                note,
+                utc_now(),
+            ),
+        )
+
+    def reserve_job(
+        self, project_id: str, request: JobRequest, request_hash: str
+    ) -> JobRecord:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            existing = connection.execute(
+                """
+                SELECT * FROM jobs
+                WHERE project_id = ? AND provider = ? AND idempotency_key = ?
+                """,
+                (project_id, request.provider, request.idempotency_key),
+            ).fetchone()
+            if existing:
+                if existing["request_hash"] != request_hash:
+                    raise ConflictError(
+                        "Idempotency key was already used for a different request"
+                    )
+                return self._job_from_row(existing)
+            if project["currency"] != request.estimated_cost.currency:
+                raise IntegrityError(
+                    f"Job currency {request.estimated_cost.currency} does not match "
+                    f"project currency {project['currency']}"
+                )
+            exposure = project["spent_minor"] + project["reserved_minor"]
+            if exposure + request.estimated_cost.minor > project["max_budget_minor"]:
+                available = project["max_budget_minor"] - exposure
+                raise BudgetExceededError(
+                    f"Insufficient budget: requested {request.estimated_cost.minor} minor units, "
+                    f"available {available}"
+                )
+            job_id = new_id("job")
+            connection.execute(
+                """
+                INSERT INTO jobs(
+                    id, project_id, provider, endpoint, operation, idempotency_key,
+                    request_hash, request_json, status, estimated_cost_minor,
+                    reserved_cost_minor, currency, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    project_id,
+                    request.provider,
+                    request.endpoint,
+                    request.operation,
+                    request.idempotency_key,
+                    request_hash,
+                    canonical_json(request.model_dump(mode="json")),
+                    JobStatus.BUDGET_RESERVED.value,
+                    request.estimated_cost.minor,
+                    request.estimated_cost.minor,
+                    request.estimated_cost.currency,
+                    now,
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                SET reserved_minor = reserved_minor + ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (request.estimated_cost.minor, now, project_id),
+            )
+            self._ledger(
+                connection,
+                project_id=project_id,
+                job_id=job_id,
+                kind=BudgetEntryKind.RESERVE,
+                amount_minor=request.estimated_cost.minor,
+                currency=request.estimated_cost.currency,
+                note="Controller-approved reservation",
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="job",
+                entity_id=job_id,
+                event_type="job.budget_reserved",
+                payload={
+                    "request_hash": request_hash,
+                    "reserved_minor": request.estimated_cost.minor,
+                },
+            )
+            return self._job_from_row(self._require_job(connection, job_id))
+
+    def get_job(self, job_id: str) -> JobRecord:
+        with self.database.read() as connection:
+            return self._job_from_row(self._require_job(connection, job_id))
+
+    def update_job_status(
+        self,
+        job_id: str,
+        *,
+        expected: set[JobStatus],
+        target: JobStatus,
+        provider_job_id: str | None = None,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> JobRecord:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            job = self._require_job(connection, job_id)
+            if JobStatus(job["status"]) not in expected:
+                expected_values = ", ".join(sorted(item.value for item in expected))
+                raise ConflictError(
+                    f"Job {job_id} must be in one of [{expected_values}], observed {job['status']}"
+                )
+            connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, provider_job_id = COALESCE(?, provider_job_id),
+                    response_json = COALESCE(?, response_json),
+                    error_json = COALESCE(?, error_json), updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    target.value,
+                    provider_job_id,
+                    canonical_json(response) if response is not None else None,
+                    canonical_json(error) if error is not None else None,
+                    now,
+                    job_id,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=job["project_id"],
+                entity_type="job",
+                entity_id=job_id,
+                event_type="job.status_changed",
+                payload={"from": job["status"], "to": target.value},
+            )
+            return self._job_from_row(self._require_job(connection, job_id))
+
+    def settle_job(
+        self,
+        job_id: str,
+        *,
+        target: JobStatus,
+        actual_cost: Money,
+        response: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> JobRecord:
+        if target not in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
+            raise IntegrityError(f"Invalid terminal status: {target.value}")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            job = self._require_job(connection, job_id)
+            current = JobStatus(job["status"])
+            terminal = {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}
+            if current in terminal:
+                if current == target and job["actual_cost_minor"] == actual_cost.minor:
+                    return self._job_from_row(job)
+                raise ConflictError(f"Job is already terminal: {current.value}")
+            if actual_cost.currency != job["currency"]:
+                raise IntegrityError(
+                    "Actual cost currency does not match the reservation"
+                )
+            if actual_cost.minor > job["reserved_cost_minor"]:
+                raise BudgetExceededError(
+                    "Actual cost exceeds the approved reservation; manual reconciliation is required"
+                )
+            reserved = job["reserved_cost_minor"]
+            connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, reserved_cost_minor = 0, actual_cost_minor = ?,
+                    response_json = COALESCE(?, response_json),
+                    error_json = COALESCE(?, error_json), updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    target.value,
+                    actual_cost.minor,
+                    canonical_json(response) if response is not None else None,
+                    canonical_json(error) if error is not None else None,
+                    now,
+                    job_id,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                SET reserved_minor = reserved_minor - ?, spent_minor = spent_minor + ?,
+                    version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (reserved, actual_cost.minor, now, job["project_id"]),
+            )
+            self._ledger(
+                connection,
+                project_id=job["project_id"],
+                job_id=job_id,
+                kind=BudgetEntryKind.RELEASE,
+                amount_minor=reserved,
+                currency=job["currency"],
+                note="Released terminal job reservation",
+            )
+            if actual_cost.minor:
+                self._ledger(
+                    connection,
+                    project_id=job["project_id"],
+                    job_id=job_id,
+                    kind=BudgetEntryKind.CHARGE,
+                    amount_minor=actual_cost.minor,
+                    currency=job["currency"],
+                    note=f"Provider cost for {target.value} job",
+                )
+            self._event(
+                connection,
+                project_id=job["project_id"],
+                entity_type="job",
+                entity_id=job_id,
+                event_type="job.settled",
+                payload={
+                    "from": job["status"],
+                    "to": target.value,
+                    "reserved_released_minor": reserved,
+                    "actual_cost_minor": actual_cost.minor,
+                },
+            )
+            return self._job_from_row(self._require_job(connection, job_id))
+
+    def recoverable_jobs(self, project_id: str | None = None) -> list[JobRecord]:
+        statuses = (
+            JobStatus.BUDGET_RESERVED.value,
+            JobStatus.SUBMITTING.value,
+            JobStatus.SUBMITTED.value,
+            JobStatus.RUNNING.value,
+            JobStatus.SUBMISSION_UNKNOWN.value,
+        )
+        placeholders = ",".join("?" for _ in statuses)
+        with self.database.read() as connection:
+            if project_id:
+                self._require_project(connection, project_id)
+                rows = connection.execute(
+                    f"SELECT * FROM jobs WHERE project_id = ? AND status IN ({placeholders}) "
+                    "ORDER BY created_at",
+                    (project_id, *statuses),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    f"SELECT * FROM jobs WHERE status IN ({placeholders}) ORDER BY created_at",
+                    statuses,
+                ).fetchall()
+            return [self._job_from_row(row) for row in rows]
+
+    def record_capability(self, result: CapabilityResult) -> None:
+        with self.database.transaction() as connection:
+            check_id = new_id("cap")
+            connection.execute(
+                """
+                INSERT INTO capability_checks(id, name, status, detail, checked_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (check_id, result.name, result.status.value, result.detail, utc_now()),
+            )
+            self._event(
+                connection,
+                project_id=None,
+                entity_type="capability_check",
+                entity_id=check_id,
+                event_type="capability.checked",
+                payload={"name": result.name, "status": result.status.value},
+            )
+
+    def events(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            if project_id:
+                self._require_project(connection, project_id)
+                rows = connection.execute(
+                    "SELECT * FROM events WHERE project_id = ? ORDER BY sequence",
+                    (project_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM events ORDER BY sequence"
+                ).fetchall()
+            return [
+                {
+                    "sequence": row["sequence"],
+                    "id": row["id"],
+                    "project_id": row["project_id"],
+                    "entity_type": row["entity_type"],
+                    "entity_id": row["entity_id"],
+                    "event_type": row["event_type"],
+                    "payload": json.loads(row["payload_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]
+
+    def budget_ledger(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM budget_ledger WHERE project_id = ? ORDER BY rowid",
+                (project_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
