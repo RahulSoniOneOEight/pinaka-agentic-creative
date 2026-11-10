@@ -1,0 +1,9 @@
+{
+  "provider": "fal",
+  "currency": "USD",
+  "primary_usd": "1.00",
+  "bonus_usd": "1.00",
+  "notify_at_usd": "1.00",
+  "max_per_call_usd": "0.50",
+  "note": "Primary budget covers the first dollar; the bonus dollar is only used after it. Crossing the first dollar notifies once."
+}

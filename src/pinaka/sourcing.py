@@ -13,13 +13,43 @@ from .enums import (
 from .models import (
     AssetCandidate,
     AssetEligibilityResult,
+    AssetRightsRecord,
+    AssetSourceRecord,
     AssetUseContext,
+    ProviderComplianceRecord,
     ProviderProfile,
 )
 
 REVIEW_DATE = date(2026, 11, 9)
 
+EVIDENCE_PENDING = "Licence evidence has not been archived for this item."
+
+
+def clear_resolved_uncertainty(items: tuple[str, ...]) -> tuple[str, ...]:
+    """Drop the evidence-pending marker once the evidence has been archived."""
+
+    return tuple(item for item in items if item != EVIDENCE_PENDING)
+
+
 PROVIDER_PROFILES: dict[AssetProvider, ProviderProfile] = {
+    AssetProvider.OWNED: ProviderProfile(
+        provider=AssetProvider.OWNED,
+        media_types=(
+            AssetMediaType.IMAGE,
+            AssetMediaType.VIDEO,
+            AssetMediaType.AUDIO,
+            AssetMediaType.TEMPLATE,
+        ),
+        acquisition_methods=(AssetAcquisitionMethod.MANUAL_IMPORT,),
+        integration_mode=ProviderIntegrationMode.MANUAL_ONLY,
+        official_urls=(),
+        terms_reviewed_at=REVIEW_DATE,
+        notes=(
+            "Client-owned or commissioned media. The signed authorisation is the rights evidence.",
+            "Possession is not permission: record the authorisation reference and its scope.",
+            "Owned media is the first preference in the sourcing cascade.",
+        ),
+    ),
     AssetProvider.PEXELS: ProviderProfile(
         provider=AssetProvider.PEXELS,
         media_types=(AssetMediaType.IMAGE, AssetMediaType.VIDEO),
@@ -194,6 +224,55 @@ PROVIDER_PROFILES: dict[AssetProvider, ProviderProfile] = {
 
 def provider_profile(provider: AssetProvider) -> ProviderProfile:
     return PROVIDER_PROFILES[provider]
+
+
+def build_owned_candidate(
+    *,
+    asset_id: str,
+    media_type: AssetMediaType,
+    creator_name: str,
+    authorisation_url: str,
+) -> AssetCandidate:
+    """Describe client-owned media whose authorisation is the rights evidence."""
+
+    return AssetCandidate(
+        source=AssetSourceRecord(
+            provider=AssetProvider.OWNED,
+            provider_asset_id=asset_id[:200],
+            media_type=media_type,
+            acquisition_method=AssetAcquisitionMethod.MANUAL_IMPORT,
+            source_page_url=None,
+            creator_name=creator_name[:300],
+            creator_url=None,
+            direct_asset_url=None,
+            api_response_hash=None,
+        ),
+        rights=AssetRightsRecord(
+            license_name="Client authorisation",
+            license_code="owned",
+            license_url=authorisation_url,
+            terms_url=authorisation_url,
+            terms_reviewed_at=REVIEW_DATE,
+            commercial_use_allowed=True,
+            modifications_allowed=True,
+            editorial_only=False,
+            attribution_required=False,
+            attribution_text=None,
+            license_evidence_ref=None,
+            license_evidence_hash=None,
+            origin_license_verified=False,
+            rights_uncertainty=(EVIDENCE_PENDING,),
+            obligations=(
+                "Retain the signed authorisation with the project.",
+                "Use the asset only within the authorised scope and territory.",
+            ),
+        ),
+        compliance=ProviderComplianceRecord(
+            human_selected=True,
+            provider_credit_planned=False,
+            creator_credit_planned=False,
+        ),
+    )
 
 
 def _unique(values: list[str]) -> tuple[str, ...]:

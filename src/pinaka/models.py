@@ -69,10 +69,12 @@ class ProjectCreate(StrictModel):
     language: str = Field(default="en", min_length=2, max_length=20)
     duration_seconds: Decimal = Field(default=Decimal(25), gt=0, le=300)
     max_budget: Money
+    parent_project_id: str | None = None
 
 
 class ProjectRecord(StrictModel):
     id: str
+    parent_project_id: str | None = None
     slug: str
     name: str
     objective: str
@@ -423,7 +425,7 @@ class AssetSourceRecord(StrictModel):
     provider_asset_id: str = Field(min_length=1, max_length=200)
     media_type: AssetMediaType
     acquisition_method: AssetAcquisitionMethod
-    source_page_url: HttpUrl
+    source_page_url: HttpUrl | None = None
     creator_name: str = Field(min_length=1, max_length=300)
     creator_url: HttpUrl | None = None
     direct_asset_url: HttpUrl | None = None
@@ -495,7 +497,7 @@ class ProviderProfile(StrictModel):
     media_types: tuple[AssetMediaType, ...]
     acquisition_methods: tuple[AssetAcquisitionMethod, ...]
     integration_mode: ProviderIntegrationMode
-    official_urls: tuple[HttpUrl, ...]
+    official_urls: tuple[HttpUrl, ...] = ()
     terms_reviewed_at: date
     notes: tuple[str, ...] = ()
 

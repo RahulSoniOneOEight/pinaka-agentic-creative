@@ -24,12 +24,14 @@ from .adapters.transcribe import (
     transcription_payload,
     write_transcript,
 )
+from .ai_edit import ComfyUIEditAdapter
 from .analytics import (
     ExperimentDesign,
     VariantMetrics,
     evaluate_experiment,
     ingest_metrics_csv,
 )
+from .assets import AssetCriteria
 from .backup import (
     create_backup,
     drill_restore,
@@ -47,6 +49,7 @@ from .enums import (
     AssetUseClass,
     ContentMode,
     ProjectStatus,
+    SlotAssetRole,
 )
 from .errors import ConflictError, NotFoundError, PinakaError
 from .external_qa import run_external_qa
@@ -57,6 +60,7 @@ from .external_spend import (
     SpendReservation,
     reconcile_spend,
 )
+from .fal import FalClient, FalEditAdapter, FalVisionJudge
 from .fonts import FontInventory, FontLicence, check_fonts, inventory_fonts
 from .formats import FormatDerivationAdapter, format_output_name
 from .freesound import FreesoundClient
@@ -64,6 +68,8 @@ from .internet_archive import InternetArchiveClient
 from .localization import plan_localization
 from .models import (
     ApprovalRequest,
+    AssetCandidate,
+    AssetUseContext,
     DeliverableCreate,
     ExecutionReceiptCreate,
     FactSetCreate,
@@ -78,6 +84,13 @@ from .models import (
     ToolProfileCreate,
 )
 from .openverse import OpenverseClient, default_context
+from .pexels import PexelsClient
+from .preference import (
+    PreferencePolicy,
+    RouteCandidate,
+    policy_summary,
+    select_route,
+)
 from .preflight import run_preflight
 from .publication import (
     PublicationAuthorization,
@@ -89,7 +102,10 @@ from .recipes import build_plan
 from .reconciliation import reconcile_project
 from .retention import RetentionItem, RetentionPolicy, plan_retention
 from .review import load_spec, review_video, write_report
+from .review_policy import CampaignRisk, ReviewPolicy
 from .routing import RouteRequest, route_profiles
+from .sourcing import build_owned_candidate
+from .unsplash import UnsplashClient
 from .utils import sha256_file, sha256_json
 from .wikimedia import WikimediaClient
 
@@ -560,7 +576,44 @@ def cmd_source_search(args: argparse.Namespace) -> dict[str, Any]:
         attribution_can_be_delivered=not args.no_attribution,
     )
     media_type = AssetMediaType(args.media)
-    if args.provider == "openverse":
+    if args.orientation and args.provider not in {"unsplash", "pexels"}:
+        raise ValueError("--orientation applies to Unsplash and Pexels only")
+    unsplash_only = bool(args.content_filter or args.order_by or args.selected_asset_id)
+    if unsplash_only and args.provider != "unsplash":
+        raise ValueError(
+            "--content-filter, --order-by and --selected-asset-id apply to Unsplash only"
+        )
+    if args.size and args.provider != "pexels":
+        raise ValueError("--size applies to Pexels only")
+    quota = PROVIDER_QUOTAS.get(args.provider)
+    if quota:
+        _controller(args).reserve_provider_request(
+            args.provider, "search", limit=quota[0], window_seconds=quota[1]
+        )
+    if args.provider == "pexels":
+        payload = PexelsClient().search_with_eligibility(
+            args.query,
+            context,
+            media_type=media_type,
+            limit=args.limit,
+            page=args.page,
+            orientation=args.orientation,
+            size=args.size,
+        )
+    elif args.provider == "unsplash":
+        if media_type != AssetMediaType.IMAGE:
+            raise ValueError("Unsplash supports image search only")
+        payload = UnsplashClient().search_with_eligibility(
+            args.query,
+            context,
+            limit=args.limit,
+            page=args.page,
+            orientation=args.orientation,
+            content_filter=args.content_filter,
+            order_by=args.order_by,
+            selected_asset_id=args.selected_asset_id,
+        )
+    elif args.provider == "openverse":
         payload = OpenverseClient().search_with_eligibility(
             args.query,
             context,
@@ -592,6 +645,336 @@ def cmd_source_search(args: argparse.Namespace) -> dict[str, Any]:
             page=args.page,
         )
     return _write_json(args.output, payload)
+
+
+PROVIDER_QUOTAS: dict[str, tuple[int, int]] = {
+    "pexels": (200, 3600),
+    "unsplash": (50, 3600),
+}
+
+
+def _asset_context(payload: dict[str, Any]) -> AssetUseContext:
+    return AssetUseContext(
+        use_class=AssetUseClass(
+            payload.get("use_class", AssetUseClass.COMMERCIAL.value)
+        ),
+        monetized=bool(payload.get("monetized", False)),
+        advertising=bool(payload.get("advertising", False)),
+        modification_planned=bool(payload.get("modification_planned", True)),
+        attribution_can_be_delivered=bool(
+            payload.get("attribution_can_be_delivered", True)
+        ),
+    )
+
+
+def _candidate_from(payload: dict[str, Any]) -> AssetCandidate:
+    inner = payload.get("candidate", payload)
+    return AssetCandidate.model_validate(inner)
+
+
+def cmd_finalize_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    context = (
+        _asset_context(payload["use_context"]) if "use_context" in payload else None
+    )
+    criteria = AssetCriteria.model_validate(payload.get("criteria", {}))
+    decided_by = payload.get("decided_by") or args.decided_by
+    return _controller(args).finalize_asset(
+        args.project_id,
+        payload["slot_id"],
+        artifact_id=payload["artifact_id"],
+        criteria=criteria,
+        context=context,
+        decided_by=decided_by,
+    )
+
+
+def cmd_slot_coverage(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).slot_coverage(args.project_id)
+
+
+def cmd_capture_evidence(args: argparse.Namespace) -> dict[str, Any]:
+    candidate = _candidate_from(_load_json(args.candidate))
+    result = _controller(args).capture_asset_evidence(args.project_id, candidate)
+    result["candidate"] = result["candidate"].model_dump(mode="json")
+    return _write_json(args.output, result)
+
+
+def cmd_download_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.candidate)
+    candidate = _candidate_from(payload)
+    context = (
+        _asset_context(payload["use_context"]) if "use_context" in payload else None
+    )
+    result = _controller(args).download_stock_asset(
+        args.project_id,
+        candidate=candidate,
+        context=context,
+        download_event_url=payload.get("download_event_url"),
+        filename=payload.get("filename"),
+    )
+    return _write_json(args.output, result)
+
+
+def _comfy_adapter(payload: dict[str, Any]) -> ComfyUIEditAdapter:
+    return ComfyUIEditAdapter(
+        base_url=str(payload.get("base_url", "http://127.0.0.1:8188")),
+        allowed_checkpoints=tuple(payload.get("allowed_checkpoints", ())),
+        allowed_upscale_models=tuple(payload.get("allowed_upscale_models", ())),
+    )
+
+
+def _edit_adapter(payload: dict[str, Any]) -> Any:
+    """Choose the execution surface: fal direct first, local ComfyUI second."""
+
+    if payload.get("provider", "fal") == "comfy":
+        return _comfy_adapter(payload)
+    models = {key: tuple(value) for key, value in (payload.get("models") or {}).items()}
+    return FalEditAdapter(FalClient(), allowed_models=models)
+
+
+def cmd_judge_asset(args: argparse.Namespace) -> dict[str, Any]:
+    policy = (
+        ReviewPolicy.model_validate(_load_json(args.policy)) if args.policy else None
+    )
+    judge = (
+        FalVisionJudge(FalClient(), model=args.model)
+        if args.provider == "fal"
+        else None
+    )
+    risk = CampaignRisk(
+        monetized=args.monetized,
+        advertising=args.advertising,
+        has_recognizable_people=args.people,
+        makes_factual_claims=args.claims,
+    )
+    return _write_json(
+        args.output,
+        _controller(args).judge_asset(
+            args.project_id,
+            args.artifact_id,
+            model=args.model,
+            intent=args.intent,
+            policy=policy,
+            technical_ok=not args.technical_failed,
+            risk=risk,
+            judge=judge,
+        ),
+    )
+
+
+def cmd_create_revision(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    budget = (
+        Money(
+            amount=Decimal(str(payload["max_budget"])),
+            currency=payload.get("currency", "USD"),
+        )
+        if payload.get("max_budget") is not None
+        else None
+    )
+    duration = (
+        Decimal(str(payload["duration_seconds"]))
+        if payload.get("duration_seconds") is not None
+        else None
+    )
+    revision = _controller(args).create_revision(
+        args.parent_id,
+        name=payload["name"],
+        objective=payload["objective"],
+        audience=payload.get("audience"),
+        output_format=payload.get("output_format"),
+        language=payload.get("language"),
+        duration_seconds=duration,
+        max_budget=budget,
+    )
+    return revision.model_dump(mode="json")
+
+
+def cmd_revision_lineage(args: argparse.Namespace) -> dict[str, Any]:
+    return {"lineage": _controller(args).revision_lineage(args.project_id)}
+
+
+def cmd_record_scene_plan(args: argparse.Namespace) -> dict[str, Any]:
+    markdown = Path(args.markdown_file).read_text(encoding="utf-8")
+    return _controller(args).record_scene_plan(args.project_id, markdown)
+
+
+def cmd_scene_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).scene_plan(args.project_id) or {"plan": None}
+
+
+def cmd_ai_edit_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    mask = Path(payload["mask_path"]).read_bytes() if payload.get("mask_path") else None
+    return _write_json(
+        args.output,
+        _controller(args).ai_edit_asset(
+            args.project_id,
+            slot_id=payload["slot_id"],
+            artifact_id=payload["artifact_id"],
+            prompt=payload["prompt"],
+            mask=mask,
+            checkpoint=payload.get("model") or payload.get("checkpoint"),
+            seed=int(payload.get("seed", 0)),
+            steps=int(payload.get("steps", 20)),
+            denoise=float(payload.get("denoise", 0.55)),
+            adapter=_edit_adapter(payload),
+        ),
+    )
+
+
+def cmd_upscale_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _write_json(
+        args.output,
+        _controller(args).generative_upscale_asset(
+            args.project_id,
+            slot_id=payload["slot_id"],
+            artifact_id=payload["artifact_id"],
+            model_name=payload.get("model_name") or payload.get("model"),
+            adapter=_edit_adapter(payload),
+        ),
+    )
+
+
+def cmd_import_owned_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    controller = _controller(args)
+    candidate = build_owned_candidate(
+        asset_id=payload["asset_id"],
+        media_type=AssetMediaType(payload.get("media_type", "image")),
+        creator_name=payload["creator_name"],
+        authorisation_url=payload["authorisation_url"],
+    )
+    captured = controller.capture_asset_evidence(args.project_id, candidate)
+    context = (
+        _asset_context(payload["use_context"])
+        if "use_context" in payload
+        else controller.asset_use_context(args.project_id)
+    )
+    artifact = controller.import_sourced_original(
+        args.project_id,
+        args.source,
+        candidate=captured["candidate"],
+        context=context,
+    )
+    return _write_json(
+        args.output,
+        {
+            "artifact": artifact,
+            "candidate": captured["candidate"].model_dump(mode="json"),
+            "evidence": captured["evidence"],
+            "evidence_hash": captured["evidence_hash"],
+        },
+    )
+
+
+def cmd_assign_slot_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    context = (
+        _asset_context(payload["use_context"]) if "use_context" in payload else None
+    )
+    criteria = AssetCriteria.model_validate(payload.get("criteria", {}))
+    decided_by = payload.get("decided_by") or args.decided_by
+    return _controller(args).assign_slot_asset(
+        args.project_id,
+        payload["slot_id"],
+        artifact_id=payload["artifact_id"],
+        role=SlotAssetRole(payload["role"]),
+        criteria=criteria,
+        context=context,
+        decided_by=decided_by,
+    )
+
+
+def cmd_promote_backup(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).promote_backup(
+        args.project_id,
+        args.slot_id,
+        decided_by=args.decided_by,
+        reason=args.reason,
+    )
+
+
+def cmd_set_use_context(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    context = _asset_context(payload)
+    return _controller(args).set_asset_use_context(args.project_id, context)
+
+
+def cmd_analyze_asset(args: argparse.Namespace) -> dict[str, Any]:
+    return _write_json(
+        args.output,
+        _controller(args).analyze_asset(
+            args.project_id,
+            args.artifact_id,
+            required_width=args.width,
+            required_height=args.height,
+            required_duration_seconds=args.duration,
+        ),
+    )
+
+
+def cmd_correct_asset(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _write_json(
+        args.output,
+        _controller(args).correct_asset(
+            args.project_id,
+            slot_id=payload["slot_id"],
+            artifact_id=payload["artifact_id"],
+            operations=list(payload["operations"]),
+        ),
+    )
+
+
+def cmd_compose_assets(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _write_json(
+        args.output,
+        _controller(args).compose_assets(
+            args.project_id,
+            background_id=payload["background_id"],
+            overlay_id=payload["overlay_id"],
+            x=int(payload.get("x", 0)),
+            y=int(payload.get("y", 0)),
+            width=payload.get("width"),
+            height=payload.get("height"),
+            opacity=float(payload.get("opacity", 1.0)),
+        ),
+    )
+
+
+def cmd_reserve_spend(args: argparse.Namespace) -> dict[str, Any]:
+    result = _controller(args).reserve_provider_spend(
+        args.provider, amount_usd=args.amount_usd, purpose=args.purpose
+    )
+    for message in result["notifications"]:
+        print(f"NOTICE: {message}", file=sys.stderr)
+    return _write_json(args.output, result)
+
+
+def cmd_spend_summary(args: argparse.Namespace) -> dict[str, Any]:
+    return _write_json(
+        args.output, _controller(args).provider_spend_summary(args.provider)
+    )
+
+
+def cmd_select_route(args: argparse.Namespace) -> dict[str, Any]:
+    policy = (
+        PreferencePolicy.load(args.policy) if args.policy else PreferencePolicy.load()
+    )
+    if args.show_policy:
+        return policy_summary(policy)
+    payload = _load_json(args.candidates)
+    raw = payload.get("candidates", payload) if isinstance(payload, dict) else payload
+    candidates = [RouteCandidate.model_validate(item) for item in raw]
+    remaining = Decimal(args.budget_remaining) if args.budget_remaining else None
+    selection = select_route(
+        args.capability, candidates, policy, budget_usd_remaining=remaining
+    )
+    return _write_json(args.output, selection.model_dump(mode="json"))
 
 
 def cmd_route_provider(args: argparse.Namespace) -> dict[str, Any]:
@@ -1373,7 +1756,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source_parser.add_argument(
         "--provider",
-        choices=["openverse", "wikimedia", "internet_archive", "freesound"],
+        choices=[
+            "openverse",
+            "wikimedia",
+            "internet_archive",
+            "freesound",
+            "unsplash",
+            "pexels",
+        ],
         default="openverse",
     )
     source_parser.add_argument("--query", required=True)
@@ -1391,8 +1781,222 @@ def build_parser() -> argparse.ArgumentParser:
     source_parser.add_argument("--advertising", action="store_true")
     source_parser.add_argument("--no-modification", action="store_true")
     source_parser.add_argument("--no-attribution", action="store_true")
+    source_parser.add_argument(
+        "--orientation",
+        choices=["landscape", "portrait", "squarish", "square"],
+        help="Unsplash and Pexels only; use squarish for Unsplash and square for Pexels",
+    )
+    source_parser.add_argument(
+        "--size",
+        choices=["large", "medium", "small"],
+        help="Pexels only: minimum asset size filter",
+    )
+    source_parser.add_argument("--content-filter", choices=["low", "high"])
+    source_parser.add_argument("--order-by", choices=["relevant", "latest"])
+    source_parser.add_argument(
+        "--selected-asset-id",
+        help=(
+            "Unsplash only: the photo the operator selected from the results. "
+            "API results are not treated as human selections without it."
+        ),
+    )
     source_parser.add_argument("--output")
     source_parser.set_defaults(handler=cmd_source_search)
+
+    finalize_parser = subparsers.add_parser(
+        "finalize-asset",
+        help="Evaluate one asset for a slot and record the treatment decision",
+    )
+    finalize_parser.add_argument("project_id")
+    finalize_parser.add_argument("--file", required=True)
+    finalize_parser.add_argument("--decided-by", required=True)
+    finalize_parser.set_defaults(handler=cmd_finalize_asset)
+
+    coverage_parser = subparsers.add_parser(
+        "slot-coverage",
+        help="Report which slots have an approved treatment",
+    )
+    coverage_parser.add_argument("project_id")
+    coverage_parser.set_defaults(handler=cmd_slot_coverage)
+
+    evidence_parser = subparsers.add_parser(
+        "capture-evidence",
+        help="Archive the item and licence pages for a sourced candidate",
+    )
+    evidence_parser.add_argument("project_id")
+    evidence_parser.add_argument("--candidate", required=True)
+    evidence_parser.add_argument("--output")
+    evidence_parser.set_defaults(handler=cmd_capture_evidence)
+
+    download_parser = subparsers.add_parser(
+        "download-asset",
+        help="Download and register a verified stock asset",
+    )
+    download_parser.add_argument("project_id")
+    download_parser.add_argument("--candidate", required=True)
+    download_parser.add_argument("--output")
+    download_parser.set_defaults(handler=cmd_download_asset)
+
+    owned_parser = subparsers.add_parser(
+        "import-owned-asset",
+        help="Register client-owned media with its signed authorisation",
+    )
+    owned_parser.add_argument("project_id")
+    owned_parser.add_argument("--file", required=True)
+    owned_parser.add_argument("--source", required=True)
+    owned_parser.add_argument("--output")
+    owned_parser.set_defaults(handler=cmd_import_owned_asset)
+
+    revision_parser = subparsers.add_parser(
+        "create-revision",
+        help="Create a child revision whose parent archive stays intact",
+    )
+    revision_parser.add_argument("parent_id")
+    revision_parser.add_argument("--file", required=True)
+    revision_parser.set_defaults(handler=cmd_create_revision)
+
+    lineage_parser = subparsers.add_parser(
+        "revision-lineage", help="Show the revision chain up to the original"
+    )
+    lineage_parser.add_argument("project_id")
+    lineage_parser.set_defaults(handler=cmd_revision_lineage)
+
+    plan_parser = subparsers.add_parser(
+        "record-scene-plan", help="Store the SCENE_PLAN markdown and its hash"
+    )
+    plan_parser.add_argument("project_id")
+    plan_parser.add_argument("--markdown-file", required=True)
+    plan_parser.set_defaults(handler=cmd_record_scene_plan)
+
+    plan_show_parser = subparsers.add_parser(
+        "scene-plan", help="Show the latest recorded scene plan"
+    )
+    plan_show_parser.add_argument("project_id")
+    plan_show_parser.set_defaults(handler=cmd_scene_plan)
+
+    judge_parser = subparsers.add_parser(
+        "judge-asset",
+        help="Judge tone, brand, composition, legibility and safety with a vision model",
+    )
+    judge_parser.add_argument("project_id")
+    judge_parser.add_argument("artifact_id")
+    judge_parser.add_argument("--model", required=True)
+    judge_parser.add_argument("--provider", choices=["fal", "managed"], default="fal")
+    judge_parser.add_argument("--intent", required=True)
+    judge_parser.add_argument("--monetized", action="store_true")
+    judge_parser.add_argument("--advertising", action="store_true")
+    judge_parser.add_argument("--people", action="store_true")
+    judge_parser.add_argument("--claims", action="store_true")
+    judge_parser.add_argument("--policy", help="Review policy JSON file")
+    judge_parser.add_argument("--technical-failed", action="store_true")
+    judge_parser.add_argument("--output")
+    judge_parser.set_defaults(handler=cmd_judge_asset)
+
+    edit_parser = subparsers.add_parser(
+        "ai-edit-asset",
+        help="Inpaint or restyle an asset through local ComfyUI",
+    )
+    edit_parser.add_argument("project_id")
+    edit_parser.add_argument("--file", required=True)
+    edit_parser.add_argument("--output")
+    edit_parser.set_defaults(handler=cmd_ai_edit_asset)
+
+    upscale_parser = subparsers.add_parser(
+        "upscale-asset",
+        help="Generative upscale an asset through local ComfyUI",
+    )
+    upscale_parser.add_argument("project_id")
+    upscale_parser.add_argument("--file", required=True)
+    upscale_parser.add_argument("--output")
+    upscale_parser.set_defaults(handler=cmd_upscale_asset)
+
+    assign_parser = subparsers.add_parser(
+        "assign-slot-asset",
+        help="Bind a primary, backup or A/B variant to a slot",
+    )
+    assign_parser.add_argument("project_id")
+    assign_parser.add_argument("--file", required=True)
+    assign_parser.add_argument("--decided-by", required=True)
+    assign_parser.set_defaults(handler=cmd_assign_slot_asset)
+
+    promote_parser = subparsers.add_parser(
+        "promote-backup",
+        help="Swap the backup asset into use for a slot",
+    )
+    promote_parser.add_argument("project_id")
+    promote_parser.add_argument("slot_id")
+    promote_parser.add_argument("--decided-by", required=True)
+    promote_parser.add_argument("--reason", required=True)
+    promote_parser.set_defaults(handler=cmd_promote_backup)
+
+    context_parser = subparsers.add_parser(
+        "set-use-context",
+        help="Record the licence use context that sourcing must satisfy",
+    )
+    context_parser.add_argument("project_id")
+    context_parser.add_argument("--file", required=True)
+    context_parser.set_defaults(handler=cmd_set_use_context)
+
+    analyze_parser = subparsers.add_parser(
+        "analyze-asset",
+        help="Measure an asset and propose treatment criteria",
+    )
+    analyze_parser.add_argument("project_id")
+    analyze_parser.add_argument("artifact_id")
+    analyze_parser.add_argument("--width", type=int)
+    analyze_parser.add_argument("--height", type=int)
+    analyze_parser.add_argument("--duration", type=float)
+    analyze_parser.add_argument("--output")
+    analyze_parser.set_defaults(handler=cmd_analyze_asset)
+
+    correct_parser = subparsers.add_parser(
+        "correct-asset",
+        help="Apply crop, scale or pad to an asset approved for correction",
+    )
+    correct_parser.add_argument("project_id")
+    correct_parser.add_argument("--file", required=True)
+    correct_parser.add_argument("--output")
+    correct_parser.set_defaults(handler=cmd_correct_asset)
+
+    compose_parser = subparsers.add_parser(
+        "compose-assets",
+        help="Composite an overlay onto a background artifact",
+    )
+    compose_parser.add_argument("project_id")
+    compose_parser.add_argument("--file", required=True)
+    compose_parser.add_argument("--output")
+    compose_parser.set_defaults(handler=cmd_compose_assets)
+
+    spend_parser = subparsers.add_parser(
+        "reserve-spend",
+        help="Charge a paid call to the primary or bonus provider budget",
+    )
+    spend_parser.add_argument("--provider", default="fal")
+    spend_parser.add_argument("--amount-usd", required=True)
+    spend_parser.add_argument("--purpose", required=True)
+    spend_parser.add_argument("--output")
+    spend_parser.set_defaults(handler=cmd_reserve_spend)
+
+    summary_parser = subparsers.add_parser(
+        "spend-summary", help="Show provider spend against the tiered budget"
+    )
+    summary_parser.add_argument("--provider", default="fal")
+    summary_parser.add_argument("--output")
+    summary_parser.set_defaults(handler=cmd_spend_summary)
+
+    preference_parser = subparsers.add_parser(
+        "select-route",
+        help="Choose an execution route under the provider preference policy",
+    )
+    preference_parser.add_argument("--capability", required=True)
+    preference_parser.add_argument("--candidates", help="JSON file of route candidates")
+    preference_parser.add_argument(
+        "--policy", help="Alternative preference policy JSON"
+    )
+    preference_parser.add_argument("--budget-remaining")
+    preference_parser.add_argument("--show-policy", action="store_true")
+    preference_parser.add_argument("--output")
+    preference_parser.set_defaults(handler=cmd_select_route)
 
     route_parser = subparsers.add_parser(
         "route-provider",

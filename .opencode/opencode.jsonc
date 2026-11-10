@@ -5,5 +5,16 @@
     { "action": "edit", "resource": ".local/*", "effect": "deny" },
     { "action": "shell", "resource": "git push *", "effect": "ask" },
     { "action": "shell", "resource": "*publish*", "effect": "ask" }
-  ]
+  ],
+  "mcp": {
+    "servers": {
+      "openmontage-studio": {
+        "type": "local",
+        "command": [
+          "C:\\Users\\LENOVO\\AppData\\Local\\Programs\\OpenMontage Studio\\OpenMontage Studio.exe",
+          "--mcp"
+        ]
+      }
+    }
+  }
 }

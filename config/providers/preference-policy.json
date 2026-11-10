@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "default_order": ["local", "managed_model", "fal_direct", "studio", "managed"],
+  "rules": {
+    "analysis": ["local"],
+    "deterministic_correction": ["local"],
+    "composite": ["local"],
+    "render": ["local", "studio"],
+    "composition": ["studio", "local"],
+    "storyboard": ["studio"],
+    "review_packet": ["studio"],
+    "inpaint": ["fal_direct", "studio", "local"],
+    "generative_upscale": ["fal_direct", "studio", "local"],
+    "image_generation": ["fal_direct", "studio", "local"],
+    "video_generation": ["fal_direct", "studio"],
+    "avatar": ["fal_direct", "studio"],
+    "mesh": ["fal_direct", "studio"],
+    "world": ["fal_direct", "studio"],
+    "narration": ["local", "studio"],
+    "transcription": ["local", "studio"],
+    "vision_judgement": ["managed_model", "fal_direct", "studio"],
+    "sourcing": ["controller"],
+    "publication": ["controller"],
+    "archive": ["controller"]
+  },
+  "max_usd_per_call": "0.50",
+  "max_usd_per_project": "2.00",
+  "allow_paid": true,
+  "require_receipt": true,
+  "require_quote": true,
+  "fallback_on_unavailable": true
+}

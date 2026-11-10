@@ -70,6 +70,23 @@ class ArtifactKind(ValueEnum):
     QA = "qa"
     ARCHIVE = "archive"
     EXTERNAL_SPEND = "external_spend"
+    REFERENCE = "reference"
+
+
+class TreatmentVerdict(ValueEnum):
+    USE_AS_IS = "use_as_is"
+    CORRECT = "correct"
+    COMPOSITE = "composite"
+    REGENERATE = "regenerate"
+    REPLACE = "replace"
+    REJECT = "reject"
+
+
+class SlotAssetRole(ValueEnum):
+    PRIMARY = "primary"
+    BACKUP = "backup"
+    VARIANT_A = "variant_a"
+    VARIANT_B = "variant_b"
 
 
 class ArtifactStatus(ValueEnum):
@@ -91,6 +108,7 @@ class BudgetEntryKind(ValueEnum):
 
 
 class AssetProvider(ValueEnum):
+    OWNED = "owned"
     PEXELS = "pexels"
     OPENVERSE = "openverse"
     UNSPLASH = "unsplash"

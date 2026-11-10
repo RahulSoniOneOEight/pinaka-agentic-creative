@@ -165,6 +165,39 @@ def run_preflight(controller: CreativeController, project_id: str) -> dict[str, 
         )
     )
 
+    slots = controller.repository.list_slots(project_id)
+    coverage = controller.slot_coverage(project_id)
+    if not slots:
+        slots_status = "pass"
+        slots_detail = "No asset slots are declared for this project."
+    elif coverage["coverage"] == "complete":
+        slots_status = "pass"
+        slots_detail = "Every declared slot has an approved treatment."
+    else:
+        slots_status = (
+            "fail"
+            if project.status
+            in {
+                ProjectStatus.FINAL_CANDIDATE,
+                ProjectStatus.FINAL_APPROVED,
+                ProjectStatus.ARCHIVED,
+            }
+            else "warn"
+        )
+        slots_detail = "Some declared slots have no approved treatment."
+    rules.append(
+        _rule(
+            "R-SLOTS-001",
+            slots_status,
+            slots_detail,
+            {
+                "total": coverage["total"],
+                "resolved": coverage["resolved"],
+                "unresolved": [item["stable_key"] for item in coverage["unresolved"]],
+            },
+        )
+    )
+
     recovery_issues = bool(
         reconciliation["recoverable_jobs"] or reconciliation["unresolved_operations"]
     )

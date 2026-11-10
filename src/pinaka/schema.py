@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 7
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -347,7 +347,105 @@ CREATE TABLE IF NOT EXISTS archives (
 """
 
 
+SCHEMA_V3 = r"""
+CREATE TABLE IF NOT EXISTS treatment_decisions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    artifact_id TEXT REFERENCES artifacts(id),
+    verdict TEXT NOT NULL,
+    decided_by TEXT NOT NULL,
+    criteria_json TEXT NOT NULL,
+    rights_json TEXT,
+    reasons_json TEXT NOT NULL,
+    decision_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_treatment_slot
+    ON treatment_decisions(slot_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_treatment_project
+    ON treatment_decisions(project_id, created_at);
+
+CREATE TABLE IF NOT EXISTS provider_requests (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    requested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_requests_window
+    ON provider_requests(provider, requested_at);
+"""
+
+
+SCHEMA_V4 = r"""
+CREATE TABLE IF NOT EXISTS asset_use_contexts (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    use_class TEXT NOT NULL,
+    monetized INTEGER NOT NULL CHECK (monetized IN (0, 1)),
+    advertising INTEGER NOT NULL CHECK (advertising IN (0, 1)),
+    modification_planned INTEGER NOT NULL CHECK (modification_planned IN (0, 1)),
+    attribution_can_be_delivered INTEGER NOT NULL
+        CHECK (attribution_can_be_delivered IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
+SCHEMA_V5 = r"""
+CREATE TABLE IF NOT EXISTS slot_assets (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    treatment_decision_id TEXT REFERENCES treatment_decisions(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(slot_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_slot_assets_project
+    ON slot_assets(project_id);
+CREATE INDEX IF NOT EXISTS idx_slot_assets_slot
+    ON slot_assets(slot_id);
+"""
+
+
+SCHEMA_V6 = r"""
+CREATE TABLE IF NOT EXISTS provider_spend (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    tier TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_spend_window
+    ON provider_spend(provider, created_at);
+"""
+
+
+SCHEMA_V7 = r"""
+ALTER TABLE projects ADD COLUMN parent_project_id TEXT REFERENCES projects(id);
+CREATE INDEX IF NOT EXISTS idx_projects_parent ON projects(parent_project_id);
+
+CREATE TABLE IF NOT EXISTS scene_plans (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    content_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scene_plans_project ON scene_plans(project_id, created_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
+    3: SCHEMA_V3,
+    4: SCHEMA_V4,
+    5: SCHEMA_V5,
+    6: SCHEMA_V6,
+    7: SCHEMA_V7,
 }

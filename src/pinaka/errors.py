@@ -36,3 +36,7 @@ class ConfigurationError(PinakaError):
 
 class RightsEligibilityError(PinakaError):
     pass
+
+
+class QuotaExceededError(PinakaError):
+    pass
