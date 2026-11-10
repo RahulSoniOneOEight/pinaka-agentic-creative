@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from pinaka.controller import CreativeController
+from pinaka.errors import IntegrityError
 from pinaka.kids import (
     check_flash_rate,
     check_kids_loudness,
@@ -71,6 +77,19 @@ def test_kids_loudness_warns_without_a_measurement():
     assert check.status == "warn"
 
 
+def test_kids_loudness_reads_ffmpeg_loudnorm_fields():
+    check = check_kids_loudness({"output_i": "-16.6", "output_tp": "-4.7"})
+
+    assert check.status == "pass"
+    assert check.evidence["integrated_lufs"] == -16.6
+
+
+def test_kids_loudness_fails_when_ffmpeg_measurement_is_too_loud():
+    check = check_kids_loudness({"input_i": "-14.2", "input_tp": "-1.0"})
+
+    assert check.status == "fail"
+
+
 def test_kids_safety_checks_compose_available_measurements():
     checks = kids_safety_checks(
         luminance=[0.5] * 10, fps=30, loudness={"integrated_lufs": -18.0}
@@ -103,6 +122,42 @@ def test_other_channels_keep_adult_defaults():
 
     assert profile.made_for_kids is False
     assert profile.comments_enabled is True
+
+
+def _mux_result(loudness: dict[str, str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        metadata={
+            "duration_seconds": "5",
+            "video_codec": "h264",
+            "width_px": 1080,
+            "height_px": 1920,
+            "fps": 30.0,
+            "audio_codec": "aac",
+            "audio_sample_rate": 48000,
+            "audio_channels": "stereo",
+        },
+        loudness=loudness,
+    )
+
+
+def test_mux_validation_accepts_a_quiet_mix():
+    CreativeController._validate_mux_result(
+        _mux_result({"input_i": "-16.4", "input_tp": "-4.0"}), Decimal(5)
+    )
+
+
+def test_mux_validation_rejects_loud_audio():
+    with pytest.raises(IntegrityError, match="loudness"):
+        CreativeController._validate_mux_result(
+            _mux_result({"input_i": "-12.0", "input_tp": "-3.0"}), Decimal(5)
+        )
+
+
+def test_mux_validation_rejects_a_hot_peak():
+    with pytest.raises(IntegrityError, match="true peak"):
+        CreativeController._validate_mux_result(
+            _mux_result({"input_i": "-16.0", "input_tp": "-0.5"}), Decimal(5)
+        )
 
 
 def test_kids_pilot_contract_validates():

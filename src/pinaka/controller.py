@@ -2787,6 +2787,42 @@ class CreativeController:
             "resumed": False,
         }
 
+    @staticmethod
+    def _validate_mux_result(result: Any, duration: Decimal) -> None:
+        metadata = result.metadata
+        if abs(float(metadata.get("duration_seconds", 0)) - float(duration)) > 0.05:
+            raise IntegrityError("Muxed duration does not match the approved timeline")
+        if (
+            metadata.get("video_codec") != "h264"
+            or metadata.get("width_px") != 1080
+            or metadata.get("height_px") != 1920
+            or float(metadata.get("fps", 0)) != 30.0
+        ):
+            raise IntegrityError(
+                "Muxed video stream does not match the approved profile"
+            )
+        if (
+            metadata.get("audio_codec") != "aac"
+            or metadata.get("audio_sample_rate") != 48000
+            or metadata.get("audio_channels") != "stereo"
+        ):
+            raise IntegrityError(
+                "Muxed audio stream does not match the approved profile"
+            )
+        try:
+            integrated = float(result.loudness.get("input_i"))
+            true_peak = float(result.loudness.get("input_tp"))
+        except (TypeError, ValueError) as error:
+            raise IntegrityError("Muxed loudness measurement is invalid") from error
+        if abs(integrated + 16.0) > 1.0:
+            raise IntegrityError(
+                f"Muxed loudness {integrated:.1f} LUFS is outside the -16 LUFS target"
+            )
+        if true_peak > -1.0:
+            raise IntegrityError(
+                f"Muxed true peak {true_peak:.1f} dBTP exceeds the -1.0 dBTP ceiling"
+            )
+
     def mux_voiced_animatic(
         self,
         project_id: str,
@@ -2929,39 +2965,24 @@ class CreativeController:
                 f"Voiced mux failed: {type(error).__name__}"
             ) from error
 
-        metadata = result.metadata
-        if abs(float(metadata.get("duration_seconds", 0)) - float(duration)) > 0.05:
-            raise IntegrityError("Muxed duration does not match the approved timeline")
-        if (
-            metadata.get("video_codec") != "h264"
-            or metadata.get("width_px") != 1080
-            or metadata.get("height_px") != 1920
-            or float(metadata.get("fps", 0)) != 30.0
-        ):
-            raise IntegrityError(
-                "Muxed video stream does not match the approved profile"
-            )
-        if (
-            metadata.get("audio_codec") != "aac"
-            or metadata.get("audio_sample_rate") != 48000
-            or metadata.get("audio_channels") != "stereo"
-        ):
-            raise IntegrityError(
-                "Muxed audio stream does not match the approved profile"
-            )
         try:
-            integrated = float(result.loudness.get("input_i"))
-            true_peak = float(result.loudness.get("input_tp"))
-        except (TypeError, ValueError) as error:
-            raise IntegrityError("Muxed loudness measurement is invalid") from error
-        if abs(integrated + 16.0) > 1.0:
-            raise IntegrityError(
-                f"Muxed loudness {integrated:.1f} LUFS is outside the -16 LUFS target"
+            self._validate_mux_result(result, duration)
+        except IntegrityError as error:
+            # The adapter already produced a file; record the rejection so the
+            # operation does not stay in "running" and block reconciliation.
+            self.record_execution_receipt(
+                operation["id"],
+                ExecutionReceiptCreate(
+                    status=ToolOperationStatus.FAILED,
+                    elapsed_ms=max(0, int((perf_counter() - started) * 1000)),
+                    details={"type": type(error).__name__, "redacted": True},
+                ),
             )
-        if true_peak > -1.0:
-            raise IntegrityError(
-                f"Muxed true peak {true_peak:.1f} dBTP exceeds the -1.0 dBTP ceiling"
-            )
+            raise
+
+        metadata = result.metadata
+        integrated = float(result.loudness.get("input_i"))
+        true_peak = float(result.loudness.get("input_tp"))
 
         voiced_artifact = self.write_artifact(
             project_id,

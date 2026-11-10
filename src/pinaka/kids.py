@@ -70,16 +70,38 @@ def check_flash_rate(
     )
 
 
+def normalize_loudness(measurement: dict[str, object]) -> dict[str, float | None]:
+    """Accept either friendly keys or raw ffmpeg loudnorm fields."""
+
+    integrated = None
+    for key in ("integrated_lufs", "output_i", "input_i"):
+        value = measurement.get(key)
+        if value is not None:
+            integrated = float(value)
+            break
+
+    peak = None
+    for key in ("true_peak_dbtp", "output_tp", "input_tp"):
+        value = measurement.get(key)
+        if value is not None:
+            peak = float(value)
+            break
+
+    return {"integrated_lufs": integrated, "true_peak_dbtp": peak}
+
+
 def check_kids_loudness(
     loudness: dict[str, object],
     *,
     target_lufs: float = KIDS_LOUDNESS_LUFS,
     max_peak_dbtp: float = KIDS_TRUE_PEAK_DBTP,
+    tolerance_lu: float = 1.0,
 ) -> QACheck:
     """Check the mix against the quieter kids profile."""
 
-    measured = loudness.get("integrated_lufs")
-    peak = loudness.get("true_peak_dbtp")
+    normalized = normalize_loudness(loudness)
+    measured = normalized["integrated_lufs"]
+    peak = normalized["true_peak_dbtp"]
     if measured is None:
         return QACheck(
             check="kids.loudness",
@@ -91,7 +113,7 @@ def check_kids_loudness(
     measured_value = float(measured)
     peak_value = float(peak) if peak is not None else None
     problems: list[str] = []
-    if measured_value > target_lufs + 1.0:
+    if measured_value > target_lufs + tolerance_lu:
         problems.append(
             f"Integrated loudness {measured_value} LUFS is above the "
             f"{target_lufs} LUFS kids target"
@@ -111,6 +133,7 @@ def check_kids_loudness(
             "true_peak_dbtp": peak_value,
             "target_lufs": target_lufs,
             "max_peak_dbtp": max_peak_dbtp,
+            "tolerance_lu": tolerance_lu,
         },
     )
 

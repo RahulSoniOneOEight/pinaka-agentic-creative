@@ -1,0 +1,147 @@
+{
+  "project": {
+    "name": "Pinaka Kids Rhyme - 5-second test v4",
+    "objective": "Prove the governed flow can produce a 5-second rhyme for five-year-olds.",
+    "mode": "entertainment",
+    "audience": "Children aged four to six, watching with a parent.",
+    "output_format": "1080x1920 (9:16)",
+    "language": "en",
+    "duration_seconds": "5",
+    "max_budget": {
+      "amount": "0.00",
+      "currency": "INR"
+    }
+  },
+  "approved_fact_source": "docs/end-to-end-flow-with-owners.md",
+  "client": {
+    "name": "Pinaka Intelligence",
+    "website": "https://pinakaintelligence.com/",
+    "brand_source_authorized": true,
+    "approved_service_claims": [],
+    "cta_label": "Watch together",
+    "cta_url": "https://pinakaintelligence.com/"
+  },
+  "rights_policy": "docs/asset-sourcing-policy.md",
+  "design": {
+    "penpot_file_url": "https://design.penpot.app/?screen=workspace&team-id=40e06342-8830-80d6-8008-96be7c6149d0&file-id=a5ac146a-5787-80fa-8008-b5477410eed7&page-id=a5ac146a-5787-80fa-8008-b5477410eed8",
+    "penpot_file_id": "a5ac146a-5787-80fa-8008-b5477410eed7",
+    "penpot_page_id": "a5ac146a-5787-80fa-8008-b5477410eed8",
+    "width_px": 1080,
+    "height_px": 1920,
+    "frame_rate": "30",
+    "font_families": [
+      "Inter"
+    ],
+    "brand_colors": {
+      "ink": "#0D1533",
+      "muted": "#66718C",
+      "line": "#E8EBF5",
+      "blue": "#395CFF",
+      "violet": "#735CF6",
+      "teal": "#18B7B7",
+      "orange": "#FF9F43",
+      "soft": "#FAFBFF",
+      "white": "#FFFFFF"
+    }
+  },
+  "script": {
+    "voiceover": "One, two, three little ducks, swimming in a row. Quack, quack, quack!",
+    "on_screen_text": [
+      "Quack!"
+    ],
+    "prohibited_claims": [
+      "No health, safety or developmental claims",
+      "No fear-based language",
+      "No brand characters"
+    ]
+  },
+  "provider_policy": {
+    "mode": "disabled",
+    "max_paid_spend": {
+      "amount": "0.00",
+      "currency": "INR"
+    },
+    "approved_profile_keys": []
+  },
+  "deliverable_plan": {
+    "deliverable": {
+      "stable_key": "kids-rhyme-vertical-5s-v4",
+      "name": "Kids counting rhyme, 5 seconds",
+      "objective": "Teach counting one to three through one short rhyme.",
+      "kind": "video",
+      "output_format": "1080x1920 (9:16)",
+      "language": "en",
+      "duration_seconds": "5",
+      "acceptance_targets": {
+        "frame_rate": 30,
+        "exact_text_required": false,
+        "captions_required": true,
+        "made_for_kids": true,
+        "on_screen_text": "tag only",
+        "flash_rate_max_per_second": 3,
+        "loudness_target_lufs": -16,
+        "true_peak_max_dbtp": -2
+      }
+    },
+    "segments": [
+      {
+        "stable_key": "one-two",
+        "ordinal": 1,
+        "purpose": "Count one and two.",
+        "duration_seconds": "1.2",
+        "narrative": "One, two,",
+        "constraints": {
+          "exact_text": "One, two,",
+          "no_generated_text": true
+        }
+      },
+      {
+        "stable_key": "three-ducks",
+        "ordinal": 2,
+        "purpose": "Count three and name the subject.",
+        "duration_seconds": "1.3",
+        "narrative": "three little ducks,",
+        "constraints": {
+          "exact_text": "three little ducks,",
+          "no_generated_text": true
+        }
+      },
+      {
+        "stable_key": "swim",
+        "ordinal": 3,
+        "purpose": "Complete the image.",
+        "duration_seconds": "1.3",
+        "narrative": "swimming in a row.",
+        "constraints": {
+          "exact_text": "swimming in a row.",
+          "no_generated_text": true
+        }
+      },
+      {
+        "stable_key": "tag",
+        "ordinal": 4,
+        "purpose": "Joinable tag.",
+        "duration_seconds": "1.2",
+        "narrative": "Quack, quack, quack!",
+        "constraints": {
+          "exact_text": "Quack, quack, quack!",
+          "no_generated_text": true
+        }
+      }
+    ]
+  },
+  "acceptance_targets": {
+    "duration_seconds": 5,
+    "resolution": "1080x1920",
+    "aspect_ratio": "9:16",
+    "frame_rate": 30,
+    "made_for_kids": true,
+    "flash_rate_max_per_second": 3,
+    "loudness_target_lufs": -16,
+    "true_peak_max_dbtp": -2,
+    "captions_required": true,
+    "final_approval_requires_exact_hash": true,
+    "publishing_authorized": false,
+    "test_run": "all approvals auto-recorded for this test"
+  }
+}
