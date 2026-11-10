@@ -808,7 +808,9 @@ class CreativeController:
         if download_event_url:
             fetch(download_event_url)
         content, content_type = fetch(str(asset_url))
-        if content_type and not content_type.lower().startswith(("image/", "video/")):
+        if content_type and not content_type.lower().startswith(
+            ("image/", "video/", "audio/")
+        ):
             raise IntegrityError(f"Unexpected asset content type: {content_type}")
         compliance = candidate.compliance.model_copy(
             update={"download_event_recorded": True}
@@ -816,14 +818,20 @@ class CreativeController:
         updated = candidate.model_copy(update={"compliance": compliance})
         suffix = ""
         if content_type:
-            if "jpeg" in content_type:
-                suffix = ".jpg"
-            elif "png" in content_type:
-                suffix = ".png"
-            elif "mp4" in content_type:
-                suffix = ".mp4"
-            elif "webm" in content_type:
-                suffix = ".webm"
+            lowered = content_type.lower()
+            for marker, ext in (
+                ("jpeg", ".jpg"),
+                ("png", ".png"),
+                ("mp4", ".mp4"),
+                ("webm", ".webm"),
+                ("mpeg", ".mp3"),
+                ("wav", ".wav"),
+                ("ogg", ".ogg"),
+                ("flac", ".flac"),
+            ):
+                if marker in lowered:
+                    suffix = ext
+                    break
         name = filename or f"{candidate.source.provider_asset_id}{suffix or '.bin'}"
         artifact = self.import_stock_asset(
             project_id,
@@ -956,6 +964,65 @@ class CreativeController:
             "decision": recorded,
             "verdict": decision.verdict.value,
             "role": role.value,
+        }
+
+    def assign_audio_bed(
+        self,
+        project_id: str,
+        *,
+        artifact_id: str,
+        role: SlotAssetRole,
+        criteria: AssetCriteria,
+        decided_by: str,
+        context: AssetUseContext | None = None,
+    ) -> dict[str, Any]:
+        """Bind a sourced track as the primary or backup music bed."""
+
+        context = self._enforce_context(project_id, context)
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        rights_payload = artifact["operation"].get("rights")
+        rights = (
+            AssetRightsRecord.model_validate(rights_payload) if rights_payload else None
+        )
+        decision = evaluate_treatment(
+            slot_id=f"audio:{role.value}",
+            criteria=criteria,
+            context=context,
+            decided_by=decided_by,
+            rights=rights,
+            artifact_id=artifact_id,
+        )
+        if not verdict_binds_asset(decision.verdict):
+            raise RightsEligibilityError(
+                f"Verdict {decision.verdict.value} cannot be assigned as a music bed: "
+                + "; ".join(decision.reasons)
+            )
+        bed = self.repository.upsert_audio_bed(
+            project_id,
+            artifact_id,
+            role.value,
+            verdict=decision.verdict.value,
+            decision=decision.model_dump(mode="json"),
+        )
+        return {"bed": bed, "verdict": decision.verdict.value, "role": role.value}
+
+    def audio_coverage(self, project_id: str) -> dict[str, Any]:
+        """Report whether a primary and a backup music bed exist."""
+
+        beds = {bed["role"]: bed for bed in self.repository.list_audio_beds(project_id)}
+        problems: list[str] = []
+        if "primary" not in beds:
+            problems.append("missing primary")
+        if "backup" not in beds:
+            problems.append("missing backup")
+        return {
+            "project_id": project_id,
+            "primary_artifact_id": beds.get("primary", {}).get("artifact_id"),
+            "backup_artifact_id": beds.get("backup", {}).get("artifact_id"),
+            "resolved": not problems,
+            "problems": problems,
         }
 
     def promote_backup(

@@ -620,6 +620,7 @@ def cmd_source_search(args: argparse.Namespace) -> dict[str, Any]:
             media_type=media_type,
             limit=args.limit,
             page=args.page,
+            license_type=args.license_type,
         )
     elif args.provider == "wikimedia":
         payload = WikimediaClient().search_with_eligibility(
@@ -886,6 +887,26 @@ def cmd_assign_slot_asset(args: argparse.Namespace) -> dict[str, Any]:
         context=context,
         decided_by=decided_by,
     )
+
+
+def cmd_assign_audio_bed(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    context = (
+        _asset_context(payload["use_context"]) if "use_context" in payload else None
+    )
+    criteria = AssetCriteria.model_validate(payload.get("criteria", {}))
+    return _controller(args).assign_audio_bed(
+        args.project_id,
+        artifact_id=payload["artifact_id"],
+        role=SlotAssetRole(payload.get("role", "primary")),
+        criteria=criteria,
+        context=context,
+        decided_by=payload.get("decided_by") or args.decided_by,
+    )
+
+
+def cmd_audio_coverage(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).audio_coverage(args.project_id)
 
 
 def cmd_promote_backup(args: argparse.Namespace) -> dict[str, Any]:
@@ -1787,6 +1808,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Unsplash and Pexels only; use squarish for Unsplash and square for Pexels",
     )
     source_parser.add_argument(
+        "--license-type",
+        choices=["all", "all-cc", "commercial", "modification"],
+        help="Openverse only: filter by licence capability",
+    )
+    source_parser.add_argument(
         "--size",
         choices=["large", "medium", "small"],
         help="Pexels only: minimum asset size filter",
@@ -1928,6 +1954,21 @@ def build_parser() -> argparse.ArgumentParser:
     promote_parser.add_argument("--decided-by", required=True)
     promote_parser.add_argument("--reason", required=True)
     promote_parser.set_defaults(handler=cmd_promote_backup)
+
+    audio_parser = subparsers.add_parser(
+        "assign-audio-bed",
+        help="Bind a sourced track as the primary or backup music bed",
+    )
+    audio_parser.add_argument("project_id")
+    audio_parser.add_argument("--file", required=True)
+    audio_parser.add_argument("--decided-by", required=True)
+    audio_parser.set_defaults(handler=cmd_assign_audio_bed)
+
+    audio_cov_parser = subparsers.add_parser(
+        "audio-coverage", help="Report primary and backup music coverage"
+    )
+    audio_cov_parser.add_argument("project_id")
+    audio_cov_parser.set_defaults(handler=cmd_audio_coverage)
 
     context_parser = subparsers.add_parser(
         "set-use-context",

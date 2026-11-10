@@ -164,7 +164,11 @@ class OpenverseClient:
         }
         if license_type:
             params["license_type"] = license_type
-        endpoint = f"{self.base_url}/{media_type.value}s/"
+        endpoint = (
+            f"{self.base_url}/images/"
+            if media_type == AssetMediaType.IMAGE
+            else f"{self.base_url}/audio/"
+        )
         url = f"{endpoint}?{urllib.parse.urlencode(params)}"
         raw = (self.fetcher or self._fetch)(url)
         response_hash = sha256_bytes(raw)

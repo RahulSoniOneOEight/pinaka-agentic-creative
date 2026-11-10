@@ -409,6 +409,32 @@ All four routes fail closed with an explicit error rather than silently degradin
 model. Installing the checkpoint and upscale model, starting ComfyUI, and adding a vision key enable
 them without further code changes.
 
+### Music and audio beds
+
+Music is sourced exactly like images: search, evaluate, archive evidence, download, then bind one
+track as primary and one as backup.
+
+```powershell
+python -m pinaka --home workspace source-search --provider openverse --media audio `
+  --query "gentle piano" --license-type commercial --limit 10 --output music.json
+python -m pinaka --home workspace capture-evidence <project> --candidate music.json --output music-evidenced.json
+python -m pinaka --home workspace download-asset <project> --candidate music-evidenced.json
+python -m pinaka --home workspace assign-audio-bed <project> --file bed.json --decided-by you@example.com
+python -m pinaka --home workspace audio-coverage <project>
+```
+
+| Rule | Reason |
+|---|---|
+| Use `--license-type commercial` for Openverse audio | A monetized project must reject NC |
+| Reject ND tracks | Trimming and looping are modifications |
+| Prefer CC0 | No attribution burden on a short children's video |
+| Attribution goes in the description | An end card is unreadable to a young child |
+| Verify the recording, not just the melody | A public-domain melody can have a copyrighted recording |
+| Primary and backup are both required | `audio-coverage` reports `missing backup` until both exist |
+
+The Openverse audio endpoint is `/v1/audio/`; the client builds it explicitly because the plural form
+returns 404.
+
 ## Eligibility outcomes
 
 | Outcome | Meaning | Controller action |

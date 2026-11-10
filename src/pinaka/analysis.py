@@ -192,17 +192,21 @@ class AssetAnalyzer:
         video = next(
             (item for item in streams if item.get("codec_type") == "video"), None
         )
-        if not video:
-            raise ValueError("Asset has no video stream")
-        width = int(video.get("width") or 0) or None
-        height = int(video.get("height") or 0) or None
+        audio = next(
+            (item for item in streams if item.get("codec_type") == "audio"), None
+        )
+        if not video and not audio:
+            raise ValueError("Asset has no audio or video stream")
+        width = int((video or {}).get("width") or 0) or None
+        height = int((video or {}).get("height") or 0) or None
         duration = probe.get("format", {}).get("duration")
         duration_seconds = float(duration) if duration else None
-        media_type = (
-            AssetMediaType.IMAGE
-            if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".avif"}
-            else AssetMediaType.VIDEO
-        )
+        if video is None:
+            media_type = AssetMediaType.AUDIO
+        elif path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".avif"}:
+            media_type = AssetMediaType.IMAGE
+        else:
+            media_type = AssetMediaType.VIDEO
         aspect = round(width / height, 6) if width and height else None
         required_aspect = (
             round(required_width / required_height, 6)
@@ -218,7 +222,9 @@ class AssetAnalyzer:
 
         extract = self.frame or (lambda item: _extract_frame(item, self._ffmpeg()))
 
-        if self.ocr or self.faces or self.sharpness:
+        if media_type == AssetMediaType.AUDIO:
+            tools["audio_only"] = "true"
+        elif self.ocr or self.faces or self.sharpness:
             frame = extract(path)
             if self.ocr:
                 text_sample = self.ocr(frame) or None

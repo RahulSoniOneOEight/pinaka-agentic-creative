@@ -91,6 +91,19 @@ def test_openverse_noncommercial_licence_blocks_commercial_use():
     assert eligibility.status == AssetEligibilityStatus.BLOCKED
 
 
+def test_openverse_audio_uses_the_singular_endpoint():
+    seen: list[str] = []
+
+    def fetcher(url: str) -> bytes:
+        seen.append(url)
+        return json.dumps({"result_count": 0, "results": []}).encode()
+
+    OpenverseClient(fetcher=fetcher).search("ukulele", media_type=AssetMediaType.AUDIO)
+
+    assert "/v1/audio/" in seen[0]
+    assert "/v1/audios/" not in seen[0]
+
+
 def test_openverse_client_search_uses_injected_transport():
     raw = json.dumps(FIXTURE).encode()
     client = OpenverseClient(fetcher=lambda url: raw)

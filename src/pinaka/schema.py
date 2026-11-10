@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -440,6 +440,22 @@ CREATE INDEX IF NOT EXISTS idx_scene_plans_project ON scene_plans(project_id, cr
 """
 
 
+SCHEMA_V8 = r"""
+CREATE TABLE IF NOT EXISTS audio_beds (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_audio_beds_project ON audio_beds(project_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -448,4 +464,5 @@ MIGRATIONS = {
     5: SCHEMA_V5,
     6: SCHEMA_V6,
     7: SCHEMA_V7,
+    8: SCHEMA_V8,
 }

@@ -92,7 +92,7 @@ Three hard boundaries:
 | Analytics and optimization | 2 | A/B experiment design, Wilson intervals, two-proportion z-test, Bonferroni adjustment, deterministic reports and CSV platform-export ingestion | Content calendar, automated feedback loop | Measure before optimizing; no silent model swaps | Review plus external analytics |
 | Reliability and recovery | 1 | Idempotency, unknown-submission states, reconciliation, deterministic fakes, hashed runtime backup, SQLite integrity verification and restore drill | Managed-provider interruption drill, offsite restore, queue/worker only if measured | Retry only with explicit recovery evidence | Studio job recovery |
 | Security and privacy | 1 | Secret rejection, `.local` deny, credential refs, no secrets in logs, data-classification provider routing, non-destructive retention plan, font-licence evidence | Retention enforcement, DPA review, key rotation | Minimum necessary context | Studio owns saved provider keys |
-| CI and evaluation | 1 | 308 tests, CI workflow, Ruff/format/compile/secret scan | Golden media fixtures, model evals, prompt regression suite | Test before deploy; evaluate on a fixed benchmark | Provider route evaluation |
+| CI and evaluation | 1 | 313 tests, CI workflow, Ruff/format/compile/secret scan | Golden media fixtures, model evals, prompt regression suite | Test before deploy; evaluate on a fixed benchmark | Provider route evaluation |
 | Multi-format and localization | 1/2 | 9:16 master; 1:1, 16:9 and 4:5 blurred-crop derivatives; delivery packet; caption readability/CPS audit and locale plans | Format-specific re-layout, derivative approval, dubbing, translated captions | One master, many hashed derivatives | Hosted TTS/transcription/upscale |
 
 ### Paid test envelope

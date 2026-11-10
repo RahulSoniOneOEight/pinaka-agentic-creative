@@ -1483,6 +1483,95 @@ class Repository:
                 "created_at": row["created_at"],
             }
 
+    def upsert_audio_bed(
+        self,
+        project_id: str,
+        artifact_id: str,
+        role: str,
+        *,
+        verdict: str,
+        decision: dict[str, Any],
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            artifact = connection.execute(
+                "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                (artifact_id, project_id),
+            ).fetchone()
+            if not artifact:
+                raise NotFoundError(f"Artifact not found in project: {artifact_id}")
+            existing = connection.execute(
+                "SELECT * FROM audio_beds WHERE project_id = ? AND role = ?",
+                (project_id, role),
+            ).fetchone()
+            if existing and existing["artifact_id"] == artifact_id:
+                return dict(existing)
+            if existing:
+                connection.execute(
+                    "UPDATE audio_beds SET artifact_id = ?, verdict = ?, "
+                    "decision_json = ?, updated_at = ? WHERE id = ?",
+                    (
+                        artifact_id,
+                        verdict,
+                        canonical_json(decision),
+                        now,
+                        existing["id"],
+                    ),
+                )
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="audio_bed",
+                    entity_id=existing["id"],
+                    event_type="audio_bed.replaced",
+                    payload={
+                        "role": role,
+                        "previous_artifact_id": existing["artifact_id"],
+                        "artifact_id": artifact_id,
+                    },
+                )
+                row = connection.execute(
+                    "SELECT * FROM audio_beds WHERE id = ?", (existing["id"],)
+                ).fetchone()
+                return dict(row)
+            bed_id = new_id("abed")
+            connection.execute(
+                "INSERT INTO audio_beds(id, project_id, artifact_id, role, verdict, "
+                "decision_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    bed_id,
+                    project_id,
+                    artifact_id,
+                    role,
+                    verdict,
+                    canonical_json(decision),
+                    now,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="audio_bed",
+                entity_id=bed_id,
+                event_type="audio_bed.assigned",
+                payload={"role": role, "artifact_id": artifact_id, "verdict": verdict},
+            )
+            row = connection.execute(
+                "SELECT * FROM audio_beds WHERE id = ?", (bed_id,)
+            ).fetchone()
+            return dict(row)
+
+    def list_audio_beds(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM audio_beds WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     @staticmethod
     def _slot_asset_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
