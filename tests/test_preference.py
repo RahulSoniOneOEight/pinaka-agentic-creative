@@ -186,6 +186,42 @@ def test_selection_serialises_with_rejections():
     assert payload["rejected"][0]["route_id"] == "fal-fill"
 
 
+def test_repository_policy_prefers_sourced_music_before_generation():
+    loaded = PreferencePolicy.load()
+    selection = select_route(
+        "music",
+        [
+            RouteCandidate(route_id="ace-step-local", tier="local"),
+            RouteCandidate(route_id="openverse-audio", tier="stock"),
+        ],
+        loaded,
+    )
+
+    assert selection.selected == "openverse-audio"
+    assert selection.tier == "stock"
+
+
+def test_repository_policy_generates_music_only_when_stock_is_unavailable():
+    loaded = PreferencePolicy.load()
+    selection = select_route(
+        "music",
+        [
+            RouteCandidate(route_id="openverse-audio", tier="stock", ready=False),
+            RouteCandidate(route_id="ace-step-local", tier="local"),
+        ],
+        loaded,
+    )
+
+    assert selection.selected == "ace-step-local"
+
+
+def test_repository_policy_covers_sound_effects_as_stock_first():
+    loaded = PreferencePolicy.load()
+
+    assert loaded.rules["sound_effects"][0] == "stock"
+    assert loaded.rules["ambience"][0] == "stock"
+
+
 def test_policy_summary_reports_ordering():
     summary = policy_summary(policy())
 

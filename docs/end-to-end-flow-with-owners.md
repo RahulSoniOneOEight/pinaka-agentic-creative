@@ -79,6 +79,19 @@ phase.
 | 23 | Preflight and dispatch package | Controller | None | Manual-upload package | — | Done |
 | 24 | Publish to the channel | Operator / channel adapter | **Library only** — never a channel publish | Published asset | G5 | Partial (manual) |
 
+## Audio sourcing order
+
+Music, stingers and ambience follow the same order as images. Generation is a fallback.
+
+| Order | Route | When |
+|---|---|---|
+| 1 | Owned or commissioned recording | The bed exists or can be recorded |
+| 2 | Stock: Openverse audio, Wikimedia, Internet Archive, Freesound | Default for beds, loops and effects |
+| 3 | Local generation (ACE-Step) | No eligible stock track fits |
+| 4 | Hosted generation (Studio) | Local generation is unavailable |
+
+Policy keys: `music`, `sound_effects` and `ambience` all start at `stock`.
+
 ## Where OpenMontage is genuinely the owner
 
 | Step | Studio capability | Why Studio rather than local |

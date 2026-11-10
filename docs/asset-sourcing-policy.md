@@ -412,7 +412,17 @@ them without further code changes.
 ### Music and audio beds
 
 Music is sourced exactly like images: search, evaluate, archive evidence, download, then bind one
-track as primary and one as backup.
+track as primary and one as backup. Generation is the fallback, never the default.
+
+| Order | Route | When |
+|---|---|---|
+| 1 | Owned or commissioned recording | The bed already exists or can be recorded |
+| 2 | **Stock**: Openverse audio, Wikimedia, Internet Archive, Freesound | Default for beds, loops, stingers and ambience |
+| 3 | Local generation (ACE-Step) | No eligible stock track fits the slot |
+| 4 | Hosted generation (Studio) | Local generation is unavailable |
+
+The preference policy encodes this as `music: [stock, local, studio]`,
+`sound_effects: [stock, local, studio]` and `ambience: [stock, local, studio]`.
 
 ```powershell
 python -m pinaka --home workspace source-search --provider openverse --media audio `

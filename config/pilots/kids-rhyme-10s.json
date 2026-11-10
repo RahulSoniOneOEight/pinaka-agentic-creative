@@ -46,6 +46,8 @@
         "loudness_target_lufs": -16,
         "true_peak_max_dbtp": -2,
         "music": "instrumental bed only",
+        "music_source": "sourced stock first; local generation only if no eligible track",
+        "sound_source": "sourced stock first",
         "voice": "synthetic; no real child voice"
       }
     },
@@ -101,6 +103,7 @@
     "loudness_target_lufs": -16,
     "true_peak_max_dbtp": -2,
     "music_rights": "owned, or CC0/CC BY recording",
+    "music_source": "sourced stock first; local generation is the fallback",
     "captions_required": true,
     "final_approval_requires_exact_hash": true,
     "publishing_authorized": false,
