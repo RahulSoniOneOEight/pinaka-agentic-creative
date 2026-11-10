@@ -14,21 +14,31 @@ from .enums import (
     BudgetEntryKind,
     JobStatus,
     ProjectStatus,
+    QAStatus,
+    ToolOperationStatus,
 )
 from .errors import BudgetExceededError, ConflictError, IntegrityError, NotFoundError
 from .models import (
     ApprovalRequest,
     ArtifactCreate,
     CapabilityResult,
+    DeliverableCreate,
+    DeliverableRecord,
     DependencyRef,
+    ExecutionReceiptCreate,
     FactSetCreate,
+    GroundingBundleCreate,
     JobRecord,
     JobRequest,
     Money,
     ProjectCreate,
     ProjectRecord,
+    ProviderModelProfileCreate,
+    SegmentCreate,
     ShotCreate,
     SlotCreate,
+    ToolOperationRequest,
+    ToolProfileCreate,
 )
 from .utils import canonical_json, new_id, sha256_json, slugify, utc_now
 
@@ -182,6 +192,211 @@ class Repository:
             ).fetchall()
             return [self._project_from_row(row) for row in rows]
 
+    @staticmethod
+    def _deliverable_from_row(row: sqlite3.Row) -> DeliverableRecord:
+        return DeliverableRecord(
+            id=row["id"],
+            project_id=row["project_id"],
+            stable_key=row["stable_key"],
+            name=row["name"],
+            objective=row["objective"],
+            kind=row["kind"],
+            output_format=row["output_format"],
+            language=row["language"],
+            duration_seconds=(
+                Decimal(row["duration_seconds"])
+                if row["duration_seconds"] is not None
+                else None
+            ),
+            acceptance_targets=json.loads(row["acceptance_targets_json"]),
+            version=row["version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def create_deliverable(
+        self, project_id: str, request: DeliverableCreate
+    ) -> DeliverableRecord:
+        deliverable_id = new_id("del")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            existing = connection.execute(
+                "SELECT * FROM deliverables WHERE project_id = ? AND stable_key = ?",
+                (project_id, request.stable_key),
+            ).fetchone()
+            if existing:
+                record = self._deliverable_from_row(existing)
+                observed = {
+                    key: record.model_dump(mode="json")[key]
+                    for key in type(request).model_fields
+                }
+                if sha256_json(observed) == sha256_json(
+                    request.model_dump(mode="json")
+                ):
+                    return record
+                raise ConflictError(
+                    f"Deliverable key already exists with different content: "
+                    f"{request.stable_key}"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO deliverables(
+                        id, project_id, stable_key, name, objective, kind, output_format,
+                        language, duration_seconds, acceptance_targets_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        deliverable_id,
+                        project_id,
+                        request.stable_key,
+                        request.name,
+                        request.objective,
+                        request.kind.value,
+                        request.output_format,
+                        request.language,
+                        (
+                            str(request.duration_seconds)
+                            if request.duration_seconds is not None
+                            else None
+                        ),
+                        canonical_json(request.acceptance_targets),
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"Deliverable key already exists: {request.stable_key}"
+                ) from error
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="deliverable",
+                entity_id=deliverable_id,
+                event_type="deliverable.created",
+                payload=request.model_dump(mode="json"),
+            )
+            row = connection.execute(
+                "SELECT * FROM deliverables WHERE id = ?", (deliverable_id,)
+            ).fetchone()
+            return self._deliverable_from_row(row)
+
+    def list_deliverables(self, project_id: str) -> list[DeliverableRecord]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM deliverables WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            ).fetchall()
+            return [self._deliverable_from_row(row) for row in rows]
+
+    @staticmethod
+    def _segment_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "deliverable_id": row["deliverable_id"],
+            "stable_key": row["stable_key"],
+            "ordinal": row["ordinal"],
+            "purpose": row["purpose"],
+            "duration_seconds": row["duration_seconds"],
+            "narrative": row["narrative"],
+            "constraints": json.loads(row["constraints_json"]),
+            "version": row["version"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_segment(self, project_id: str, request: SegmentCreate) -> dict[str, Any]:
+        segment_id = new_id("seg")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            deliverable = connection.execute(
+                "SELECT id FROM deliverables WHERE id = ? AND project_id = ?",
+                (request.deliverable_id, project_id),
+            ).fetchone()
+            if not deliverable:
+                raise NotFoundError(
+                    f"Deliverable not found in project: {request.deliverable_id}"
+                )
+            existing = connection.execute(
+                """
+                SELECT * FROM segments
+                WHERE deliverable_id = ? AND stable_key = ?
+                """,
+                (request.deliverable_id, request.stable_key),
+            ).fetchone()
+            if existing:
+                observed = self._segment_dict(existing)
+                comparable = {
+                    "deliverable_id": observed["deliverable_id"],
+                    "stable_key": observed["stable_key"],
+                    "ordinal": observed["ordinal"],
+                    "purpose": observed["purpose"],
+                    "duration_seconds": observed["duration_seconds"],
+                    "narrative": observed["narrative"],
+                    "constraints": observed["constraints"],
+                }
+                if sha256_json(comparable) == sha256_json(
+                    request.model_dump(mode="json")
+                ):
+                    return observed
+                raise ConflictError(
+                    f"Segment key already exists with different content: "
+                    f"{request.stable_key}"
+                )
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO segments(
+                        id, project_id, deliverable_id, stable_key, ordinal, purpose,
+                        duration_seconds, narrative, constraints_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        segment_id,
+                        project_id,
+                        request.deliverable_id,
+                        request.stable_key,
+                        request.ordinal,
+                        request.purpose,
+                        str(request.duration_seconds),
+                        request.narrative,
+                        canonical_json(request.constraints),
+                        now,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ConflictError(
+                    f"Segment key or ordinal already exists: "
+                    f"{request.stable_key}/{request.ordinal}"
+                ) from error
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="segment",
+                entity_id=segment_id,
+                event_type="segment.created",
+                payload=request.model_dump(mode="json"),
+            )
+            row = connection.execute(
+                "SELECT * FROM segments WHERE id = ?", (segment_id,)
+            ).fetchone()
+            return self._segment_dict(row)
+
+    def list_segments(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM segments WHERE project_id = ? ORDER BY deliverable_id, ordinal",
+                (project_id,),
+            ).fetchall()
+            return [self._segment_dict(row) for row in rows]
+
     def set_project_status(
         self,
         project_id: str,
@@ -240,6 +455,141 @@ class Repository:
                 (project_id,),
             ).fetchone()
             return self._fact_dict(row) if row else None
+
+    @staticmethod
+    def _grounding_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "kind": row["kind"],
+            "version": row["version"],
+            "source_ref": row["source_ref"],
+            "effective_from": row["effective_from"],
+            "values": json.loads(row["values_json"]),
+            "evidence_refs": json.loads(row["evidence_refs_json"]),
+            "content_hash": row["content_hash"],
+            "is_current": bool(row["is_current"]),
+            "created_at": row["created_at"],
+        }
+
+    def current_grounding_bundles(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                """
+                SELECT * FROM grounding_bundles
+                WHERE project_id = ? AND is_current = 1
+                ORDER BY kind
+                """,
+                (project_id,),
+            ).fetchall()
+            return [self._grounding_dict(row) for row in rows]
+
+    def add_grounding_bundle(
+        self, project_id: str, request: GroundingBundleCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        bundle_id = new_id("ground")
+        content = request.model_dump(mode="json")
+        content_hash = sha256_json(content)
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            previous = connection.execute(
+                """
+                SELECT * FROM grounding_bundles
+                WHERE project_id = ? AND kind = ? AND is_current = 1
+                """,
+                (project_id, request.kind.value),
+            ).fetchone()
+            if previous and previous["content_hash"] == content_hash:
+                return self._grounding_dict(previous)
+            version = int(
+                connection.execute(
+                    """
+                    SELECT COALESCE(MAX(version), 0) + 1
+                    FROM grounding_bundles WHERE project_id = ? AND kind = ?
+                    """,
+                    (project_id, request.kind.value),
+                ).fetchone()[0]
+            )
+            if previous:
+                connection.execute(
+                    "UPDATE grounding_bundles SET is_current = 0 WHERE id = ?",
+                    (previous["id"],),
+                )
+            connection.execute(
+                """
+                INSERT INTO grounding_bundles(
+                    id, project_id, kind, version, source_ref, effective_from,
+                    values_json, evidence_refs_json, content_hash, is_current, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    bundle_id,
+                    project_id,
+                    request.kind.value,
+                    version,
+                    request.source_ref,
+                    request.effective_from,
+                    canonical_json(request.values),
+                    canonical_json(request.evidence_refs),
+                    content_hash,
+                    now,
+                ),
+            )
+            invalidated = {"approvals": [], "artifacts": []}
+            if previous:
+                invalidated = self._invalidate_dependency_graph(
+                    connection,
+                    project_id=project_id,
+                    entity_type="grounding_bundle",
+                    entity_id=previous["id"],
+                    reason=(
+                        f"{request.kind.value} grounding replaced by version {version}"
+                    ),
+                )
+                self._rollback_status_after_grounding_change(
+                    connection, project_id, now
+                )
+            if project["status"] == ProjectStatus.BRIEF_APPROVED.value:
+                connection.execute(
+                    """
+                    UPDATE projects
+                    SET status = ?, version = version + 1, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (ProjectStatus.GROUNDING_LOCKED.value, now, project_id),
+                )
+                self._event(
+                    connection,
+                    project_id=project_id,
+                    entity_type="project",
+                    entity_id=project_id,
+                    event_type="project.status_changed",
+                    payload={
+                        "from": ProjectStatus.BRIEF_APPROVED.value,
+                        "to": ProjectStatus.GROUNDING_LOCKED.value,
+                        "reason": f"{request.kind.value} grounding v{version} locked",
+                    },
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="grounding_bundle",
+                entity_id=bundle_id,
+                event_type="grounding_bundle.created",
+                payload={
+                    "kind": request.kind.value,
+                    "version": version,
+                    "content_hash": content_hash,
+                    "replaces": previous["id"] if previous else None,
+                    "invalidated": invalidated,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM grounding_bundles WHERE id = ?", (bundle_id,)
+            ).fetchone()
+            return self._grounding_dict(row)
 
     def add_fact_set(self, project_id: str, request: FactSetCreate) -> dict[str, Any]:
         now = utc_now()
@@ -348,6 +698,7 @@ class Repository:
             ProjectStatus.PLANNED,
             ProjectStatus.BRIEF_APPROVED,
             ProjectStatus.FACTS_LOCKED,
+            ProjectStatus.GROUNDING_LOCKED,
             ProjectStatus.SOURCING,
             ProjectStatus.ANIMATIC_READY,
             ProjectStatus.ANIMATIC_APPROVED,
@@ -377,6 +728,48 @@ class Repository:
                     "from": current.value,
                     "to": ProjectStatus.FACTS_LOCKED.value,
                     "reason": "Current fact set changed",
+                },
+            )
+
+    def _rollback_status_after_grounding_change(
+        self, connection: sqlite3.Connection, project_id: str, now: str
+    ) -> None:
+        project = self._require_project(connection, project_id)
+        pipeline_order = [
+            ProjectStatus.DRAFT,
+            ProjectStatus.PLANNED,
+            ProjectStatus.BRIEF_APPROVED,
+            ProjectStatus.FACTS_LOCKED,
+            ProjectStatus.GROUNDING_LOCKED,
+            ProjectStatus.SOURCING,
+            ProjectStatus.ANIMATIC_READY,
+            ProjectStatus.ANIMATIC_APPROVED,
+            ProjectStatus.FINAL_CANDIDATE,
+            ProjectStatus.FINAL_APPROVED,
+            ProjectStatus.ARCHIVED,
+        ]
+        current = ProjectStatus(project["status"])
+        if current in pipeline_order and pipeline_order.index(
+            current
+        ) > pipeline_order.index(ProjectStatus.GROUNDING_LOCKED):
+            connection.execute(
+                """
+                UPDATE projects
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (ProjectStatus.GROUNDING_LOCKED.value, now, project_id),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="project",
+                entity_id=project_id,
+                event_type="project.rolled_back",
+                payload={
+                    "from": current.value,
+                    "to": ProjectStatus.GROUNDING_LOCKED.value,
+                    "reason": "Current grounding bundle changed",
                 },
             )
 
@@ -861,6 +1254,693 @@ class Repository:
                 (project_id,),
             ).fetchall()
             return [self._artifact_dict(connection, row) for row in rows]
+
+    @staticmethod
+    def _provider_profile_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "stable_key": row["stable_key"],
+            "provider": row["provider"],
+            "endpoint": row["endpoint"],
+            "model": row["model"],
+            "approved_roles": json.loads(row["approved_roles_json"]),
+            "credential_ref": row["credential_ref"],
+            "data_classification": row["data_classification"],
+            "limits": json.loads(row["limits_json"]),
+            "terms": json.loads(row["terms_json"]),
+            "fallback_profiles": json.loads(row["fallback_profiles_json"]),
+            "enabled": bool(row["enabled"]),
+            "version": row["version"],
+            "content_hash": row["content_hash"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def register_provider_profile(
+        self, request: ProviderModelProfileCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        payload = request.model_dump(mode="json")
+        content_hash = sha256_json(payload)
+        with self.database.transaction() as connection:
+            existing = connection.execute(
+                "SELECT * FROM provider_profiles WHERE stable_key = ?",
+                (request.stable_key,),
+            ).fetchone()
+            if existing and existing["content_hash"] == content_hash:
+                return self._provider_profile_dict(existing)
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE provider_profiles SET
+                        provider = ?, endpoint = ?, model = ?, approved_roles_json = ?,
+                        credential_ref = ?, data_classification = ?, limits_json = ?,
+                        terms_json = ?, fallback_profiles_json = ?, enabled = ?,
+                        version = version + 1, content_hash = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        request.provider,
+                        request.endpoint,
+                        request.model,
+                        canonical_json(request.approved_roles),
+                        request.credential_ref,
+                        request.data_classification.value,
+                        canonical_json(request.limits),
+                        canonical_json(request.terms),
+                        canonical_json(request.fallback_profiles),
+                        int(request.enabled),
+                        content_hash,
+                        now,
+                        existing["id"],
+                    ),
+                )
+                profile_id = existing["id"]
+                event_type = "provider_profile.updated"
+            else:
+                profile_id = new_id("provider")
+                connection.execute(
+                    """
+                    INSERT INTO provider_profiles(
+                        id, stable_key, provider, endpoint, model, approved_roles_json,
+                        credential_ref, data_classification, limits_json, terms_json,
+                        fallback_profiles_json, enabled, content_hash, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        request.stable_key,
+                        request.provider,
+                        request.endpoint,
+                        request.model,
+                        canonical_json(request.approved_roles),
+                        request.credential_ref,
+                        request.data_classification.value,
+                        canonical_json(request.limits),
+                        canonical_json(request.terms),
+                        canonical_json(request.fallback_profiles),
+                        int(request.enabled),
+                        content_hash,
+                        now,
+                        now,
+                    ),
+                )
+                event_type = "provider_profile.registered"
+            self._event(
+                connection,
+                project_id=None,
+                entity_type="provider_profile",
+                entity_id=profile_id,
+                event_type=event_type,
+                payload={
+                    "stable_key": request.stable_key,
+                    "content_hash": content_hash,
+                    "enabled": request.enabled,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM provider_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            return self._provider_profile_dict(row)
+
+    def list_provider_profiles(self) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM provider_profiles ORDER BY stable_key"
+            ).fetchall()
+            return [self._provider_profile_dict(row) for row in rows]
+
+    @staticmethod
+    def _tool_profile_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "stable_key": row["stable_key"],
+            "name": row["name"],
+            "integration_mode": row["integration_mode"],
+            "executable_or_endpoint": row["executable_or_endpoint"],
+            "supported_operations": json.loads(row["supported_operations_json"]),
+            "limits": json.loads(row["limits_json"]),
+            "fallback_order": json.loads(row["fallback_order_json"]),
+            "capability_status": row["capability_status"],
+            "version": row["version"],
+            "content_hash": row["content_hash"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def register_tool_profile(self, request: ToolProfileCreate) -> dict[str, Any]:
+        now = utc_now()
+        payload = request.model_dump(mode="json")
+        content_hash = sha256_json(payload)
+        with self.database.transaction() as connection:
+            existing = connection.execute(
+                "SELECT * FROM tool_profiles WHERE stable_key = ?",
+                (request.stable_key,),
+            ).fetchone()
+            if existing and existing["content_hash"] == content_hash:
+                return self._tool_profile_dict(existing)
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE tool_profiles SET
+                        name = ?, integration_mode = ?, executable_or_endpoint = ?,
+                        supported_operations_json = ?, limits_json = ?,
+                        fallback_order_json = ?, capability_status = ?,
+                        version = version + 1, content_hash = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        request.name,
+                        request.integration_mode.value,
+                        request.executable_or_endpoint,
+                        canonical_json(request.supported_operations),
+                        canonical_json(request.limits),
+                        canonical_json(request.fallback_order),
+                        request.capability_status.value,
+                        content_hash,
+                        now,
+                        existing["id"],
+                    ),
+                )
+                profile_id = existing["id"]
+                event_type = "tool_profile.updated"
+            else:
+                profile_id = new_id("tool")
+                connection.execute(
+                    """
+                    INSERT INTO tool_profiles(
+                        id, stable_key, name, integration_mode, executable_or_endpoint,
+                        supported_operations_json, limits_json, fallback_order_json,
+                        capability_status, content_hash, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        profile_id,
+                        request.stable_key,
+                        request.name,
+                        request.integration_mode.value,
+                        request.executable_or_endpoint,
+                        canonical_json(request.supported_operations),
+                        canonical_json(request.limits),
+                        canonical_json(request.fallback_order),
+                        request.capability_status.value,
+                        content_hash,
+                        now,
+                        now,
+                    ),
+                )
+                event_type = "tool_profile.registered"
+            self._event(
+                connection,
+                project_id=None,
+                entity_type="tool_profile",
+                entity_id=profile_id,
+                event_type=event_type,
+                payload={
+                    "stable_key": request.stable_key,
+                    "content_hash": content_hash,
+                    "capability_status": request.capability_status.value,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM tool_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            return self._tool_profile_dict(row)
+
+    def list_tool_profiles(self) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM tool_profiles ORDER BY stable_key"
+            ).fetchall()
+            return [self._tool_profile_dict(row) for row in rows]
+
+    def get_tool_profile(self, profile_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM tool_profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Tool profile not found: {profile_id}")
+            return self._tool_profile_dict(row)
+
+    @staticmethod
+    def _tool_operation_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "tool_profile_id": row["tool_profile_id"],
+            "provider_profile_id": row["provider_profile_id"],
+            "operation": row["operation"],
+            "idempotency_key": row["idempotency_key"],
+            "request_hash": row["request_hash"],
+            "status": row["status"],
+            "request": json.loads(row["request_json"]),
+            "output_declaration": json.loads(row["output_declaration_json"]),
+            "limits": json.loads(row["limits_json"]),
+            "required_approval_stage": row["required_approval_stage"],
+            "error": json.loads(row["error_json"]) if row["error_json"] else None,
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def reserve_tool_operation(
+        self, project_id: str, request: ToolOperationRequest, request_hash: str
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            tool = connection.execute(
+                "SELECT * FROM tool_profiles WHERE id = ?", (request.tool_profile_id,)
+            ).fetchone()
+            if not tool:
+                raise NotFoundError(
+                    f"Tool profile not found: {request.tool_profile_id}"
+                )
+            supported = set(json.loads(tool["supported_operations_json"]))
+            if request.operation not in supported:
+                raise IntegrityError(
+                    f"Tool profile {tool['stable_key']} does not support {request.operation}"
+                )
+            if request.provider_profile_id:
+                provider = connection.execute(
+                    "SELECT * FROM provider_profiles WHERE id = ?",
+                    (request.provider_profile_id,),
+                ).fetchone()
+                if not provider:
+                    raise NotFoundError(
+                        f"Provider profile not found: {request.provider_profile_id}"
+                    )
+                if not bool(provider["enabled"]):
+                    raise ConflictError(
+                        f"Provider profile is disabled: {provider['stable_key']}"
+                    )
+            existing = connection.execute(
+                """
+                SELECT * FROM tool_operations
+                WHERE project_id = ? AND tool_profile_id = ? AND idempotency_key = ?
+                """,
+                (project_id, request.tool_profile_id, request.idempotency_key),
+            ).fetchone()
+            if existing:
+                if existing["request_hash"] != request_hash:
+                    raise ConflictError(
+                        "Tool operation idempotency key was used for another request"
+                    )
+                return self._tool_operation_dict(existing)
+            operation_id = new_id("op")
+            connection.execute(
+                """
+                INSERT INTO tool_operations(
+                    id, project_id, tool_profile_id, provider_profile_id, operation,
+                    idempotency_key, request_hash, status, request_json,
+                    output_declaration_json, limits_json, required_approval_stage,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    operation_id,
+                    project_id,
+                    request.tool_profile_id,
+                    request.provider_profile_id,
+                    request.operation,
+                    request.idempotency_key,
+                    request_hash,
+                    ToolOperationStatus.AUTHORIZED.value,
+                    canonical_json(request.model_dump(mode="json")),
+                    canonical_json(request.output_declaration),
+                    canonical_json(request.limits),
+                    (
+                        request.required_approval_stage.value
+                        if request.required_approval_stage
+                        else None
+                    ),
+                    now,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="tool_operation",
+                entity_id=operation_id,
+                event_type="tool_operation.authorized",
+                payload={
+                    "request_hash": request_hash,
+                    "tool_profile_id": request.tool_profile_id,
+                    "provider_profile_id": request.provider_profile_id,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            return self._tool_operation_dict(row)
+
+    def get_tool_operation(self, operation_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Tool operation not found: {operation_id}")
+            return self._tool_operation_dict(row)
+
+    def mark_tool_operation_running(self, operation_id: str) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Tool operation not found: {operation_id}")
+            status = ToolOperationStatus(row["status"])
+            if status == ToolOperationStatus.RUNNING:
+                return self._tool_operation_dict(row)
+            if status != ToolOperationStatus.AUTHORIZED:
+                raise ConflictError(
+                    f"Tool operation cannot start from status {status.value}"
+                )
+            connection.execute(
+                """
+                UPDATE tool_operations
+                SET status = ?, started_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (ToolOperationStatus.RUNNING.value, now, now, operation_id),
+            )
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="tool_operation",
+                entity_id=operation_id,
+                event_type="tool_operation.started",
+                payload={"from": status.value, "to": ToolOperationStatus.RUNNING.value},
+            )
+            updated = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            return self._tool_operation_dict(updated)
+
+    def record_execution_receipt(
+        self, operation_id: str, request: ExecutionReceiptCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        if request.actual_cost and request.actual_cost.minor > 0:
+            raise IntegrityError(
+                "Paid execution must settle through a controller-budgeted provider job"
+            )
+        with self.database.transaction() as connection:
+            operation = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if not operation:
+                raise NotFoundError(f"Tool operation not found: {operation_id}")
+            existing = connection.execute(
+                "SELECT * FROM execution_receipts WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            cost = request.actual_cost
+            actual_minor = cost.minor if cost else 0
+            currency = cost.currency if cost else None
+            receipt_content = {
+                "status": request.status.value,
+                "elapsed_ms": request.elapsed_ms,
+                "output_artifact_ids": request.output_artifact_ids,
+                "response_hash": request.response_hash,
+                "actual_cost_minor": actual_minor,
+                "currency": currency,
+                "details": request.details,
+            }
+            if existing:
+                observed = {
+                    "status": existing["status"],
+                    "elapsed_ms": existing["elapsed_ms"],
+                    "output_artifact_ids": json.loads(
+                        existing["output_artifact_ids_json"]
+                    ),
+                    "response_hash": existing["response_hash"],
+                    "actual_cost_minor": existing["actual_cost_minor"],
+                    "currency": existing["currency"],
+                    "details": json.loads(existing["details_json"]),
+                }
+                if sha256_json(observed) != sha256_json(receipt_content):
+                    raise ConflictError(
+                        "Execution receipt already exists with different content"
+                    )
+                return {"id": existing["id"], "operation_id": operation_id, **observed}
+            operation_status = ToolOperationStatus(operation["status"])
+            if operation_status not in {
+                ToolOperationStatus.AUTHORIZED,
+                ToolOperationStatus.RUNNING,
+            }:
+                raise ConflictError(
+                    f"Operation in {operation_status.value} cannot receive a new receipt"
+                )
+            for artifact_id in request.output_artifact_ids:
+                artifact = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (artifact_id, operation["project_id"]),
+                ).fetchone()
+                if not artifact:
+                    raise IntegrityError(
+                        f"Receipt output artifact is not in the project: {artifact_id}"
+                    )
+            receipt_id = new_id("receipt")
+            connection.execute(
+                """
+                INSERT INTO execution_receipts(
+                    id, operation_id, status, elapsed_ms, output_artifact_ids_json,
+                    response_hash, actual_cost_minor, currency, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    receipt_id,
+                    operation_id,
+                    request.status.value,
+                    request.elapsed_ms,
+                    canonical_json(request.output_artifact_ids),
+                    request.response_hash,
+                    actual_minor,
+                    currency,
+                    canonical_json(request.details),
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE tool_operations
+                SET status = ?, finished_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (request.status.value, now, now, operation_id),
+            )
+            self._event(
+                connection,
+                project_id=operation["project_id"],
+                entity_type="execution_receipt",
+                entity_id=receipt_id,
+                event_type="execution_receipt.recorded",
+                payload={
+                    "operation_id": operation_id,
+                    "status": request.status.value,
+                    "output_count": len(request.output_artifact_ids),
+                    "actual_cost_minor": actual_minor,
+                },
+            )
+            return {"id": receipt_id, "operation_id": operation_id, **receipt_content}
+
+    def get_execution_receipt(self, operation_id: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM execution_receipts WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "operation_id": operation_id,
+                "status": row["status"],
+                "elapsed_ms": row["elapsed_ms"],
+                "output_artifact_ids": json.loads(row["output_artifact_ids_json"]),
+                "response_hash": row["response_hash"],
+                "actual_cost_minor": row["actual_cost_minor"],
+                "currency": row["currency"],
+                "details": json.loads(row["details_json"]),
+                "created_at": row["created_at"],
+            }
+
+    def list_tool_operations(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM tool_operations WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            ).fetchall()
+            return [self._tool_operation_dict(row) for row in rows]
+
+    def register_archive(
+        self, project_id: str, manifest_artifact_id: str, manifest_hash: str
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            if project["status"] != ProjectStatus.FINAL_APPROVED.value:
+                raise ConflictError("Only a final-approved project can be archived")
+            artifact = connection.execute(
+                """
+                SELECT id, content_hash FROM artifacts
+                WHERE id = ? AND project_id = ?
+                """,
+                (manifest_artifact_id, project_id),
+            ).fetchone()
+            if not artifact or artifact["content_hash"] != manifest_hash:
+                raise IntegrityError("Archive manifest artifact/hash mismatch")
+            existing = connection.execute(
+                "SELECT * FROM archives WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            if existing:
+                if (
+                    existing["manifest_artifact_id"] != manifest_artifact_id
+                    or existing["manifest_hash"] != manifest_hash
+                ):
+                    raise ConflictError(
+                        "Project already has a different archive manifest"
+                    )
+                return dict(existing)
+            archive_id = new_id("archive")
+            connection.execute(
+                """
+                INSERT INTO archives(
+                    id, project_id, manifest_artifact_id, manifest_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (archive_id, project_id, manifest_artifact_id, manifest_hash, now),
+            )
+            connection.execute(
+                """
+                UPDATE projects
+                SET status = ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (ProjectStatus.ARCHIVED.value, now, project_id),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="archive",
+                entity_id=archive_id,
+                event_type="project.archived",
+                payload={
+                    "manifest_artifact_id": manifest_artifact_id,
+                    "manifest_hash": manifest_hash,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM archives WHERE id = ?", (archive_id,)
+            ).fetchone()
+            return dict(row)
+
+    def get_archive(self, project_id: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM archives WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    @staticmethod
+    def _qa_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "artifact_id": row["artifact_id"],
+            "check_name": row["check_name"],
+            "status": row["status"],
+            "findings": json.loads(row["findings_json"]),
+            "evidence_hash": row["evidence_hash"],
+            "created_at": row["created_at"],
+        }
+
+    def record_qa_result(
+        self,
+        *,
+        project_id: str,
+        artifact_id: str,
+        check_name: str,
+        status: str,
+        findings: dict[str, Any],
+        evidence_hash: str,
+    ) -> dict[str, Any]:
+        if status not in {item.value for item in QAStatus}:
+            raise IntegrityError(f"Unsupported QA status: {status}")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            artifact = connection.execute(
+                "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                (artifact_id, project_id),
+            ).fetchone()
+            if not artifact:
+                raise NotFoundError(
+                    f"QA subject artifact not found in project: {artifact_id}"
+                )
+            existing = connection.execute(
+                """
+                SELECT * FROM qa_results
+                WHERE project_id = ? AND artifact_id = ? AND check_name = ?
+                  AND evidence_hash = ?
+                """,
+                (project_id, artifact_id, check_name, evidence_hash),
+            ).fetchone()
+            if existing:
+                return self._qa_dict(existing)
+            qa_id = new_id("qa")
+            connection.execute(
+                """
+                INSERT INTO qa_results(
+                    id, project_id, artifact_id, check_name, status,
+                    findings_json, evidence_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    qa_id,
+                    project_id,
+                    artifact_id,
+                    check_name,
+                    status,
+                    canonical_json(findings),
+                    evidence_hash,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="qa_result",
+                entity_id=qa_id,
+                event_type="qa.recorded",
+                payload={
+                    "artifact_id": artifact_id,
+                    "check_name": check_name,
+                    "status": status,
+                    "evidence_hash": evidence_hash,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM qa_results WHERE id = ?", (qa_id,)
+            ).fetchone()
+            return self._qa_dict(row)
+
+    def list_qa_results(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM qa_results WHERE project_id = ? ORDER BY created_at, check_name",
+                (project_id,),
+            ).fetchall()
+            return [self._qa_dict(row) for row in rows]
 
     @staticmethod
     def _ledger(

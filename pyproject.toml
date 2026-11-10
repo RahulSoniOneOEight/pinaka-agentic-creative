@@ -17,6 +17,30 @@ dev = [
   "pytest>=8.3,<9",
   "ruff>=0.14,<1",
 ]
+media = [
+  "imageio-ffmpeg>=0.5,<1",
+  "static-ffmpeg>=3,<4",
+  "pymediainfo>=7,<8",
+  "opencv-python-headless>=4.10,<5",
+]
+tts = [
+  "kokoro-onnx>=0.6,<1",
+]
+asr = [
+  "faster-whisper>=1.2,<2",
+]
+fonts = [
+  "fonttools>=4.50,<5",
+]
+render = [
+  "playwright>=1.65,<2",
+]
+motion = [
+  "manim>=0.19,<1",
+]
+gcp-image = [
+  "google-genai>=1.0,<2",
+]
 
 [project.scripts]
 pinaka = "pinaka.cli:main"

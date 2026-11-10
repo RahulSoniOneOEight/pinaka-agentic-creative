@@ -1,0 +1,24 @@
+{
+  "stable_key": "google-vertex-nano-banana",
+  "name": "Google Vertex Nano Banana (ADC trial-credit route)",
+  "integration_mode": "native",
+  "executable_or_endpoint": "vertex://spheric-host-505921-t5/global",
+  "supported_operations": ["image.generate"],
+  "limits": {
+    "max_cost_minor": 15,
+    "project": "spheric-host-505921-t5",
+    "location": "global",
+    "default_model": "gemini-3.1-flash-image",
+    "allowed_models": [
+      "gemini-3.1-flash-image",
+      "gemini-3.1-flash-image-preview",
+      "gemini-3.1-flash-lite-image",
+      "gemini-3-pro-image",
+      "gemini-nano-banana-2.1"
+    ],
+    "billing": "gcp_trial_credit",
+    "auth": "application_default_credentials"
+  },
+  "fallback_order": [],
+  "capability_status": "working"
+}

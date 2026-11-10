@@ -1,0 +1,155 @@
+{
+  "project": {
+    "name": "Pinaka Intelligence Virtual CFO — 10-second explainer",
+    "objective": "Create a rights-cleared 10-second vertical explainer that introduces Pinaka Intelligence's approved Virtual CFO service and invites SME founders to start a conversation.",
+    "mode": "product",
+    "audience": "SME founders and operators of growing businesses who need clearer forecasting, budgeting and financial decision support.",
+    "output_format": "1080x1920 (9:16)",
+    "language": "en",
+    "duration_seconds": "10",
+    "max_budget": {
+      "amount": "0.00",
+      "currency": "INR"
+    }
+  },
+  "client": {
+    "name": "Pinaka Intelligence",
+    "website": "https://pinakaintelligence.com/",
+    "brand_source_authorized": true,
+    "approved_service_claims": [
+      "Virtual CFO is an approved Pinaka Intelligence service for this campaign.",
+      "The service can support forecasts, budgets and financial insight.",
+      "Pinaka Intelligence provides AI-native decision intelligence and governed automation."
+    ],
+    "cta_label": "Start a Conversation",
+    "cta_url": "https://wa.me/919664369464?text=Hi%20Rahul%2C%0AGreat%20connecting%20with%20you.%0ALets%20keep%20in%20touch."
+  },
+  "approved_fact_source": "https://pinakaintelligence.com/",
+  "rights_policy": "docs/asset-sourcing-policy.md",
+  "llm_model": null,
+  "generation_endpoint": null,
+  "voice_provider": null,
+  "design": {
+    "penpot_file_url": "https://design.penpot.app/?screen=workspace&team-id=40e06342-8830-80d6-8008-96be7c6149d0&file-id=a5ac146a-5787-80fa-8008-b5477410eed7&page-id=a5ac146a-5787-80fa-8008-b5477410eed8",
+    "penpot_file_id": "a5ac146a-5787-80fa-8008-b5477410eed7",
+    "penpot_page_id": "a5ac146a-5787-80fa-8008-b5477410eed8",
+    "width_px": 1080,
+    "height_px": 1920,
+    "frame_rate": "30",
+    "font_families": [
+      "Inter"
+    ],
+    "brand_colors": {
+      "ink": "#0D1533",
+      "muted": "#66718C",
+      "line": "#E8EBF5",
+      "blue": "#395CFF",
+      "violet": "#735CF6",
+      "teal": "#18B7B7",
+      "orange": "#FF9F43",
+      "soft": "#FAFBFF",
+      "white": "#FFFFFF"
+    }
+  },
+  "script": {
+    "voiceover": "Growing business, unclear cash flow? A virtual CFO brings forecasts, budgets, and financial insight—so your next decision starts with clarity.",
+    "on_screen_text": [
+      "Growing business. Unclear cash flow?",
+      "Forecasts · Budgets · Financial insight",
+      "Decide with clarity",
+      "Start a Conversation",
+      "pinakaintelligence.com"
+    ],
+    "prohibited_claims": [
+      "Guaranteed profit",
+      "Guaranteed savings",
+      "Guaranteed growth",
+      "Guaranteed funding or investment outcomes"
+    ]
+  },
+  "provider_policy": {
+    "mode": "disabled",
+    "max_paid_spend": {
+      "amount": "0.00",
+      "currency": "INR"
+    },
+    "approved_profile_keys": []
+  },
+  "deliverable_plan": {
+    "deliverable": {
+      "stable_key": "virtual-cfo-vertical-10s",
+      "name": "Virtual CFO 10-second vertical explainer",
+      "objective": "Explain the Virtual CFO value proposition and invite a qualified founder to start a conversation.",
+      "kind": "video",
+      "output_format": "1080x1920 (9:16)",
+      "language": "en",
+      "duration_seconds": "10",
+      "acceptance_targets": {
+        "frame_rate": 30,
+        "exact_text_required": true,
+        "captions_required": true,
+        "editable_penpot_source_required": true
+      }
+    },
+    "segments": [
+      {
+        "stable_key": "problem-hook",
+        "ordinal": 1,
+        "purpose": "Establish the founder's cash-flow uncertainty.",
+        "duration_seconds": "2",
+        "narrative": "Growing business. Unclear cash flow?",
+        "constraints": {
+          "exact_text": "Growing business. Unclear cash flow?",
+          "no_generated_text": true
+        }
+      },
+      {
+        "stable_key": "service-value",
+        "ordinal": 2,
+        "purpose": "Explain the approved Virtual CFO capabilities.",
+        "duration_seconds": "4",
+        "narrative": "A virtual CFO brings forecasts, budgets, and financial insight.",
+        "constraints": {
+          "exact_text": "Forecasts · Budgets · Financial insight",
+          "no_guaranteed_outcomes": true
+        }
+      },
+      {
+        "stable_key": "decision-clarity",
+        "ordinal": 3,
+        "purpose": "Connect financial insight to clearer founder decisions.",
+        "duration_seconds": "2",
+        "narrative": "Your next decision starts with clarity.",
+        "constraints": {
+          "exact_text": "Decide with clarity",
+          "human_decision_remains_governed": true
+        }
+      },
+      {
+        "stable_key": "brand-cta",
+        "ordinal": 4,
+        "purpose": "Show Pinaka Intelligence branding and the approved call-to-action.",
+        "duration_seconds": "2",
+        "narrative": "Start a Conversation with Pinaka Intelligence.",
+        "constraints": {
+          "exact_text": "Start a Conversation",
+          "destination": "https://pinakaintelligence.com/",
+          "logo_must_remain_editable": true
+        }
+      }
+    ]
+  },
+  "acceptance_targets": {
+    "duration_seconds": 10,
+    "resolution": "1080x1920",
+    "aspect_ratio": "9:16",
+    "frame_rate": 30,
+    "voiceover_language": "English",
+    "text_remains_editable_in_penpot": true,
+    "wcag_target": "WCAG 2.2 AA for designed text and controls",
+    "maximum_paid_cost": "INR 0.00",
+    "final_approval_requires_exact_hash": true,
+    "publishing_authorized": false,
+    "creative_acceptance_owner": "Rahul Soni"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Phase 1 provider capability test",
+  "status": "authorized ceiling; one trial-credit sample, no cash spend",
+  "max_paid_spend": {
+    "amount": "1.00",
+    "currency": "USD"
+  },
+  "provider_mode": "disabled",
+  "approved_profile_keys": [],
+  "notes": [
+    "The person authorized a maximum of USD 1.00 for this test and implementation run.",
+    "No paid call was made: the only verified funded route is OpenMontage Studio's saved fal key, which is a separate budget/consent authority.",
+    "A paid test requires a controller-owned exact provider route, a reserved budget and an imported receipt.",
+    "The local capability work in this run cost USD 0.00.",
+    "One ADC Vertex Nano Banana 2.1 sample cost 4 cents of Google Cloud trial credit; cash paid spend remains USD 0.00."
+  ]
+}

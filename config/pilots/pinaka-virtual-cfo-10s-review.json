@@ -1,0 +1,121 @@
+{
+  "width_px": 1080,
+  "height_px": 1920,
+  "duration_seconds": "10",
+  "fps": "30",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "expected_scene_cuts": ["2", "6", "8"],
+  "scene_threshold": "0.10",
+  "black_min_duration": "0.10",
+  "freeze_min_duration": "1.0",
+  "silence_min_duration": "0.5",
+  "freeze_policy": "ignore",
+  "ocr": [
+    {
+      "time_seconds": "1",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1920,
+      "expected_text": "Growing business. Unclear cash flow?",
+      "min_similarity": 0.85
+    },
+    {
+      "time_seconds": "4",
+      "x": 80,
+      "y": 700,
+      "width": 500,
+      "height": 100,
+      "expected_text": "A VIRTUAL CFO BRINGS",
+      "min_similarity": 0.85
+    },
+    {
+      "time_seconds": "4",
+      "x": 80,
+      "y": 780,
+      "width": 900,
+      "height": 420,
+      "expected_text": "Forecasts Budgets Financial insight",
+      "min_similarity": 0.85
+    },
+    {
+      "time_seconds": "7",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1920,
+      "expected_text": "Decide with clarity Your next decision starts with clarity.",
+      "min_similarity": 0.85
+    },
+    {
+      "time_seconds": "9",
+      "x": 60,
+      "y": 880,
+      "width": 640,
+      "height": 180,
+      "expected_text": "Start a Conversation",
+      "min_similarity": 0.85
+    },
+    {
+      "time_seconds": "9",
+      "x": 0,
+      "y": 0,
+      "width": 1080,
+      "height": 1920,
+      "expected_text": "PINAKA INTELLIGENCE pinakaintelligence.com",
+      "min_similarity": 0.80
+    }
+  ],
+  "colors": [
+    {
+      "time_seconds": "1",
+      "x": 140,
+      "y": 752,
+      "expected_hex": "#395CFF",
+      "tolerance": 60
+    },
+    {
+      "time_seconds": "3",
+      "x": 10,
+      "y": 10,
+      "expected_hex": "#FAFBFF",
+      "tolerance": 10
+    },
+    {
+      "time_seconds": "3",
+      "x": 974,
+      "y": 835,
+      "expected_hex": "#18B7B7",
+      "tolerance": 30
+    },
+    {
+      "time_seconds": "3",
+      "x": 974,
+      "y": 995,
+      "expected_hex": "#735CF6",
+      "tolerance": 30
+    },
+    {
+      "time_seconds": "3",
+      "x": 974,
+      "y": 1155,
+      "expected_hex": "#FF9F43",
+      "tolerance": 30
+    },
+    {
+      "time_seconds": "9",
+      "x": 10,
+      "y": 10,
+      "expected_hex": "#0D1533",
+      "tolerance": 20
+    },
+    {
+      "time_seconds": "9",
+      "x": 300,
+      "y": 980,
+      "expected_hex": "#395CFF",
+      "tolerance": 45
+    }
+  ]
+}

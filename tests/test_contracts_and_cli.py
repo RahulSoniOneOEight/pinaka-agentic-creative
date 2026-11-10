@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -39,3 +40,43 @@ def test_cli_demo_smoke(tmp_path, capsys):
     assert captured.err == ""
     assert payload["message"] == "Demo completed without external or paid calls"
     assert payload["job"]["status"] == "succeeded"
+
+
+def test_cli_pilot_contract_new_plan_and_next(tmp_path, capsys):
+    contract = (
+        Path(__file__).parents[1] / "config" / "pilots" / "pinaka-virtual-cfo-10s.json"
+    )
+    home = tmp_path / "pilot-runtime"
+
+    assert (
+        main(["--home", str(home), "pilot-validate", "--contract", str(contract)]) == 0
+    )
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["status"] == "valid"
+    assert validated["provider_mode"] == "disabled"
+
+    assert main(["--home", str(home), "pilot-new", "--contract", str(contract)]) == 0
+    created = json.loads(capsys.readouterr().out)
+    project_id = created["project"]["id"]
+    assert created["next_action"]["action"] == "plan"
+
+    assert (
+        main(
+            [
+                "--home",
+                str(home),
+                "pilot-plan",
+                project_id,
+                "--contract",
+                str(contract),
+            ]
+        )
+        == 0
+    )
+    planned = json.loads(capsys.readouterr().out)
+    assert planned["project"]["status"] == "planned"
+    assert len(planned["segments"]) == 4
+
+    assert main(["--home", str(home), "next", project_id]) == 0
+    next_action = json.loads(capsys.readouterr().out)
+    assert next_action["action"] == "approve_brief"

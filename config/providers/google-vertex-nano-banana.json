@@ -1,0 +1,25 @@
+{
+  "stable_key": "google-vertex-nano-banana",
+  "provider": "google-vertex",
+  "endpoint": "vertex://spheric-host-505921-t5/global",
+  "model": "gemini-nano-banana-2.1",
+  "approved_roles": ["image"],
+  "credential_ref": "ADC",
+  "data_classification": "public",
+  "limits": {
+    "unit_cost": "0.08",
+    "currency": "USD",
+    "quality_tier": "standard",
+    "capabilities": ["image"],
+    "project": "spheric-host-505921-t5",
+    "location": "global",
+    "billing": "gcp_trial_credit"
+  },
+  "terms": {
+    "pricing_url": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+    "billing": "gcp_trial_credit",
+    "auth": "application_default_credentials"
+  },
+  "fallback_profiles": [],
+  "enabled": false
+}

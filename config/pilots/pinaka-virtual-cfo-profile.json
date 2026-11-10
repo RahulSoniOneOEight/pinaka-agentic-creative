@@ -1,0 +1,48 @@
+{
+  "schema_version": "creative-profile/v1",
+  "deliverable": {
+    "output_kind": "video",
+    "duration_seconds": "10",
+    "orientation": "vertical",
+    "aspect_ratio": "9:16",
+    "width_px": 1080,
+    "height_px": 1920,
+    "destination": "social",
+    "language": "en"
+  },
+  "product_role": "none",
+  "form": "explainer",
+  "structures": ["linear"],
+  "subjects": ["money"],
+  "tones": ["friendly"],
+  "primary_outcome": "inform",
+  "secondary_outcomes": ["build_trust"],
+  "truth_policy": "source_bound",
+  "usage": {
+    "use_class": "commercial",
+    "monetized": true,
+    "advertising": true,
+    "sponsored": false,
+    "modification_planned": true,
+    "attribution_can_be_delivered": true,
+    "cta_required": true,
+    "sponsor_disclosure_required": false,
+    "platforms": ["instagram_reels", "youtube_shorts", "linkedin"],
+    "territories": ["IN"]
+  },
+  "audience": {
+    "description": "SME founders and operators of growing businesses",
+    "age_band": "25-55",
+    "caption_required": true,
+    "narration_required": true,
+    "accessibility_notes": ["captions required", "high contrast type"]
+  },
+  "quality_tier": "standard",
+  "series_pattern": "one_off",
+  "product_complexity": "service_or_software",
+  "asset_readiness": "no_assets",
+  "source_material": "idea_only",
+  "content_depth": "multi_beat",
+  "realistic_synthetic": false,
+  "heavy_generation": false
+}

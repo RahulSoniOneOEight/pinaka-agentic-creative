@@ -1,0 +1,19 @@
+{
+  "stable_key": "comfyui-local-image",
+  "name": "ComfyUI local text-to-image (CPU, zero-cost)",
+  "integration_mode": "native",
+  "executable_or_endpoint": "http://127.0.0.1:8188",
+  "supported_operations": ["image.generate"],
+  "limits": {
+    "max_cost_minor": 0,
+    "allowed_checkpoints": ["v1-5-pruned-emaonly-fp16.safetensors"],
+    "default_width": 512,
+    "default_height": 512,
+    "max_width": 1024,
+    "max_height": 1024,
+    "max_steps": 50,
+    "device": "cpu"
+  },
+  "fallback_order": [],
+  "capability_status": "working"
+}

@@ -1,0 +1,22 @@
+{
+  "stable_key": "google-nano-banana-image",
+  "provider": "google",
+  "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+  "model": "gemini-2.5-flash-image",
+  "approved_roles": ["image"],
+  "credential_ref": "GEMINI_API_KEY",
+  "data_classification": "public",
+  "limits": {
+    "unit_cost": "0",
+    "currency": "USD",
+    "quality_tier": "standard",
+    "capabilities": ["image"],
+    "billing": "free_tier_only"
+  },
+  "terms": {
+    "billing": "free_tier_only",
+    "source": "https://ai.google.dev/gemini-api/docs/pricing"
+  },
+  "fallback_profiles": [],
+  "enabled": false
+}

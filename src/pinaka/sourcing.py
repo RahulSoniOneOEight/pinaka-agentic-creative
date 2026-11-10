@@ -118,6 +118,77 @@ PROVIDER_PROFILES: dict[AssetProvider, ProviderProfile] = {
             "Automated access, scraping, and unauthorized scripts are prohibited.",
         ),
     ),
+    AssetProvider.WIKIMEDIA: ProviderProfile(
+        provider=AssetProvider.WIKIMEDIA,
+        media_types=(
+            AssetMediaType.IMAGE,
+            AssetMediaType.AUDIO,
+            AssetMediaType.VIDEO,
+        ),
+        acquisition_methods=(
+            AssetAcquisitionMethod.OFFICIAL_API,
+            AssetAcquisitionMethod.MANUAL_IMPORT,
+        ),
+        integration_mode=ProviderIntegrationMode.API_SPIKE_ALLOWED,
+        official_urls=(
+            "https://commons.wikimedia.org/w/api.php",
+            "https://commons.wikimedia.org/wiki/Commons:Licensing",
+            "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+        ),
+        terms_reviewed_at=REVIEW_DATE,
+        notes=(
+            "Commons is a community-maintained repository; licence metadata can be wrong.",
+            "Every file must be verified at its description page before approval.",
+            "Non-free content, fair-use files, and unclear licences are not eligible.",
+            "Respect attribution, share-alike, and personality/trademark restrictions.",
+        ),
+    ),
+    AssetProvider.INTERNET_ARCHIVE: ProviderProfile(
+        provider=AssetProvider.INTERNET_ARCHIVE,
+        media_types=(
+            AssetMediaType.IMAGE,
+            AssetMediaType.AUDIO,
+            AssetMediaType.VIDEO,
+        ),
+        acquisition_methods=(
+            AssetAcquisitionMethod.OFFICIAL_API,
+            AssetAcquisitionMethod.MANUAL_IMPORT,
+        ),
+        integration_mode=ProviderIntegrationMode.API_SPIKE_ALLOWED,
+        official_urls=(
+            "https://archive.org/advancedsearch.php",
+            "https://archive.org/about/terms.php",
+            "https://archive.org/developers/",
+        ),
+        terms_reviewed_at=REVIEW_DATE,
+        notes=(
+            "Item-level licences vary; the search index is metadata, not a licence grant.",
+            "Verify the item page and each selected file before approval.",
+            "Do not use items whose uploader lacks rights or whose licence is unclear.",
+            "Respect takedown status, access restrictions, and third-party rights.",
+        ),
+    ),
+    AssetProvider.FREESOUND: ProviderProfile(
+        provider=AssetProvider.FREESOUND,
+        media_types=(AssetMediaType.AUDIO,),
+        acquisition_methods=(
+            AssetAcquisitionMethod.OFFICIAL_API,
+            AssetAcquisitionMethod.MANUAL_IMPORT,
+        ),
+        integration_mode=ProviderIntegrationMode.EXISTING_KEY_REQUIRED,
+        official_urls=(
+            "https://freesound.org/docs/api/",
+            "https://freesound.org/help/tos_web/",
+            "https://freesound.org/help/faq/",
+        ),
+        terms_reviewed_at=REVIEW_DATE,
+        notes=(
+            "An existing API key is required; new-key availability is not assumed.",
+            "Each sound carries its own Creative Commons licence and attribution terms.",
+            "Preview files are for audition only; the original requires a governed import.",
+            "Do not bulk-download, scrape, or redistribute the Freesound library.",
+        ),
+    ),
 }
 
 
@@ -212,6 +283,40 @@ def evaluate_asset_candidate(
             and compliance.openverse_disclosure_planned is not True
         ):
             review.append("Openverse non-endorsement disclosure is not recorded")
+
+    if source.provider == AssetProvider.WIKIMEDIA:
+        if not rights.origin_license_verified:
+            review.append(
+                "Wikimedia Commons licence metadata has not been verified at the "
+                "file description page"
+            )
+        if (
+            compliance.creator_credit_planned is not True
+            and rights.attribution_required
+        ):
+            review.append("Wikimedia Commons creator attribution is not planned")
+
+    if source.provider == AssetProvider.INTERNET_ARCHIVE:
+        if not rights.origin_license_verified:
+            review.append(
+                "Internet Archive item licence has not been verified at the item page"
+            )
+        if rights.commercial_use_allowed is None:
+            review.append(
+                "Internet Archive search does not establish commercial-use permission"
+            )
+
+    if source.provider == AssetProvider.FREESOUND:
+        if not rights.origin_license_verified:
+            review.append(
+                "Freesound licence metadata has not been verified at the sound page"
+            )
+        if rights.commercial_use_allowed is None:
+            review.append(
+                "Freesound search does not establish commercial-use permission"
+            )
+        if compliance.creator_credit_planned is not True:
+            review.append("Freesound creator attribution is not planned")
 
     if (
         source.provider == AssetProvider.UNSPLASH

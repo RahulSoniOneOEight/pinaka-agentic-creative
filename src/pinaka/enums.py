@@ -17,6 +17,7 @@ class ProjectStatus(ValueEnum):
     PLANNED = "planned"
     BRIEF_APPROVED = "brief_approved"
     FACTS_LOCKED = "facts_locked"
+    GROUNDING_LOCKED = "grounding_locked"
     SOURCING = "sourcing"
     ANIMATIC_READY = "animatic_ready"
     ANIMATIC_APPROVED = "animatic_approved"
@@ -58,6 +59,7 @@ class JobStatus(ValueEnum):
 
 
 class ArtifactKind(ValueEnum):
+    CONTRACT = "contract"
     ORIGINAL = "original"
     DERIVATIVE = "derivative"
     GENERATED = "generated"
@@ -66,6 +68,8 @@ class ArtifactKind(ValueEnum):
     PREVIEW = "preview"
     RENDER = "render"
     QA = "qa"
+    ARCHIVE = "archive"
+    EXTERNAL_SPEND = "external_spend"
 
 
 class ArtifactStatus(ValueEnum):
@@ -92,6 +96,9 @@ class AssetProvider(ValueEnum):
     UNSPLASH = "unsplash"
     MIXKIT = "mixkit"
     VIDEEZY = "videezy"
+    WIKIMEDIA = "wikimedia"
+    INTERNET_ARCHIVE = "internet_archive"
+    FREESOUND = "freesound"
 
 
 class AssetMediaType(ValueEnum):
@@ -122,3 +129,58 @@ class ProviderIntegrationMode(ValueEnum):
     API_SPIKE_ALLOWED = "api_spike_allowed"
     EXISTING_KEY_REQUIRED = "existing_key_required"
     MANUAL_ONLY = "manual_only"
+
+
+class DeliverableKind(ValueEnum):
+    VIDEO = "video"
+    STILL = "still"
+    CAROUSEL = "carousel"
+    AUDIO = "audio"
+    DOCUMENT = "document"
+
+
+class GroundingBundleKind(ValueEnum):
+    PRODUCT_FACTS = "product_facts"
+    CLAIMS = "claims"
+    TUTORIAL = "tutorial"
+    SOURCES = "sources"
+    STORY = "story"
+    SERIES = "series"
+    BRAND = "brand"
+    PLATFORM = "platform"
+
+
+class DataClassification(ValueEnum):
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    CONFIDENTIAL = "confidential"
+    RESTRICTED = "restricted"
+
+
+class ToolIntegrationMode(ValueEnum):
+    NATIVE = "native"
+    MCP = "mcp"
+    HEADLESS = "headless"
+    SPECIALIST_HANDOFF = "specialist_handoff"
+    MANAGED_SERVICE = "managed_service"
+
+
+class ToolOperationStatus(ValueEnum):
+    AUTHORIZED = "authorized"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+
+class ProviderExecutionMode(ValueEnum):
+    DISABLED = "disabled"
+    DETERMINISTIC_FAKE = "deterministic_fake"
+    CONTROLLED_LIVE = "controlled_live"
+
+
+class QAStatus(ValueEnum):
+    PASS = "pass"
+    WARN = "warn"
+    FAIL = "fail"

@@ -1,9 +1,10 @@
 # Governed asset-sourcing policy
 
 **Review date:** 9 November 2026  
-**Scope:** Pexels, Openverse, Unsplash, Mixkit, Videezy, and owned media  
-**Mode:** network search/download disabled until each connection gate passes; governed local import
-is implemented
+**Scope:** Pexels, Openverse, Wikimedia Commons, Internet Archive, Freesound, Unsplash, Mixkit, Videezy, and owned media
+**Mode:** metadata search is implemented for Openverse, Wikimedia Commons and Internet Archive; media
+download/import remains disabled until a selected item passes the rights gate and an explicit
+operator import
 
 This document is an engineering policy, not legal advice. Provider terms and individual-item
 licences can change. Every selected asset must retain its own evidence; this matrix is not a
@@ -27,6 +28,9 @@ substitute for reviewing the item and its current licence.
 |---|---|---|---|---|
 | **Pexels** | Photos, video | Official API or manual import | API only if an existing key is available; new key issuance is currently paused | Keep item page, creator, licence/terms evidence, Pexels link obligation, and third-party-rights review |
 | **Openverse** | Images, audio | Official API or manual import | First API connection candidate; no video API | Verify the licence on the originating site; reject incompatible CC terms; preserve exact attribution |
+| **Wikimedia Commons** | Images, audio, video | Official API or manual import | Metadata search implemented against the MediaWiki API; no downloads | Verify the licence, authorship and restrictions on the file description page; reject non-free/fair-use files; preserve attribution and share-alike |
+| **Internet Archive** | Images, audio, video | Official API or manual import | Metadata search implemented against `advancedsearch.php`; no downloads | Treat the search index as discovery only; verify the item page, selected file and uploader rights; reject unclear licences |
+| **Freesound** | Audio, SFX | Official API or manual import | Metadata search implemented; existing API key required; no downloads | Verify the sound page licence; preserve attribution and share-alike; previews are audition-only |
 | **Unsplash** | Photos | Official API or manual import | API connection only after its tracking/attribution behavior is implemented | API previews hotlink returned URLs; human selection triggers `download_location`; preserve photographer and Unsplash attribution with UTM links |
 | **Mixkit** | Video, music, SFX, templates | **Manual import only** | No documented public API was found; never scrape or script downloads | Capture the per-item licence. Stock Video Free can be commercial; Restricted cannot be used for commercial/business-social/YouTube or monetized output |
 | **Videezy** | Video, templates | **Manual import only** | No documented public API was found; terms prohibit automated/non-human access and scraping | Capture the exact Standard, Community, Pro, CC, or Editorial licence and required attribution |
@@ -53,6 +57,39 @@ substitute for reviewing the item and its current licence.
   checked and saved as per-item evidence before import.
 - Do not scrape or bypass rate limits. An API integration must say it was made using Openverse and
   is not endorsed or certified by Openverse.
+
+### Wikimedia Commons
+
+- Commons is a community-maintained repository. Its licence metadata can be wrong, incomplete, or
+  changed after upload; the file description page is the authoritative evidence.
+- CC BY, CC BY-SA, CC0 and public-domain marks can be commercially usable. Non-free, fair-use,
+  unclear, and "copyrighted" files are not eligible. Preserve attribution and share-alike.
+- Personality, trademark, museum, and access restrictions can apply even when the copyright licence
+  is free. Record the `Restrictions` field and route it to human review.
+- The adapter searches metadata only. It never downloads or imports a file; selection triggers a
+  separate evidence and import step.
+
+### Internet Archive
+
+- The advanced-search index returns item-level metadata, not a licence grant. Licences vary by item
+  and by file inside an item.
+- The adapter records `licenseurl` when present, but many items return only the Archive's general
+  terms page. That is not a licence and must be treated as unverified.
+- Verify the item page, the uploader's rights, the selected file, and any access restrictions before
+  import. Reject unclear licences and takedown-affected items.
+- The adapter searches metadata only. File selection requires a separate item-metadata check and an
+  explicit governed import.
+
+### Freesound
+
+- Freesound requires an existing API key. The adapter reads `FREESOUND_API_KEY` or
+  `D:\pinaka-credentials\secrets\freesound-api-key`; the key is now present and was validated with a
+  live metadata search. Never put the key in a URL, prompt, log or artifact.
+- Each sound carries its own Creative Commons licence. Commercial productions must reject `NC`;
+  modifications must reject `ND`; attribution and share-alike must be preserved.
+- Search results carry an audition preview, not the original file. The adapter records no direct
+  asset URL; the original requires a governed import after the licence is verified.
+- Do not bulk-download or redistribute the library. Rate limits and the API terms apply.
 
 ### Unsplash
 
@@ -211,5 +248,8 @@ Eligibility at import does not end compliance. Before final approval, QA must ve
 - Pexels: [API](https://www.pexels.com/api/), [API documentation](https://www.pexels.com/api/documentation/), [licence](https://www.pexels.com/license/), [terms](https://www.pexels.com/terms-of-service/)
 - Openverse: [API](https://api.openverse.org/v1/), [terms](https://docs.openverse.org/terms_of_service.html), [about/licence warning](https://openverse.org/about/)
 - Unsplash: [API documentation](https://unsplash.com/documentation), [API guidelines](https://help.unsplash.com/en/articles/2511245-unsplash-api-guidelines), [licence](https://unsplash.com/license)
+- Wikimedia Commons: [API](https://commons.wikimedia.org/w/api.php), [licensing](https://commons.wikimedia.org/wiki/Commons:Licensing), [terms](https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use)
+- Internet Archive: [advanced search](https://archive.org/advancedsearch.php), [terms](https://archive.org/about/terms.php), [developer docs](https://archive.org/developers/)
+- Freesound: [API docs](https://freesound.org/docs/api/), [terms](https://freesound.org/help/tos_web/), [FAQ](https://freesound.org/help/faq/)
 - Mixkit: [licences](https://mixkit.co/license/), [terms](https://mixkit.co/terms/)
 - Videezy: [terms](https://www.videezy.com/terms), [licence types](https://support.videezy.com/en_us/categories/license-types-Bk1PKxowF), [commercial-use guidance](https://support.videezy.com/en_us/how-can-i-use-a-videezy-resource-for-commercial-purposes-HkAwYgowt)

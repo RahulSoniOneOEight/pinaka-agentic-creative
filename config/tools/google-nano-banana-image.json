@@ -1,0 +1,15 @@
+{
+  "stable_key": "google-nano-banana-image",
+  "name": "Google Nano Banana image (zero-cost route)",
+  "integration_mode": "native",
+  "executable_or_endpoint": "https://generativelanguage.googleapis.com/v1beta",
+  "supported_operations": ["image.generate"],
+  "limits": {
+    "max_cost_minor": 0,
+    "billing_mode": "free_tier",
+    "model": "gemini-2.5-flash-image",
+    "default_aspect_ratio": "9:16"
+  },
+  "fallback_order": [],
+  "capability_status": "unavailable"
+}

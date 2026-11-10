@@ -1,0 +1,29 @@
+{
+  "design": {
+    "experiment_id": "vcfo-hook-ab-001",
+    "hypothesis": "A direct cash-flow question in the first two seconds raises completion rate.",
+    "primary_metric": "completion_rate",
+    "variants": ["control", "cash_flow_hook"],
+    "control": "control",
+    "minimum_sample_per_variant": 500,
+    "alpha": 0.05
+  },
+  "metrics": [
+    {
+      "variant": "control",
+      "impressions": 2000,
+      "views": 1000,
+      "completions": 180,
+      "clicks": 40,
+      "conversions": 4
+    },
+    {
+      "variant": "cash_flow_hook",
+      "impressions": 2000,
+      "views": 1000,
+      "completions": 240,
+      "clicks": 62,
+      "conversions": 7
+    }
+  ]
+}

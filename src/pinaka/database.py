@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .errors import ConfigurationError
-from .schema import SCHEMA_V1, SCHEMA_VERSION
+from .schema import MIGRATIONS, SCHEMA_VERSION
 from .utils import utc_now
 
 
@@ -38,13 +38,25 @@ class Database:
                 raise ConfigurationError(
                     f"Database schema {current} is newer than supported schema {SCHEMA_VERSION}"
                 )
-            if current < 1:
-                connection.executescript(SCHEMA_V1)
-                connection.execute(
-                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
-                    (1, utc_now()),
+            for version in range(current + 1, SCHEMA_VERSION + 1):
+                migration = MIGRATIONS.get(version)
+                if migration is None:
+                    raise ConfigurationError(f"Missing database migration {version}")
+                applied_at = utc_now().replace("'", "''")
+                script = (
+                    "BEGIN IMMEDIATE;\n"
+                    f"{migration}\n"
+                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) "
+                    f"VALUES ({version}, '{applied_at}');\n"
+                    f"PRAGMA user_version = {version};\n"
+                    "COMMIT;"
                 )
-                connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                try:
+                    connection.executescript(script)
+                except sqlite3.DatabaseError:
+                    if connection.in_transaction:
+                        connection.rollback()
+                    raise
 
     @contextmanager
     def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:
