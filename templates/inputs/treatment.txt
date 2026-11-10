@@ -1,0 +1,16 @@
+TREATMENT INPUT
+
+Slot:
+Asset:
+By:
+
+Fits the slot?     yes / no
+Framing ok?        yes / no
+Resolution ok?     yes / no
+Text in image?     yes / no
+Person or brand?   yes / no
+Rights cleared?    yes / no
+Looks clean?       yes / no
+Tone matches?      yes / no
+
+Notes:

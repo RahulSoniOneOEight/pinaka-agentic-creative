@@ -1,0 +1,17 @@
+OWNED MEDIA INPUT
+
+Asset name:
+Type:            image / video / audio
+Owner:
+Authorisation link:
+Date:
+
+Commercial use:   yes / no
+Editing allowed:  yes / no
+AI retouch:       yes / no
+People cleared:   yes / no
+Territory:
+Term:
+Credit needed:    yes / no
+
+Notes:

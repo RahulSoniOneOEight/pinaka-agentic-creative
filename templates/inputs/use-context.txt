@@ -1,0 +1,10 @@
+USE CONTEXT INPUT
+
+Project:
+Use class:        commercial / editorial / noncommercial
+Monetized:        yes / no
+Advertising:      yes / no
+Editing planned:  yes / no
+Attribution possible: yes / no
+
+Notes:

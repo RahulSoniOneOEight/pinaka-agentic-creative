@@ -1,0 +1,10 @@
+AI EDIT INPUT
+
+Slot:
+Asset:
+Model:
+Prompt:
+Mask:              yes / no
+Budget per call:
+
+Notes:

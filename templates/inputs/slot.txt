@@ -1,0 +1,14 @@
+SLOT ASSIGNMENT INPUT
+
+Slot:
+By:
+
+Primary asset:
+Backup asset:
+A/B pair:          yes / no
+A asset:
+B asset:
+Promote backup:    yes / no
+Reason:
+
+Notes:

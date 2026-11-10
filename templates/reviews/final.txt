@@ -1,0 +1,18 @@
+FINAL REVIEW
+
+Project:
+By:
+Date:
+File:
+Hash:
+
+QA passed?        yes / no
+OCR matches?      yes / no
+ASR matches?      yes / no
+Captions pass?    yes / no
+Slots complete?   yes / no
+Rights confirmed? yes / no
+
+Notes:
+
+Approve exact hash:  yes / no
