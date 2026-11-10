@@ -1,0 +1,109 @@
+{
+  "project": {
+    "name": "Pinaka Kids Rhyme - 10-second counting rhyme",
+    "objective": "Create a rights-cleared 10-second counting rhyme for five-year-olds that teaches one idea and can be published as made-for-kids.",
+    "mode": "entertainment",
+    "audience": "Children aged four to six, watching with a parent or older sibling.",
+    "output_format": "1080x1920 (9:16)",
+    "language": "en",
+    "duration_seconds": "10",
+    "max_budget": {
+      "amount": "0.00",
+      "currency": "INR"
+    }
+  },
+  "approved_fact_source": "docs/end-to-end-flow-with-owners.md",
+  "rights_policy": "docs/asset-sourcing-policy.md",
+  "llm_model": null,
+  "generation_endpoint": null,
+  "voice_provider": null,
+  "provider_policy": {
+    "mode": "disabled",
+    "max_paid_spend": {
+      "amount": "0.00",
+      "currency": "INR"
+    },
+    "approved_profile_keys": []
+  },
+  "deliverable_plan": {
+    "deliverable": {
+      "stable_key": "kids-rhyme-vertical-10s",
+      "name": "Kids counting rhyme, 10 seconds",
+      "objective": "Teach counting one to three through one sung couplet and a repeated tag.",
+      "kind": "video",
+      "output_format": "1080x1920 (9:16)",
+      "language": "en",
+      "duration_seconds": "10",
+      "acceptance_targets": {
+        "frame_rate": 30,
+        "exact_text_required": false,
+        "captions_required": true,
+        "editable_source_required": true,
+        "made_for_kids": true,
+        "on_screen_text": "none",
+        "external_links": "none",
+        "flash_rate_max_per_second": 3,
+        "loudness_target_lufs": -16,
+        "true_peak_max_dbtp": -2,
+        "music": "instrumental bed only",
+        "voice": "synthetic; no real child voice"
+      }
+    },
+    "segments": [
+      {
+        "stable_key": "intro-count",
+        "ordinal": 1,
+        "purpose": "State the counting idea once, slowly.",
+        "duration_seconds": "4",
+        "narrative": "One, two, three little ducks,",
+        "constraints": {
+          "speech": "One, two, three little ducks,",
+          "no_generated_text": true,
+          "no_on_screen_text": true
+        }
+      },
+      {
+        "stable_key": "swim",
+        "ordinal": 2,
+        "purpose": "Complete the couplet with one gentle action.",
+        "duration_seconds": "4",
+        "narrative": "swimming in a row.",
+        "constraints": {
+          "speech": "swimming in a row.",
+          "no_generated_text": true,
+          "no_on_screen_text": true
+        }
+      },
+      {
+        "stable_key": "tag",
+        "ordinal": 3,
+        "purpose": "Give a joinable tag that a child can repeat.",
+        "duration_seconds": "2",
+        "narrative": "Quack, quack, quack!",
+        "constraints": {
+          "speech": "Quack, quack, quack!",
+          "no_generated_text": true,
+          "no_on_screen_text": true
+        }
+      }
+    ]
+  },
+  "acceptance_targets": {
+    "duration_seconds": 10,
+    "resolution": "1080x1920",
+    "aspect_ratio": "9:16",
+    "frame_rate": 30,
+    "voiceover_language": "English",
+    "words_total": 12,
+    "reading_dependency": "none",
+    "made_for_kids": true,
+    "flash_rate_max_per_second": 3,
+    "loudness_target_lufs": -16,
+    "true_peak_max_dbtp": -2,
+    "music_rights": "owned, or CC0/CC BY recording",
+    "captions_required": true,
+    "final_approval_requires_exact_hash": true,
+    "publishing_authorized": false,
+    "creative_acceptance_owner": "Rahul Soni"
+  }
+}

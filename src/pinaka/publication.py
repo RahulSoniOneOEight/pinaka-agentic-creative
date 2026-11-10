@@ -36,6 +36,9 @@ class ChannelProfile(StrictModel):
     requires_commercial_disclosure: bool
     max_title_chars: int = 100
     max_description_chars: int = 2200
+    made_for_kids: bool = False
+    comments_enabled: bool = True
+    personalized_ads: bool = True
 
 
 CHANNELS: dict[str, ChannelProfile] = {
@@ -97,6 +100,22 @@ CHANNELS: dict[str, ChannelProfile] = {
         max_height_px=1920,
         requires_captions=True,
         requires_commercial_disclosure=True,
+    ),
+    "youtube_kids": ChannelProfile(
+        key="youtube_kids",
+        platform="YouTube Kids",
+        aspect_ratios=("9:16", "16:9"),
+        min_duration_seconds=1,
+        max_duration_seconds=600,
+        max_width_px=1920,
+        max_height_px=1920,
+        requires_captions=True,
+        requires_commercial_disclosure=True,
+        max_title_chars=100,
+        max_description_chars=5000,
+        made_for_kids=True,
+        comments_enabled=False,
+        personalized_ads=False,
     ),
 }
 

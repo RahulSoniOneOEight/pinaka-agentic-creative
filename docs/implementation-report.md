@@ -102,7 +102,7 @@ Added the deterministic planning and control plane for both phases:
 - A/B experiment design, Wilson intervals and two-proportion z-test;
 - runtime backup, integrity verification, restore drill and non-destructive retention plan.
 
-Verification: **313 tests pass**, Ruff/format/compile clean, archived-pilot preflight **12/12 PASS**,
+Verification: **326 tests pass**, Ruff/format/compile clean, archived-pilot preflight **12/12 PASS**,
 restore drill **329 items** with SQLite integrity `ok`, and publication preflight correctly blocked
 for missing authorization and captions.
 
