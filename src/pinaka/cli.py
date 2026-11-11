@@ -937,6 +937,15 @@ def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).author_composition(
+        args.project_id,
+        width=args.width,
+        height=args.height,
+        title=args.title,
+    )
+
+
 def cmd_vertex_check(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).verify_vertex_models(
         project=args.project, location=args.location
@@ -2333,6 +2342,16 @@ def build_parser() -> argparse.ArgumentParser:
     vertex_check_parser.add_argument("--project")
     vertex_check_parser.add_argument("--location")
     vertex_check_parser.set_defaults(handler=cmd_vertex_check)
+
+    composition_parser = subparsers.add_parser(
+        "author-composition",
+        help="Author an editable HyperFrames composition from the shot plan",
+    )
+    composition_parser.add_argument("project_id")
+    composition_parser.add_argument("--width", type=int, default=1080)
+    composition_parser.add_argument("--height", type=int, default=1920)
+    composition_parser.add_argument("--title")
+    composition_parser.set_defaults(handler=cmd_author_composition)
 
     vertex_profile_parser = subparsers.add_parser(
         "register-vertex-profile",

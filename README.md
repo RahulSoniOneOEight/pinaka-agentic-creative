@@ -145,7 +145,7 @@ The governed-Studio foundation adds:
 Gemini runs through **Vertex AI with Application Default Credentials** (no API keys): image
 generation, narration and transcription, with a free model-availability check. fal work is priced per
 model through `pinaka.pricing`, so a creative can be planned against a small dollar target before any
-paid call.
+paid call. Editable HyperFrames compositions are authored from the shot plan with no provider at all.
 
 The archived 10-second pilot remains the verified production baseline.
 
@@ -161,7 +161,8 @@ residual risks. See `docs/openmontage-controller-integration.md` for the Studio 
 `docs/studio-gateway.md` for the live production gateway, `docs/creative-budget-planning.md` for
 budget plans and variance approval, `docs/raw-text-planner.md` for text intake,
 `docs/studio-session-readiness.md` for the per-session Studio check, and `docs/vertex-adc.md` for
-Gemini on Vertex with ADC and the fal cost model. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
+Gemini on Vertex with ADC and the fal cost model. See `docs/hyperframes-composition.md` for the
+editable composition format. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
 production tools and managed services, their roles, licensing boundaries, and current integration
 status. See `docs/two-phase-production-implementation-plan.md` for the two-phase delivery roadmap.
 See `docs/nano-banana.md` for the exact ADC/API-key image routes, models, pricing, commands and

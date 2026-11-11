@@ -31,6 +31,7 @@ from .assets import (
 )
 from .budget import TieredBudget, evaluate_spend, spend_summary
 from .capabilities import probe_all
+from .composition import build_composition, validate_composition
 from .correction import FFmpegCompositeAdapter, FFmpegCorrectionAdapter
 from .database import Database
 from .enums import (
@@ -2876,6 +2877,75 @@ class CreativeController:
             tool_version="deterministic-fake/v1",
         )
         return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
+
+    def author_composition(
+        self,
+        project_id: str,
+        *,
+        width: int = 1080,
+        height: int = 1920,
+        title: str | None = None,
+    ) -> dict[str, Any]:
+        """Author one editable HyperFrames composition from the governed plan."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot author a composition for a {project.status.value} project"
+            )
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            raise IntegrityError("A current workable brief is required")
+        shots = self.repository.list_shots(project_id)
+        if not shots:
+            raise IntegrityError("A composition requires at least one planned shot")
+        elements = self.repository.list_creative_elements(project_id)
+        html = build_composition(
+            title=title or project.name,
+            width=width,
+            height=height,
+            shots=shots,
+            elements=elements,
+        )
+        report = validate_composition(html)
+        if not report["valid"]:
+            raise IntegrityError(
+                "Composition failed validation: " + ", ".join(report["problems"])
+            )
+        content = html.encode("utf-8")
+        digest = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"scenes/composition-{digest[:12]}/index.html",
+            content=content,
+            operation={
+                "type": "hyperframes_composition",
+                "schema": report.get("schema", "hyperframes"),
+                "shots": report["shot_count"],
+                "width": width,
+                "height": height,
+            },
+            dependencies=(
+                DependencyRef(entity_type="workable_brief", entity_id=brief["id"]),
+                *(
+                    DependencyRef(entity_type="shot", entity_id=shot["id"])
+                    for shot in shots
+                ),
+                *(
+                    DependencyRef(
+                        entity_type="creative_element", entity_id=element["id"]
+                    )
+                    for element in elements
+                ),
+            ),
+        )
+        return {
+            "artifact": artifact,
+            "validation": report,
+            "content_hash": digest,
+            "shot_count": report["shot_count"],
+        }
 
     def studio_production(self, operation_id: str) -> dict[str, Any] | None:
         production = self.repository.get_studio_production(operation_id)
