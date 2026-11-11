@@ -22,6 +22,7 @@ from .models import (
     ApprovalRequest,
     ArtifactCreate,
     CapabilityResult,
+    CreativeElementCreate,
     DeliverableCreate,
     DeliverableRecord,
     DependencyRef,
@@ -36,9 +37,11 @@ from .models import (
     ProviderModelProfileCreate,
     SegmentCreate,
     ShotCreate,
+    ShotElementBindingCreate,
     SlotCreate,
     ToolOperationRequest,
     ToolProfileCreate,
+    WorkableBriefCreate,
 )
 from .utils import canonical_json, new_id, sha256_json, slugify, utc_now
 
@@ -247,6 +250,168 @@ class Repository:
                 "content_hash": row["content_hash"],
                 "created_at": row["created_at"],
             }
+
+    @staticmethod
+    def _brief_decision_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "field": row["field"],
+            "value": json.loads(row["value_json"]),
+            "state": row["state"],
+            "basis": row["basis"],
+            "risk": row["risk"],
+            "reversible": bool(row["reversible"]),
+            "alternatives_considered": json.loads(row["alternatives_json"]),
+            "affected_shot_keys": json.loads(row["affected_shot_keys_json"]),
+            "review_gate": row["review_gate"],
+            "blocked_work": json.loads(row["blocked_work_json"]),
+            "created_at": row["created_at"],
+        }
+
+    def _workable_brief_dict(
+        self, connection: sqlite3.Connection, row: sqlite3.Row
+    ) -> dict[str, Any]:
+        decisions = connection.execute(
+            "SELECT * FROM brief_decisions WHERE brief_id = ? ORDER BY field",
+            (row["id"],),
+        ).fetchall()
+        package = json.loads(row["package_json"])
+        package["decisions"] = [self._brief_decision_dict(item) for item in decisions]
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "version": row["version"],
+            "source_artifact_id": row["source_artifact_id"],
+            "source_content_hash": row["source_content_hash"],
+            "content_hash": row["content_hash"],
+            "is_current": bool(row["is_current"]),
+            "created_at": row["created_at"],
+            "package": package,
+        }
+
+    def record_workable_brief(
+        self, project_id: str, request: WorkableBriefCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        payload = request.model_dump(mode="json")
+        content_hash = sha256_json(payload)
+        brief_id = new_id("brief")
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            source = connection.execute(
+                "SELECT * FROM artifacts WHERE id = ? AND project_id = ?",
+                (request.source_artifact_id, project_id),
+            ).fetchone()
+            if not source:
+                raise NotFoundError(
+                    f"Brief source artifact not found in project: {request.source_artifact_id}"
+                )
+            if source["content_hash"] != request.source_content_hash:
+                raise IntegrityError("Brief source artifact hash does not match")
+            if source["kind"] != "original" or not bool(source["immutable"]):
+                raise IntegrityError(
+                    "A workable brief must derive from a protected original artifact"
+                )
+            current = connection.execute(
+                "SELECT * FROM workable_briefs WHERE project_id = ? AND is_current = 1",
+                (project_id,),
+            ).fetchone()
+            if current and current["content_hash"] == content_hash:
+                return self._workable_brief_dict(connection, current)
+            version = int(current["version"]) + 1 if current else 1
+            if current:
+                connection.execute(
+                    "UPDATE workable_briefs SET is_current = 0 WHERE id = ?",
+                    (current["id"],),
+                )
+            connection.execute(
+                """
+                INSERT INTO workable_briefs(
+                    id, project_id, version, source_artifact_id, source_content_hash,
+                    package_json, content_hash, is_current, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    brief_id,
+                    project_id,
+                    version,
+                    request.source_artifact_id,
+                    request.source_content_hash,
+                    canonical_json(payload),
+                    content_hash,
+                    now,
+                ),
+            )
+            for decision in request.decisions:
+                connection.execute(
+                    """
+                    INSERT INTO brief_decisions(
+                        id, brief_id, project_id, field, value_json, state, basis,
+                        risk, reversible, alternatives_json, affected_shot_keys_json,
+                        review_gate, blocked_work_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id("decision"),
+                        brief_id,
+                        project_id,
+                        decision.field,
+                        canonical_json(decision.value),
+                        decision.state.value,
+                        decision.basis,
+                        decision.risk.value,
+                        int(decision.reversible),
+                        canonical_json(decision.alternatives_considered),
+                        canonical_json(decision.affected_shot_keys),
+                        decision.review_gate.value if decision.review_gate else None,
+                        canonical_json(decision.blocked_work),
+                        now,
+                    ),
+                )
+            invalidated = {"approvals": [], "artifacts": []}
+            if current:
+                invalidated = self._invalidate_dependency_graph(
+                    connection,
+                    project_id=project_id,
+                    entity_type="workable_brief",
+                    entity_id=current["id"],
+                    reason="Current workable brief changed",
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="workable_brief",
+                entity_id=brief_id,
+                event_type="workable_brief.recorded",
+                payload={
+                    "version": version,
+                    "content_hash": content_hash,
+                    "source_artifact_id": request.source_artifact_id,
+                    "invalidated": invalidated,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM workable_briefs WHERE id = ?", (brief_id,)
+            ).fetchone()
+            return self._workable_brief_dict(connection, row)
+
+    def latest_workable_brief(self, project_id: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM workable_briefs WHERE project_id = ? AND is_current = 1",
+                (project_id,),
+            ).fetchone()
+            return self._workable_brief_dict(connection, row) if row else None
+
+    def get_workable_brief(self, brief_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM workable_briefs WHERE id = ?", (brief_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Workable brief not found: {brief_id}")
+            return self._workable_brief_dict(connection, row)
 
     @staticmethod
     def _deliverable_from_row(row: sqlite3.Row) -> DeliverableRecord:
@@ -991,6 +1156,24 @@ class Repository:
             ).fetchone()
             return self._shot_dict(row)
 
+    def get_shot(self, shot_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM shots WHERE id = ?", (shot_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Shot not found: {shot_id}")
+            return self._shot_dict(row)
+
+    def list_shots(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM shots WHERE project_id = ? ORDER BY ordinal",
+                (project_id,),
+            ).fetchall()
+            return [self._shot_dict(row) for row in rows]
+
     def add_slot(self, project_id: str, request: SlotCreate) -> dict[str, Any]:
         slot_id = new_id("slot")
         now = utc_now()
@@ -1044,6 +1227,292 @@ class Repository:
                 **request.model_dump(mode="json"),
                 "version": 1,
             }
+
+    @staticmethod
+    def _creative_element_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "stable_key": row["stable_key"],
+            "version": row["version"],
+            "kind": row["kind"],
+            "name": row["name"],
+            "specification": json.loads(row["specification_json"]),
+            "continuity": json.loads(row["continuity_json"]),
+            "source_artifact_id": row["source_artifact_id"],
+            "content_hash": row["content_hash"],
+            "is_current": bool(row["is_current"]),
+            "created_at": row["created_at"],
+        }
+
+    def record_creative_element(
+        self, project_id: str, request: CreativeElementCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        payload = request.model_dump(mode="json")
+        content_hash = sha256_json(payload)
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            if request.source_artifact_id:
+                source = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (request.source_artifact_id, project_id),
+                ).fetchone()
+                if not source:
+                    raise NotFoundError(
+                        "Element source artifact not found in project: "
+                        f"{request.source_artifact_id}"
+                    )
+            current = connection.execute(
+                """
+                SELECT * FROM creative_elements
+                WHERE project_id = ? AND stable_key = ? AND is_current = 1
+                """,
+                (project_id, request.stable_key),
+            ).fetchone()
+            if current and current["content_hash"] == content_hash:
+                return self._creative_element_dict(current)
+            version = int(current["version"]) + 1 if current else 1
+            if current:
+                connection.execute(
+                    "UPDATE creative_elements SET is_current = 0 WHERE id = ?",
+                    (current["id"],),
+                )
+            element_id = new_id("element")
+            connection.execute(
+                """
+                INSERT INTO creative_elements(
+                    id, project_id, stable_key, version, kind, name,
+                    specification_json, continuity_json, source_artifact_id,
+                    content_hash, is_current, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (
+                    element_id,
+                    project_id,
+                    request.stable_key,
+                    version,
+                    request.kind.value,
+                    request.name,
+                    canonical_json(request.specification),
+                    canonical_json(request.continuity),
+                    request.source_artifact_id,
+                    content_hash,
+                    now,
+                ),
+            )
+            rebound_count = 0
+            if current:
+                bindings = connection.execute(
+                    """
+                    SELECT * FROM shot_element_bindings
+                    WHERE element_id = ? AND is_current = 1
+                    """,
+                    (current["id"],),
+                ).fetchall()
+                for binding in bindings:
+                    connection.execute(
+                        """
+                        UPDATE shot_element_bindings
+                        SET is_current = 0, updated_at = ? WHERE id = ?
+                        """,
+                        (now, binding["id"]),
+                    )
+                    rebound_id = new_id("binding")
+                    connection.execute(
+                        """
+                        INSERT INTO shot_element_bindings(
+                            id, project_id, shot_id, element_id, role, notes,
+                            is_current, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        """,
+                        (
+                            rebound_id,
+                            project_id,
+                            binding["shot_id"],
+                            element_id,
+                            binding["role"],
+                            binding["notes"],
+                            now,
+                            now,
+                        ),
+                    )
+                    rebound_count += 1
+                    self._event(
+                        connection,
+                        project_id=project_id,
+                        entity_type="shot_element_binding",
+                        entity_id=rebound_id,
+                        event_type="shot_element.rebound",
+                        payload={
+                            "from_binding_id": binding["id"],
+                            "from_element_id": current["id"],
+                            "to_element_id": element_id,
+                        },
+                    )
+            invalidated = {"approvals": [], "artifacts": []}
+            if current:
+                invalidated = self._invalidate_dependency_graph(
+                    connection,
+                    project_id=project_id,
+                    entity_type="creative_element",
+                    entity_id=current["id"],
+                    reason=f"Creative element {request.stable_key} changed",
+                )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="creative_element",
+                entity_id=element_id,
+                event_type="creative_element.recorded",
+                payload={
+                    "stable_key": request.stable_key,
+                    "version": version,
+                    "content_hash": content_hash,
+                    "rebound_shot_count": rebound_count,
+                    "invalidated": invalidated,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM creative_elements WHERE id = ?", (element_id,)
+            ).fetchone()
+            return self._creative_element_dict(row)
+
+    def get_creative_element(self, element_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM creative_elements WHERE id = ?", (element_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Creative element not found: {element_id}")
+            return self._creative_element_dict(row)
+
+    def list_creative_elements(
+        self, project_id: str, *, current_only: bool = True
+    ) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            query = "SELECT * FROM creative_elements WHERE project_id = ?"
+            if current_only:
+                query += " AND is_current = 1"
+            query += " ORDER BY stable_key, version"
+            rows = connection.execute(query, (project_id,)).fetchall()
+            return [self._creative_element_dict(row) for row in rows]
+
+    @staticmethod
+    def _shot_element_binding_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "shot_id": row["shot_id"],
+            "element_id": row["element_id"],
+            "role": row["role"],
+            "notes": row["notes"],
+            "is_current": bool(row["is_current"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def bind_element_to_shot(
+        self, project_id: str, request: ShotElementBindingCreate
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            shot = connection.execute(
+                "SELECT id FROM shots WHERE id = ? AND project_id = ?",
+                (request.shot_id, project_id),
+            ).fetchone()
+            if not shot:
+                raise NotFoundError(f"Shot not found in project: {request.shot_id}")
+            element = connection.execute(
+                """
+                SELECT id FROM creative_elements
+                WHERE id = ? AND project_id = ? AND is_current = 1
+                """,
+                (request.element_id, project_id),
+            ).fetchone()
+            if not element:
+                raise NotFoundError(
+                    f"Current creative element not found in project: {request.element_id}"
+                )
+            current = connection.execute(
+                """
+                SELECT * FROM shot_element_bindings
+                WHERE project_id = ? AND shot_id = ? AND role = ? AND is_current = 1
+                """,
+                (project_id, request.shot_id, request.role),
+            ).fetchone()
+            if (
+                current
+                and current["element_id"] == request.element_id
+                and current["notes"] == request.notes
+            ):
+                return self._shot_element_binding_dict(current)
+            if current:
+                connection.execute(
+                    "UPDATE shot_element_bindings SET is_current = 0, updated_at = ? WHERE id = ?",
+                    (now, current["id"]),
+                )
+            binding_id = new_id("binding")
+            connection.execute(
+                """
+                INSERT INTO shot_element_bindings(
+                    id, project_id, shot_id, element_id, role, notes,
+                    is_current, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (
+                    binding_id,
+                    project_id,
+                    request.shot_id,
+                    request.element_id,
+                    request.role,
+                    request.notes,
+                    now,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="shot_element_binding",
+                entity_id=binding_id,
+                event_type="shot_element.bound",
+                payload={
+                    **request.model_dump(mode="json"),
+                    "replaced_binding_id": current["id"] if current else None,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM shot_element_bindings WHERE id = ?", (binding_id,)
+            ).fetchone()
+            return self._shot_element_binding_dict(row)
+
+    def list_shot_element_bindings(
+        self, project_id: str, *, shot_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            if shot_id:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM shot_element_bindings
+                    WHERE project_id = ? AND shot_id = ? AND is_current = 1
+                    ORDER BY role
+                    """,
+                    (project_id, shot_id),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM shot_element_bindings
+                    WHERE project_id = ? AND is_current = 1
+                    ORDER BY shot_id, role
+                    """,
+                    (project_id,),
+                ).fetchall()
+            return [self._shot_element_binding_dict(row) for row in rows]
 
     def active_approval(self, project_id: str, stage: str) -> dict[str, Any] | None:
         with self.database.read() as connection:
@@ -2261,6 +2730,19 @@ class Repository:
                 raise NotFoundError(f"Tool operation not found: {operation_id}")
             return self._tool_operation_dict(row)
 
+    def tool_operation_by_idempotency(
+        self, project_id: str, tool_profile_id: str, idempotency_key: str
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM tool_operations
+                WHERE project_id = ? AND tool_profile_id = ? AND idempotency_key = ?
+                """,
+                (project_id, tool_profile_id, idempotency_key),
+            ).fetchone()
+            return self._tool_operation_dict(row) if row else None
+
     def mark_tool_operation_running(self, operation_id: str) -> dict[str, Any]:
         now = utc_now()
         with self.database.transaction() as connection:
@@ -2311,6 +2793,14 @@ class Repository:
             ).fetchone()
             if not operation:
                 raise NotFoundError(f"Tool operation not found: {operation_id}")
+            specialist = connection.execute(
+                "SELECT id FROM specialist_handoffs WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if specialist:
+                raise IntegrityError(
+                    "Specialist operations must settle through their governed handoff"
+                )
             existing = connection.execute(
                 "SELECT * FROM execution_receipts WHERE operation_id = ?",
                 (operation_id,),
@@ -2434,6 +2924,389 @@ class Repository:
                 (project_id,),
             ).fetchall()
             return [self._tool_operation_dict(row) for row in rows]
+
+    @staticmethod
+    def _specialist_handoff_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "tool_profile_id": row["tool_profile_id"],
+            "operation_id": row["operation_id"],
+            "work_packet_artifact_id": row["work_packet_artifact_id"],
+            "work_packet_hash": row["work_packet_hash"],
+            "input_artifact_ids": json.loads(row["input_artifact_ids_json"]),
+            "output_artifact_ids": json.loads(row["output_artifact_ids_json"]),
+            "result_packet_hash": row["result_packet_hash"],
+            "tool_version": row["tool_version"],
+            "operator_note": row["operator_note"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def record_specialist_handoff(
+        self,
+        project_id: str,
+        *,
+        tool_profile_id: str,
+        operation_id: str,
+        work_packet_artifact_id: str,
+        work_packet_hash: str,
+        input_artifact_ids: tuple[str, ...],
+        status: str = "authorized",
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            operation = connection.execute(
+                """
+                SELECT id FROM tool_operations
+                WHERE id = ? AND project_id = ? AND tool_profile_id = ?
+                """,
+                (operation_id, project_id, tool_profile_id),
+            ).fetchone()
+            if not operation:
+                raise IntegrityError(
+                    "Specialist handoff operation does not match project/tool"
+                )
+            packet = connection.execute(
+                """
+                SELECT id, content_hash FROM artifacts
+                WHERE id = ? AND project_id = ?
+                """,
+                (work_packet_artifact_id, project_id),
+            ).fetchone()
+            if not packet or packet["content_hash"] != work_packet_hash:
+                raise IntegrityError("Specialist work packet artifact/hash mismatch")
+            for artifact_id in input_artifact_ids:
+                artifact = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (artifact_id, project_id),
+                ).fetchone()
+                if not artifact:
+                    raise IntegrityError(
+                        f"Specialist input artifact is not in the project: {artifact_id}"
+                    )
+            existing = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if existing:
+                observed = self._specialist_handoff_dict(existing)
+                expected = {
+                    "work_packet_artifact_id": work_packet_artifact_id,
+                    "work_packet_hash": work_packet_hash,
+                    "input_artifact_ids": list(input_artifact_ids),
+                }
+                if any(observed[key] != value for key, value in expected.items()):
+                    raise ConflictError(
+                        "Specialist handoff operation already has another work packet"
+                    )
+                return observed
+            handoff_id = new_id("handoff")
+            connection.execute(
+                """
+                INSERT INTO specialist_handoffs(
+                    id, project_id, tool_profile_id, work_packet_hash,
+                    input_artifact_ids_json, output_artifact_ids_json, status,
+                    created_at, updated_at, operation_id, work_packet_artifact_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    handoff_id,
+                    project_id,
+                    tool_profile_id,
+                    work_packet_hash,
+                    canonical_json(input_artifact_ids),
+                    canonical_json(()),
+                    status,
+                    now,
+                    now,
+                    operation_id,
+                    work_packet_artifact_id,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="specialist_handoff",
+                entity_id=handoff_id,
+                event_type="specialist_handoff.authorized",
+                payload={
+                    "operation_id": operation_id,
+                    "work_packet_hash": work_packet_hash,
+                    "input_artifact_ids": input_artifact_ids,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE id = ?", (handoff_id,)
+            ).fetchone()
+            return self._specialist_handoff_dict(row)
+
+    def specialist_handoff_for_operation(self, operation_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if not row:
+                raise NotFoundError(
+                    f"Specialist handoff not found for operation: {operation_id}"
+                )
+            return self._specialist_handoff_dict(row)
+
+    def complete_specialist_handoff(
+        self,
+        operation_id: str,
+        *,
+        status: str,
+        output_artifact_ids: tuple[str, ...],
+        result_packet_hash: str,
+        tool_version: str | None = None,
+        operator_note: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if not row:
+                raise NotFoundError(
+                    f"Specialist handoff not found for operation: {operation_id}"
+                )
+            for artifact_id in output_artifact_ids:
+                artifact = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (artifact_id, row["project_id"]),
+                ).fetchone()
+                if not artifact:
+                    raise IntegrityError(
+                        f"Specialist output artifact is not in the project: {artifact_id}"
+                    )
+            if row["result_packet_hash"]:
+                observed = self._specialist_handoff_dict(row)
+                if (
+                    observed["result_packet_hash"] != result_packet_hash
+                    or observed["output_artifact_ids"] != list(output_artifact_ids)
+                    or observed["status"] != status
+                ):
+                    raise ConflictError(
+                        "Specialist handoff already completed with another result"
+                    )
+                return observed
+            connection.execute(
+                """
+                UPDATE specialist_handoffs
+                SET output_artifact_ids_json = ?, result_packet_hash = ?,
+                    tool_version = ?, operator_note = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    canonical_json(output_artifact_ids),
+                    result_packet_hash,
+                    tool_version,
+                    operator_note,
+                    status,
+                    now,
+                    row["id"],
+                ),
+            )
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="specialist_handoff",
+                entity_id=row["id"],
+                event_type="specialist_handoff.completed",
+                payload={
+                    "operation_id": operation_id,
+                    "status": status,
+                    "result_packet_hash": result_packet_hash,
+                    "output_artifact_ids": output_artifact_ids,
+                },
+            )
+            updated = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE id = ?", (row["id"],)
+            ).fetchone()
+            return self._specialist_handoff_dict(updated)
+
+    def record_specialist_result(
+        self,
+        operation_id: str,
+        request: ExecutionReceiptCreate,
+        *,
+        result_packet_hash: str,
+        tool_version: str | None = None,
+        operator_note: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Atomically settle a specialist operation and its linked handoff."""
+
+        if request.actual_cost and request.actual_cost.minor > 0:
+            raise IntegrityError(
+                "Paid execution must settle through a controller-budgeted provider job"
+            )
+        now = utc_now()
+        with self.database.transaction() as connection:
+            operation = connection.execute(
+                "SELECT * FROM tool_operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if not operation:
+                raise NotFoundError(f"Tool operation not found: {operation_id}")
+            handoff = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if not handoff:
+                raise NotFoundError(
+                    f"Specialist handoff not found for operation: {operation_id}"
+                )
+            cost = request.actual_cost
+            actual_minor = cost.minor if cost else 0
+            currency = cost.currency if cost else None
+            receipt_content = {
+                "status": request.status.value,
+                "elapsed_ms": request.elapsed_ms,
+                "output_artifact_ids": request.output_artifact_ids,
+                "response_hash": request.response_hash,
+                "actual_cost_minor": actual_minor,
+                "currency": currency,
+                "details": request.details,
+            }
+            existing = connection.execute(
+                "SELECT * FROM execution_receipts WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if existing:
+                observed = {
+                    "status": existing["status"],
+                    "elapsed_ms": existing["elapsed_ms"],
+                    "output_artifact_ids": json.loads(
+                        existing["output_artifact_ids_json"]
+                    ),
+                    "response_hash": existing["response_hash"],
+                    "actual_cost_minor": existing["actual_cost_minor"],
+                    "currency": existing["currency"],
+                    "details": json.loads(existing["details_json"]),
+                }
+                handoff_dict = self._specialist_handoff_dict(handoff)
+                if (
+                    sha256_json(observed) != sha256_json(receipt_content)
+                    or handoff_dict["result_packet_hash"] != result_packet_hash
+                    or handoff_dict["output_artifact_ids"]
+                    != list(request.output_artifact_ids)
+                ):
+                    raise ConflictError(
+                        "Specialist operation already has a different terminal result"
+                    )
+                receipt = {
+                    "id": existing["id"],
+                    "operation_id": operation_id,
+                    **observed,
+                    "created_at": existing["created_at"],
+                }
+                return receipt, handoff_dict
+            operation_status = ToolOperationStatus(operation["status"])
+            if operation_status not in {
+                ToolOperationStatus.AUTHORIZED,
+                ToolOperationStatus.RUNNING,
+            }:
+                raise ConflictError(
+                    f"Operation in {operation_status.value} cannot receive a new result"
+                )
+            for artifact_id in request.output_artifact_ids:
+                artifact = connection.execute(
+                    "SELECT id FROM artifacts WHERE id = ? AND project_id = ?",
+                    (artifact_id, operation["project_id"]),
+                ).fetchone()
+                if not artifact:
+                    raise IntegrityError(
+                        f"Specialist output artifact is not in the project: {artifact_id}"
+                    )
+            if handoff["result_packet_hash"]:
+                raise ConflictError(
+                    "Specialist handoff has a result without a matching receipt"
+                )
+            receipt_id = new_id("receipt")
+            connection.execute(
+                """
+                INSERT INTO execution_receipts(
+                    id, operation_id, status, elapsed_ms, output_artifact_ids_json,
+                    response_hash, actual_cost_minor, currency, details_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    receipt_id,
+                    operation_id,
+                    request.status.value,
+                    request.elapsed_ms,
+                    canonical_json(request.output_artifact_ids),
+                    request.response_hash,
+                    actual_minor,
+                    currency,
+                    canonical_json(request.details),
+                    now,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE tool_operations
+                SET status = ?, finished_at = ?, updated_at = ? WHERE id = ?
+                """,
+                (request.status.value, now, now, operation_id),
+            )
+            connection.execute(
+                """
+                UPDATE specialist_handoffs
+                SET output_artifact_ids_json = ?, result_packet_hash = ?,
+                    tool_version = ?, operator_note = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    canonical_json(request.output_artifact_ids),
+                    result_packet_hash,
+                    tool_version,
+                    operator_note,
+                    request.status.value,
+                    now,
+                    handoff["id"],
+                ),
+            )
+            self._event(
+                connection,
+                project_id=operation["project_id"],
+                entity_type="execution_receipt",
+                entity_id=receipt_id,
+                event_type="execution_receipt.recorded",
+                payload={
+                    "operation_id": operation_id,
+                    "status": request.status.value,
+                    "output_count": len(request.output_artifact_ids),
+                    "actual_cost_minor": actual_minor,
+                },
+            )
+            self._event(
+                connection,
+                project_id=operation["project_id"],
+                entity_type="specialist_handoff",
+                entity_id=handoff["id"],
+                event_type="specialist_handoff.completed",
+                payload={
+                    "operation_id": operation_id,
+                    "status": request.status.value,
+                    "result_packet_hash": result_packet_hash,
+                    "output_artifact_ids": request.output_artifact_ids,
+                },
+            )
+            updated_handoff = connection.execute(
+                "SELECT * FROM specialist_handoffs WHERE id = ?", (handoff["id"],)
+            ).fetchone()
+            receipt = {
+                "id": receipt_id,
+                "operation_id": operation_id,
+                **receipt_content,
+                "created_at": now,
+            }
+            return receipt, self._specialist_handoff_dict(updated_handoff)
 
     def register_archive(
         self, project_id: str, manifest_artifact_id: str, manifest_hash: str

@@ -192,6 +192,50 @@ class ToolOperationStatus(ValueEnum):
     OUTCOME_UNKNOWN = "outcome_unknown"
 
 
+class DecisionProvenance(ValueEnum):
+    SUPPLIED = "supplied"
+    DERIVED = "derived"
+    DEFAULTED = "defaulted"
+    ASSUMED = "assumed"
+    APPROVED = "approved"
+    BLOCKED = "blocked"
+
+
+class DecisionRisk(ValueEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class CreativeElementKind(ValueEnum):
+    CHARACTER = "character"
+    PROP = "prop"
+    LOCATION = "location"
+    WORLD = "world"
+    PALETTE = "palette"
+    VOICE = "voice"
+    STYLE = "style"
+    OTHER = "other"
+
+
+class StudioAutonomy(ValueEnum):
+    STANDARD = "standard"
+    AUTOPILOT = "autopilot"
+
+
+class StudioWorkPhase(ValueEnum):
+    BRIEF = "brief"
+    SCRIPT = "script"
+    SCENE_PLAN = "scene_plan"
+    STORYBOARD = "storyboard"
+    COMPOSITION = "composition"
+    NARRATION = "narration"
+    MUSIC = "music"
+    CAPTIONS = "captions"
+    RENDER = "render"
+    REVIEW = "review"
+
+
 class ProviderExecutionMode(ValueEnum):
     DISABLED = "disabled"
     DETERMINISTIC_FAKE = "deterministic_fake"

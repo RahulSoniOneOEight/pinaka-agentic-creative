@@ -63,6 +63,7 @@ from .models import (
     AssetEligibilityResult,
     AssetRightsRecord,
     AssetUseContext,
+    CreativeElementCreate,
     DeliverableCreate,
     DeliverableRecord,
     DependencyRef,
@@ -78,14 +79,19 @@ from .models import (
     ProviderModelProfileCreate,
     SegmentCreate,
     ShotCreate,
+    ShotElementBindingCreate,
     SlotCreate,
+    StudioResultPacketImport,
+    StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
+    WorkableBriefCreate,
 )
 from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
 from .repository import Repository
 from .review_policy import CampaignRisk, ReviewPolicy, decide_review
 from .sourcing import clear_resolved_uncertainty, evaluate_asset_candidate
+from .studio import StudioAdapter
 from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json
 
 ALLOWED_TRANSITIONS: dict[ProjectStatus, set[ProjectStatus]] = {
@@ -267,6 +273,52 @@ class CreativeController:
             return None
         text = self.read_artifact_text(plan["artifact_id"])
         return {**plan, "markdown": text}
+
+    def record_workable_brief(
+        self, project_id: str, request: WorkableBriefCreate
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot change the workable brief for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "workable_brief"
+        )
+        return self.repository.record_workable_brief(project_id, request)
+
+    def workable_brief(self, project_id: str) -> dict[str, Any] | None:
+        return self.repository.latest_workable_brief(project_id)
+
+    def record_creative_element(
+        self, project_id: str, request: CreativeElementCreate
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot change creative elements for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "creative_element"
+        )
+        return self.repository.record_creative_element(project_id, request)
+
+    def list_creative_elements(
+        self, project_id: str, *, current_only: bool = True
+    ) -> list[dict[str, Any]]:
+        return self.repository.list_creative_elements(
+            project_id, current_only=current_only
+        )
+
+    def bind_element_to_shot(
+        self, project_id: str, request: ShotElementBindingCreate
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot bind creative elements for a {project.status.value} project"
+            )
+        return self.repository.bind_element_to_shot(project_id, request)
 
     def create_project_from_contract(
         self, contract: PilotContract
@@ -1631,6 +1683,494 @@ class CreativeController:
     ) -> dict[str, Any]:
         self._reject_sensitive_payload(request.model_dump(mode="json"), "receipt")
         return self.repository.record_execution_receipt(operation_id, request)
+
+    @staticmethod
+    def _blocked_studio_decisions(
+        brief: dict[str, Any],
+        request: StudioWorkPacketRequest,
+        shots: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        phases = {phase.value for phase in request.scope.phases}
+        selected_shots = set(request.scope.shot_ids)
+        selected_shots.update(
+            shot["stable_key"] for shot in shots if shot["id"] in selected_shots
+        )
+        blocked: list[dict[str, Any]] = []
+        for decision in brief["package"]["decisions"]:
+            if decision["state"] != "blocked":
+                continue
+            affected = set(decision["blocked_work"])
+            affects_phase = bool(affected & phases) or bool(affected & {"all", "*"})
+            affects_prefixed_phase = any(
+                item.split(":", 1)[0] in phases for item in affected
+            )
+            affects_shot = bool(affected & selected_shots)
+            if affects_phase or affects_prefixed_phase or affects_shot:
+                blocked.append(decision)
+        return blocked
+
+    def prepare_studio_work_packet(
+        self, project_id: str, request: StudioWorkPacketRequest
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot authorize Studio work for a {project.status.value} project"
+            )
+        profile = self.repository.get_tool_profile(request.tool_profile_id)
+        if profile["integration_mode"] not in {
+            ToolIntegrationMode.MCP.value,
+            ToolIntegrationMode.SPECIALIST_HANDOFF.value,
+        }:
+            raise IntegrityError(
+                "Studio work requires an MCP or specialist-handoff tool profile"
+            )
+        operation_name = "openmontage.execute_work_packet"
+        if operation_name not in profile["supported_operations"]:
+            raise IntegrityError(
+                f"Tool profile {profile['stable_key']} does not support {operation_name}"
+            )
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            raise IntegrityError("A current workable brief is required for Studio work")
+        all_shots = self.repository.list_shots(project_id)
+        shots_by_id = {shot["id"]: shot for shot in all_shots}
+        if request.scope.shot_ids:
+            missing_shots = set(request.scope.shot_ids) - set(shots_by_id)
+            if missing_shots:
+                raise NotFoundError(
+                    f"Studio scope contains unknown shots: {sorted(missing_shots)}"
+                )
+            shots = [shots_by_id[shot_id] for shot_id in request.scope.shot_ids]
+        else:
+            shots = all_shots
+        blockers = self._blocked_studio_decisions(brief, request, shots)
+        if blockers:
+            fields = ", ".join(decision["field"] for decision in blockers)
+            raise ApprovalRequiredError(
+                f"Studio scope is blocked by non-delegable decisions: {fields}"
+            )
+        phases = {phase.value for phase in request.scope.phases}
+        scene_plan = self.repository.latest_scene_plan(project_id)
+        if (
+            phases & {"storyboard", "composition", "render", "review"}
+            and not scene_plan
+        ):
+            raise IntegrityError(
+                "Storyboard, composition, render and review work require a scene plan"
+            )
+        all_elements = self.repository.list_creative_elements(project_id)
+        elements_by_id = {element["id"]: element for element in all_elements}
+        if request.scope.element_ids:
+            missing_elements = set(request.scope.element_ids) - set(elements_by_id)
+            if missing_elements:
+                raise NotFoundError(
+                    "Studio scope contains unknown or superseded elements: "
+                    f"{sorted(missing_elements)}"
+                )
+            elements = [
+                elements_by_id[element_id] for element_id in request.scope.element_ids
+            ]
+        else:
+            elements = all_elements
+        selected_shot_ids = {shot["id"] for shot in shots}
+        selected_element_ids = {element["id"] for element in elements}
+        bindings = [
+            binding
+            for binding in self.repository.list_shot_element_bindings(project_id)
+            if binding["shot_id"] in selected_shot_ids
+            and binding["element_id"] in selected_element_ids
+        ]
+        slots = [
+            slot
+            for slot in self.repository.list_slots(project_id)
+            if slot["shot_id"] in selected_shot_ids
+        ]
+        selected_slot_ids = {slot["id"] for slot in slots}
+        slot_assets = [
+            assignment
+            for assignment in self.repository.list_slot_assets(project_id)
+            if assignment["slot_id"] in selected_slot_ids
+        ]
+        treatment_decisions = [
+            decision
+            for decision in self.repository.list_treatment_decisions(project_id)
+            if decision["slot_id"] in selected_slot_ids
+        ]
+        audio_beds = self.repository.list_audio_beds(project_id)
+        input_ids = [brief["source_artifact_id"], *request.input_artifact_ids]
+        if scene_plan:
+            input_ids.append(scene_plan["artifact_id"])
+        input_ids.extend(
+            element["source_artifact_id"]
+            for element in elements
+            if element["source_artifact_id"]
+        )
+        input_ids.extend(assignment["artifact_id"] for assignment in slot_assets)
+        input_ids.extend(bed["artifact_id"] for bed in audio_beds)
+        input_ids = list(dict.fromkeys(input_ids))
+        input_artifacts = []
+        for artifact_id in input_ids:
+            artifact = self.repository.get_artifact(artifact_id)
+            if artifact["project_id"] != project_id:
+                raise IntegrityError(
+                    f"Studio input artifact is not in the project: {artifact_id}"
+                )
+            input_artifacts.append(
+                {
+                    "id": artifact["id"],
+                    "kind": artifact["kind"],
+                    "relative_path": artifact["relative_path"],
+                    "content_hash": artifact["content_hash"],
+                }
+            )
+        packet = {
+            "schema": "pinaka.openmontage.work-packet/v1",
+            "project": {
+                "id": project.id,
+                "name": project.name,
+                "objective": project.objective,
+                "audience": project.audience,
+                "output_format": project.output_format,
+                "language": project.language,
+                "duration_seconds": str(project.duration_seconds),
+            },
+            "brief": brief,
+            "scene_plan": scene_plan,
+            "shots": shots,
+            "elements": elements,
+            "shot_element_bindings": bindings,
+            "slots": slots,
+            "slot_asset_assignments": slot_assets,
+            "treatment_decisions": treatment_decisions,
+            "audio_beds": audio_beds,
+            "scope": request.scope.model_dump(mode="json"),
+            "instructions": request.instructions,
+            "input_artifacts": input_artifacts,
+            "output_declaration": request.output_declaration,
+            "controller_authority": {
+                "system_of_record": "pinaka.CreativeController",
+                "studio_review_is_advisory": True,
+                "exact_hash_approval_required": True,
+                "publication_authorized": False,
+                "paid_generation_authorized": False,
+                "max_credits": 0,
+                "max_usd": "0",
+            },
+        }
+        packet_bytes = canonical_json(packet).encode("utf-8")
+        packet_hash = sha256_bytes(packet_bytes)
+        existing_operation = self.repository.tool_operation_by_idempotency(
+            project_id, request.tool_profile_id, request.idempotency_key
+        )
+        if existing_operation:
+            existing_hash = existing_operation["request"]["parameters"].get(
+                "work_packet_hash"
+            )
+            if existing_hash != packet_hash:
+                raise ConflictError(
+                    "Studio idempotency key was used for a different work packet"
+                )
+            packet_artifact = self.repository.get_artifact(
+                existing_operation["request"]["parameters"]["work_packet_artifact_id"]
+            )
+            try:
+                handoff = self.repository.specialist_handoff_for_operation(
+                    existing_operation["id"]
+                )
+            except NotFoundError:
+                handoff = self.repository.record_specialist_handoff(
+                    project_id,
+                    tool_profile_id=request.tool_profile_id,
+                    operation_id=existing_operation["id"],
+                    work_packet_artifact_id=packet_artifact["id"],
+                    work_packet_hash=packet_hash,
+                    input_artifact_ids=tuple(input_ids),
+                )
+            return {
+                "handoff": handoff,
+                "operation": existing_operation,
+                "work_packet_artifact": packet_artifact,
+                "work_packet_hash": packet_hash,
+                "packet": packet,
+            }
+        dependencies = [
+            DependencyRef(entity_type="workable_brief", entity_id=brief["id"]),
+            *(
+                [DependencyRef(entity_type="scene_plan", entity_id=scene_plan["id"])]
+                if scene_plan
+                else []
+            ),
+            *(
+                DependencyRef(entity_type="shot", entity_id=shot["id"])
+                for shot in shots
+            ),
+            *(
+                DependencyRef(entity_type="creative_element", entity_id=element["id"])
+                for element in elements
+            ),
+            *(
+                DependencyRef(entity_type="artifact", entity_id=artifact_id)
+                for artifact_id in input_ids
+            ),
+        ]
+        packet_artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.CONTRACT,
+            relative_path=(
+                f"artifacts/openmontage/work-packets/{packet_hash[:12]}.json"
+            ),
+            content=packet_bytes,
+            operation={
+                "type": "openmontage_work_packet",
+                "schema": packet["schema"],
+            },
+            dependencies=tuple(dependencies),
+        )
+        operation_request = ToolOperationRequest(
+            tool_profile_id=request.tool_profile_id,
+            operation=operation_name,
+            idempotency_key=request.idempotency_key,
+            parameters={
+                "work_packet_artifact_id": packet_artifact["id"],
+                "work_packet_hash": packet_hash,
+                "scope": request.scope.model_dump(mode="json"),
+            },
+            input_artifact_ids=(packet_artifact["id"], *input_ids),
+            output_declaration=request.output_declaration,
+            limits={
+                "paid": False,
+                "max_cost_minor": 0,
+                "max_credits": 0,
+                "allow_publication": False,
+            },
+            required_approval_stage=request.required_approval_stage,
+        )
+        operation = self.reserve_tool_operation(project_id, operation_request)
+        handoff = self.repository.record_specialist_handoff(
+            project_id,
+            tool_profile_id=request.tool_profile_id,
+            operation_id=operation["id"],
+            work_packet_artifact_id=packet_artifact["id"],
+            work_packet_hash=packet_hash,
+            input_artifact_ids=tuple(input_ids),
+        )
+        return {
+            "handoff": handoff,
+            "operation": operation,
+            "work_packet_artifact": packet_artifact,
+            "work_packet_hash": packet_hash,
+            "packet": packet,
+        }
+
+    def studio_work_packet(self, operation_id: str) -> dict[str, Any]:
+        handoff = self.repository.specialist_handoff_for_operation(operation_id)
+        packet = json.loads(self.read_artifact_text(handoff["work_packet_artifact_id"]))
+        return {"handoff": handoff, "packet": packet}
+
+    def import_studio_result(self, request: StudioResultPacketImport) -> dict[str, Any]:
+        self._reject_sensitive_payload(request.model_dump(mode="json"), "studio_result")
+        operation = self.repository.get_tool_operation(request.operation_id)
+        if operation["operation"] != "openmontage.execute_work_packet":
+            raise IntegrityError("Operation is not an OpenMontage work packet")
+        handoff = self.repository.specialist_handoff_for_operation(request.operation_id)
+        result_hash = sha256_json(request.model_dump(mode="json"))
+        existing_receipt = self.repository.get_execution_receipt(request.operation_id)
+        if existing_receipt:
+            if handoff["result_packet_hash"] != result_hash:
+                raise ConflictError(
+                    "Studio operation already has a different terminal result"
+                )
+            return {
+                "handoff": handoff,
+                "receipt": existing_receipt,
+                "artifacts": [
+                    self.repository.get_artifact(artifact_id)
+                    for artifact_id in existing_receipt["output_artifact_ids"]
+                ],
+            }
+        declared_roles = set(operation["output_declaration"].get("roles", ()))
+        artifacts = []
+        for output in request.outputs:
+            if declared_roles and output.role not in declared_roles:
+                raise IntegrityError(
+                    f"Studio output role was not declared: {output.role}"
+                )
+            if not output.relative_path.replace("\\", "/").startswith("artifacts/"):
+                raise IntegrityError("Studio outputs must be stored beneath artifacts/")
+            source = Path(output.source_path).expanduser().resolve()
+            if not source.is_file():
+                raise NotFoundError(f"Studio output file not found: {source}")
+            content = source.read_bytes()
+            if sha256_bytes(content) != output.content_hash:
+                raise IntegrityError(
+                    f"Studio output hash mismatch for role {output.role}"
+                )
+            artifacts.append(
+                self.write_artifact(
+                    operation["project_id"],
+                    kind=output.kind,
+                    relative_path=output.relative_path,
+                    content=content,
+                    operation={
+                        "type": "openmontage_result",
+                        "operation_id": request.operation_id,
+                        "work_packet_hash": handoff["work_packet_hash"],
+                        "result_packet_hash": result_hash,
+                        "role": output.role,
+                    },
+                    parent_artifact_id=output.parent_artifact_id,
+                    dependencies=(
+                        DependencyRef(
+                            entity_type="artifact",
+                            entity_id=handoff["work_packet_artifact_id"],
+                            entity_hash=handoff["work_packet_hash"],
+                        ),
+                        DependencyRef(
+                            entity_type="tool_operation",
+                            entity_id=request.operation_id,
+                        ),
+                    ),
+                )
+            )
+        receipt_request = ExecutionReceiptCreate(
+            status=request.status,
+            elapsed_ms=request.elapsed_ms,
+            output_artifact_ids=tuple(artifact["id"] for artifact in artifacts),
+            response_hash=request.response_hash,
+            actual_cost=request.actual_cost,
+            details={
+                **request.details,
+                "integration": "openmontage",
+                "work_packet_hash": handoff["work_packet_hash"],
+                "result_packet_hash": result_hash,
+            },
+        )
+        self._reject_sensitive_payload(
+            receipt_request.model_dump(mode="json"), "studio_receipt"
+        )
+        receipt, handoff = self.repository.record_specialist_result(
+            request.operation_id,
+            receipt_request,
+            result_packet_hash=result_hash,
+            tool_version=(
+                str(request.details["tool_version"])
+                if request.details.get("tool_version")
+                else None
+            ),
+            operator_note=(
+                str(request.details["operator_note"])
+                if request.details.get("operator_note")
+                else None
+            ),
+        )
+        return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
+
+    def run_studio_work_packet(
+        self, operation_id: str, adapter: StudioAdapter
+    ) -> dict[str, Any]:
+        operation = self.repository.get_tool_operation(operation_id)
+        handoff = self.repository.specialist_handoff_for_operation(operation_id)
+        profile = self.repository.get_tool_profile(operation["tool_profile_id"])
+        if profile["stable_key"] != adapter.profile_key:
+            raise IntegrityError(
+                f"Tool profile {profile['stable_key']!r} does not match adapter "
+                f"{adapter.profile_key!r}"
+            )
+        existing = self.repository.get_execution_receipt(operation_id)
+        if existing:
+            return {
+                "handoff": handoff,
+                "receipt": existing,
+                "artifacts": [
+                    self.repository.get_artifact(artifact_id)
+                    for artifact_id in existing["output_artifact_ids"]
+                ],
+            }
+        operation = self.repository.mark_tool_operation_running(operation_id)
+        packet = json.loads(self.read_artifact_text(handoff["work_packet_artifact_id"]))
+        packet["packet_hash"] = handoff["work_packet_hash"]
+        started = perf_counter()
+        try:
+            result = adapter.execute(packet)
+        except TimeoutError:
+            status = ToolOperationStatus.OUTCOME_UNKNOWN
+            details = {"type": "TimeoutError", "redacted": True}
+            result = None
+        except (OSError, RuntimeError, ValueError) as error:
+            status = ToolOperationStatus.FAILED
+            details = {"type": type(error).__name__, "redacted": True}
+            result = None
+        else:
+            status = ToolOperationStatus.SUCCEEDED
+            details = result.details
+        artifacts = []
+        if result:
+            for output in result.outputs:
+                if not output.relative_path.replace("\\", "/").startswith("artifacts/"):
+                    raise IntegrityError(
+                        "Studio outputs must be stored beneath artifacts/"
+                    )
+                artifacts.append(
+                    self.write_artifact(
+                        operation["project_id"],
+                        kind=output.kind,
+                        relative_path=output.relative_path,
+                        content=output.content,
+                        operation={
+                            "type": "openmontage_result",
+                            "operation_id": operation_id,
+                            "work_packet_hash": handoff["work_packet_hash"],
+                            "role": output.role,
+                            "simulated": True,
+                        },
+                        parent_artifact_id=output.parent_artifact_id,
+                        dependencies=(
+                            DependencyRef(
+                                entity_type="artifact",
+                                entity_id=handoff["work_packet_artifact_id"],
+                                entity_hash=handoff["work_packet_hash"],
+                            ),
+                            DependencyRef(
+                                entity_type="tool_operation", entity_id=operation_id
+                            ),
+                        ),
+                    )
+                )
+        result_packet_hash = sha256_json(
+            {
+                "operation_id": operation_id,
+                "status": status.value,
+                "outputs": [
+                    {
+                        "id": artifact["id"],
+                        "content_hash": artifact["content_hash"],
+                    }
+                    for artifact in artifacts
+                ],
+                "response_hash": result.response_hash if result else None,
+                "details": details,
+            }
+        )
+        receipt_request = ExecutionReceiptCreate(
+            status=status,
+            elapsed_ms=max(0, int((perf_counter() - started) * 1000)),
+            output_artifact_ids=tuple(artifact["id"] for artifact in artifacts),
+            response_hash=result.response_hash if result else None,
+            details={
+                **details,
+                "integration": "openmontage",
+                "work_packet_hash": handoff["work_packet_hash"],
+                "result_packet_hash": result_packet_hash,
+            },
+        )
+        receipt, handoff = self.repository.record_specialist_result(
+            operation_id,
+            receipt_request,
+            result_packet_hash=result_packet_hash,
+            tool_version="deterministic-fake/v1",
+        )
+        return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
 
     def run_tool_once(
         self,

@@ -70,6 +70,7 @@ from .models import (
     ApprovalRequest,
     AssetCandidate,
     AssetUseContext,
+    CreativeElementCreate,
     DeliverableCreate,
     ExecutionReceiptCreate,
     FactSetCreate,
@@ -80,8 +81,12 @@ from .models import (
     ProjectCreate,
     ProviderModelProfileCreate,
     SegmentCreate,
+    ShotElementBindingCreate,
+    StudioResultPacketImport,
+    StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
+    WorkableBriefCreate,
 )
 from .openverse import OpenverseClient, default_context
 from .pexels import PexelsClient
@@ -803,6 +808,47 @@ def cmd_record_scene_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_scene_plan(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).scene_plan(args.project_id) or {"plan": None}
+
+
+def cmd_record_workable_brief(args: argparse.Namespace) -> dict[str, Any]:
+    request = WorkableBriefCreate.model_validate(_load_json(args.file))
+    return _controller(args).record_workable_brief(args.project_id, request)
+
+
+def cmd_workable_brief(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).workable_brief(args.project_id) or {"brief": None}
+
+
+def cmd_record_creative_element(args: argparse.Namespace) -> dict[str, Any]:
+    request = CreativeElementCreate.model_validate(_load_json(args.file))
+    return _controller(args).record_creative_element(args.project_id, request)
+
+
+def cmd_list_creative_elements(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "elements": _controller(args).list_creative_elements(
+            args.project_id, current_only=not args.include_history
+        )
+    }
+
+
+def cmd_bind_creative_element(args: argparse.Namespace) -> dict[str, Any]:
+    request = ShotElementBindingCreate.model_validate(_load_json(args.file))
+    return _controller(args).bind_element_to_shot(args.project_id, request)
+
+
+def cmd_prepare_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
+    request = StudioWorkPacketRequest.model_validate(_load_json(args.file))
+    return _controller(args).prepare_studio_work_packet(args.project_id, request)
+
+
+def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).studio_work_packet(args.operation_id)
+
+
+def cmd_import_studio_result(args: argparse.Namespace) -> dict[str, Any]:
+    request = StudioResultPacketImport.model_validate(_load_json(args.file))
+    return _controller(args).import_studio_result(request)
 
 
 def cmd_ai_edit_asset(args: argparse.Namespace) -> dict[str, Any]:
@@ -1899,6 +1945,63 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_show_parser.add_argument("project_id")
     plan_show_parser.set_defaults(handler=cmd_scene_plan)
+
+    brief_record_parser = subparsers.add_parser(
+        "record-workable-brief",
+        help="Record a versioned workable brief with decision provenance",
+    )
+    brief_record_parser.add_argument("project_id")
+    brief_record_parser.add_argument("--file", required=True)
+    brief_record_parser.set_defaults(handler=cmd_record_workable_brief)
+
+    brief_show_parser = subparsers.add_parser(
+        "workable-brief", help="Show the current workable brief"
+    )
+    brief_show_parser.add_argument("project_id")
+    brief_show_parser.set_defaults(handler=cmd_workable_brief)
+
+    element_record_parser = subparsers.add_parser(
+        "record-creative-element",
+        help="Record a versioned reusable character, prop, location or style element",
+    )
+    element_record_parser.add_argument("project_id")
+    element_record_parser.add_argument("--file", required=True)
+    element_record_parser.set_defaults(handler=cmd_record_creative_element)
+
+    element_list_parser = subparsers.add_parser(
+        "list-creative-elements", help="List reusable creative elements"
+    )
+    element_list_parser.add_argument("project_id")
+    element_list_parser.add_argument("--include-history", action="store_true")
+    element_list_parser.set_defaults(handler=cmd_list_creative_elements)
+
+    element_bind_parser = subparsers.add_parser(
+        "bind-creative-element", help="Bind a current creative element to a shot role"
+    )
+    element_bind_parser.add_argument("project_id")
+    element_bind_parser.add_argument("--file", required=True)
+    element_bind_parser.set_defaults(handler=cmd_bind_creative_element)
+
+    studio_prepare_parser = subparsers.add_parser(
+        "prepare-studio-work-packet",
+        help="Authorize a zero-spend OpenMontage work packet",
+    )
+    studio_prepare_parser.add_argument("project_id")
+    studio_prepare_parser.add_argument("--file", required=True)
+    studio_prepare_parser.set_defaults(handler=cmd_prepare_studio_work_packet)
+
+    studio_show_parser = subparsers.add_parser(
+        "studio-work-packet", help="Show a governed OpenMontage work packet"
+    )
+    studio_show_parser.add_argument("operation_id")
+    studio_show_parser.set_defaults(handler=cmd_studio_work_packet)
+
+    studio_import_parser = subparsers.add_parser(
+        "import-studio-result",
+        help="Import a zero-cost OpenMontage result and terminal receipt",
+    )
+    studio_import_parser.add_argument("--file", required=True)
+    studio_import_parser.set_defaults(handler=cmd_import_studio_result)
 
     judge_parser = subparsers.add_parser(
         "judge-asset",

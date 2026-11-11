@@ -1,0 +1,61 @@
+{
+  "source_artifact_id": "art_REPLACE_WITH_CONTROLLER_ID",
+  "source_content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "objective": "Create a five-second counting rhyme",
+  "audience": "Children aged four to six",
+  "deliverable": "Five-second 9:16 animated review master",
+  "destination": null,
+  "classification": {
+    "content_family": "character_story",
+    "subject": "kids",
+    "production_lane": "deterministic_composition"
+  },
+  "treatment": {
+    "concept": "Three original ducklings count together",
+    "visual_style": "original paper-cut animation",
+    "world": "simple pond"
+  },
+  "beats": [
+    {
+      "id": "beat-01",
+      "start": "0",
+      "end": "5",
+      "visual": "Three ducklings swim in a row"
+    }
+  ],
+  "audio_plan": {
+    "voice": "warm synthetic adult",
+    "music": "optional"
+  },
+  "acceptance": {
+    "duration_seconds": "5",
+    "visible_duck_count": 3,
+    "publication_authorized": false
+  },
+  "decisions": [
+    {
+      "field": "visual.background",
+      "value": "simple stylised pond",
+      "state": "assumed",
+      "basis": "The supplied action is swimming",
+      "risk": "low",
+      "reversible": true,
+      "alternatives_considered": ["paper-cut lake"],
+      "affected_shot_keys": ["shot-01"],
+      "review_gate": "animatic",
+      "blocked_work": []
+    },
+    {
+      "field": "voice.identity",
+      "value": null,
+      "state": "blocked",
+      "basis": "No voice identity or consent was supplied",
+      "risk": "high",
+      "reversible": false,
+      "alternatives_considered": [],
+      "affected_shot_keys": [],
+      "review_gate": null,
+      "blocked_work": ["narration"]
+    }
+  ]
+}

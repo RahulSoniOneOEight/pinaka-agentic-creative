@@ -500,4 +500,5 @@ A brief is ready for governed production when:
 - [`creative-classification-and-production-guide.md`](creative-classification-and-production-guide.md)
 - [`asset-sourcing-policy.md`](asset-sourcing-policy.md)
 - [`end-to-end-flow-with-owners.md`](end-to-end-flow-with-owners.md)
+- [`openmontage-controller-integration.md`](openmontage-controller-integration.md)
 - [`architecture.md`](architecture.md)

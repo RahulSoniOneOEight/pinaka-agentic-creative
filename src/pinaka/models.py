@@ -25,7 +25,10 @@ from .enums import (
     AssetUseClass,
     CapabilityStatus,
     ContentMode,
+    CreativeElementKind,
     DataClassification,
+    DecisionProvenance,
+    DecisionRisk,
     DeliverableKind,
     GroundingBundleKind,
     JobStatus,
@@ -33,6 +36,8 @@ from .enums import (
     ProviderExecutionMode,
     ProviderIntegrationMode,
     QAStatus,
+    StudioAutonomy,
+    StudioWorkPhase,
     ToolIntegrationMode,
     ToolOperationStatus,
 )
@@ -313,6 +318,134 @@ class ExecutionReceiptCreate(StrictModel):
             ToolOperationStatus.OUTCOME_UNKNOWN,
         }:
             raise ValueError("Execution receipts require a terminal operation status")
+        return self
+
+
+class BriefDecisionCreate(StrictModel):
+    field: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$")
+    value: Any = None
+    state: DecisionProvenance
+    basis: str = Field(min_length=1, max_length=2000)
+    risk: DecisionRisk = DecisionRisk.LOW
+    reversible: bool = True
+    alternatives_considered: tuple[str, ...] = ()
+    affected_shot_keys: tuple[str, ...] = ()
+    review_gate: ApprovalStage | None = None
+    blocked_work: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def enforce_autonomy_boundary(self) -> BriefDecisionCreate:
+        if self.state == DecisionProvenance.ASSUMED and not self.reversible:
+            raise ValueError("Assumed decisions must be reversible")
+        if self.state == DecisionProvenance.BLOCKED and not self.blocked_work:
+            raise ValueError("Blocked decisions must identify the affected work")
+        return self
+
+
+class WorkableBriefCreate(StrictModel):
+    source_artifact_id: str = Field(min_length=1, max_length=120)
+    source_content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    objective: str = Field(min_length=1, max_length=2000)
+    audience: str = Field(min_length=1, max_length=500)
+    deliverable: str = Field(min_length=1, max_length=500)
+    destination: str | None = Field(default=None, max_length=500)
+    classification: dict[str, Any] = Field(min_length=1)
+    treatment: dict[str, Any] = Field(min_length=1)
+    beats: tuple[dict[str, Any], ...] = Field(min_length=1)
+    audio_plan: dict[str, Any] = Field(default_factory=dict)
+    acceptance: dict[str, Any] = Field(min_length=1)
+    decisions: tuple[BriefDecisionCreate, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def decisions_have_unique_fields(self) -> WorkableBriefCreate:
+        fields = [decision.field for decision in self.decisions]
+        if len(fields) != len(set(fields)):
+            raise ValueError("Brief decision fields must be unique")
+        return self
+
+
+class CreativeElementCreate(StrictModel):
+    stable_key: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$")
+    kind: CreativeElementKind
+    name: str = Field(min_length=1, max_length=200)
+    specification: dict[str, Any] = Field(min_length=1)
+    continuity: dict[str, Any] = Field(default_factory=dict)
+    source_artifact_id: str | None = Field(default=None, max_length=120)
+
+
+class ShotElementBindingCreate(StrictModel):
+    shot_id: str = Field(min_length=1, max_length=120)
+    element_id: str = Field(min_length=1, max_length=120)
+    role: str = Field(min_length=1, max_length=120)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class StudioScope(StrictModel):
+    autonomy: StudioAutonomy = StudioAutonomy.AUTOPILOT
+    phases: tuple[StudioWorkPhase, ...] = Field(min_length=1)
+    shot_ids: tuple[str, ...] = ()
+    element_ids: tuple[str, ...] = ()
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    allow_paid_generation: bool = False
+    max_credits: int = Field(default=0, ge=0)
+    max_usd: Decimal = Field(default=Decimal(0), ge=0, decimal_places=2)
+    allow_publication: bool = False
+
+    @model_validator(mode="after")
+    def enforce_zero_spend_and_no_publication(self) -> StudioScope:
+        if self.allow_paid_generation or self.max_credits or self.max_usd:
+            raise ValueError("Studio work packets are zero-spend in this integration")
+        if self.allow_publication:
+            raise ValueError("Studio publication authority is not permitted")
+        if len(self.phases) != len(set(self.phases)):
+            raise ValueError("Studio phases must be unique")
+        return self
+
+
+class StudioWorkPacketRequest(StrictModel):
+    tool_profile_id: str = Field(min_length=1, max_length=120)
+    idempotency_key: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,199}$")
+    instructions: str = Field(min_length=1, max_length=10000)
+    scope: StudioScope
+    input_artifact_ids: tuple[str, ...] = ()
+    output_declaration: dict[str, Any] = Field(min_length=1)
+    required_approval_stage: ApprovalStage | None = None
+
+
+class StudioResultOutputImport(StrictModel):
+    source_path: str = Field(min_length=1, max_length=2000)
+    relative_path: str = Field(min_length=1, max_length=1000)
+    kind: ArtifactKind
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    parent_artifact_id: str | None = Field(default=None, max_length=120)
+    role: str = Field(min_length=1, max_length=120)
+
+
+class StudioResultPacketImport(StrictModel):
+    operation_id: str = Field(min_length=1, max_length=120)
+    status: ToolOperationStatus
+    elapsed_ms: int = Field(ge=0)
+    outputs: tuple[StudioResultOutputImport, ...] = ()
+    response_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    actual_cost: Money | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def result_is_terminal_and_zero_spend(self) -> StudioResultPacketImport:
+        terminal = {
+            ToolOperationStatus.SUCCEEDED,
+            ToolOperationStatus.FAILED,
+            ToolOperationStatus.CANCELLED,
+            ToolOperationStatus.OUTCOME_UNKNOWN,
+        }
+        if self.status not in terminal:
+            raise ValueError("Studio results require a terminal status")
+        if self.status == ToolOperationStatus.SUCCEEDED and not self.outputs:
+            raise ValueError("A successful Studio result must declare output artifacts")
+        if self.status != ToolOperationStatus.SUCCEEDED and self.outputs:
+            raise ValueError("Only successful Studio results may declare outputs")
+        if self.actual_cost and self.actual_cost.minor > 0:
+            raise ValueError("Studio result packets must report zero cost")
         return self
 
 

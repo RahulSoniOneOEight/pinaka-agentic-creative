@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -456,6 +456,87 @@ CREATE INDEX IF NOT EXISTS idx_audio_beds_project ON audio_beds(project_id);
 """
 
 
+SCHEMA_V9 = r"""
+CREATE TABLE IF NOT EXISTS workable_briefs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    source_artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    source_content_hash TEXT NOT NULL,
+    package_json TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workable_briefs_current
+    ON workable_briefs(project_id) WHERE is_current = 1;
+
+CREATE TABLE IF NOT EXISTS brief_decisions (
+    id TEXT PRIMARY KEY,
+    brief_id TEXT NOT NULL REFERENCES workable_briefs(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    field TEXT NOT NULL,
+    value_json TEXT NOT NULL,
+    state TEXT NOT NULL,
+    basis TEXT NOT NULL,
+    risk TEXT NOT NULL,
+    reversible INTEGER NOT NULL CHECK (reversible IN (0, 1)),
+    alternatives_json TEXT NOT NULL,
+    affected_shot_keys_json TEXT NOT NULL,
+    review_gate TEXT,
+    blocked_work_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(brief_id, field)
+);
+CREATE INDEX IF NOT EXISTS idx_brief_decisions_project_state
+    ON brief_decisions(project_id, state);
+
+CREATE TABLE IF NOT EXISTS creative_elements (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    stable_key TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    specification_json TEXT NOT NULL,
+    continuity_json TEXT NOT NULL,
+    source_artifact_id TEXT REFERENCES artifacts(id),
+    content_hash TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, stable_key, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_creative_elements_current
+    ON creative_elements(project_id, stable_key) WHERE is_current = 1;
+
+CREATE TABLE IF NOT EXISTS shot_element_bindings (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+    element_id TEXT NOT NULL REFERENCES creative_elements(id),
+    role TEXT NOT NULL,
+    notes TEXT,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_shot_element_bindings_current
+    ON shot_element_bindings(project_id, shot_id, role) WHERE is_current = 1;
+CREATE INDEX IF NOT EXISTS idx_shot_element_bindings_element
+    ON shot_element_bindings(element_id, is_current);
+
+ALTER TABLE specialist_handoffs
+    ADD COLUMN operation_id TEXT REFERENCES tool_operations(id);
+ALTER TABLE specialist_handoffs
+    ADD COLUMN work_packet_artifact_id TEXT REFERENCES artifacts(id);
+ALTER TABLE specialist_handoffs
+    ADD COLUMN result_packet_hash TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_specialist_handoffs_operation
+    ON specialist_handoffs(operation_id) WHERE operation_id IS NOT NULL;
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -465,4 +546,5 @@ MIGRATIONS = {
     6: SCHEMA_V6,
     7: SCHEMA_V7,
     8: SCHEMA_V8,
+    9: SCHEMA_V9,
 }
