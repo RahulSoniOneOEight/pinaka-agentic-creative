@@ -32,6 +32,7 @@ from .database import Database
 from .enums import (
     ApprovalStage,
     ArtifactKind,
+    ArtifactStatus,
     AssetEligibilityStatus,
     AssetUseClass,
     BudgetItemStatus,
@@ -91,10 +92,19 @@ from .models import (
     StudioScope,
     StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
+    TextBriefRequest,
     ToolOperationRequest,
     ToolProfileCreate,
     VarianceDecisionCreate,
     WorkableBriefCreate,
+)
+from .planning import (
+    DEFAULT_DURATION_SECONDS,
+    analyze_text,
+    build_brief,
+    propose_elements,
+    propose_shots,
+    scene_plan_markdown,
 )
 from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
 from .repository import Repository
@@ -191,6 +201,9 @@ STUDIO_AUTO_SPEND_MINOR = 100
 SPEND_CURRENCIES = ("USD", "INR")
 DEFAULT_RUN_CAP_MINOR = {"USD": 100, "INR": 8500}
 DEFAULT_CREATIVE_TARGET_MINOR = {"USD": 100, "INR": 8500}
+GENERATED_SOURCES = frozenset(
+    {"generated", "paid_generation", "ai_generated", "ai", "synthesis"}
+)
 
 
 class CreativeController:
@@ -303,6 +316,72 @@ class CreativeController:
 
     def workable_brief(self, project_id: str) -> dict[str, Any] | None:
         return self.repository.latest_workable_brief(project_id)
+
+    def plan_from_text(
+        self, project_id: str, request: TextBriefRequest
+    ) -> dict[str, Any]:
+        """Preserve raw text and derive a governed workable brief from it."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(f"Cannot plan a {project.status.value} project")
+        self._reject_sensitive_payload({"text": request.text}, "text_brief")
+        content = request.text.encode("utf-8")
+        digest = sha256_bytes(content)
+        stored = self.artifact_store.write_bytes(
+            project_id, f"inputs/brief-source-{digest[:12]}.txt", content
+        )
+        artifact = self.repository.artifact_by_path(project_id, stored.relative_path)
+        if artifact is None:
+            artifact = self.repository.register_artifact(
+                project_id,
+                ArtifactCreate(
+                    kind=ArtifactKind.ORIGINAL,
+                    relative_path=stored.relative_path,
+                    content_hash=stored.content_hash,
+                    operation={
+                        "type": "text_brief_source",
+                        "size_bytes": stored.size_bytes,
+                    },
+                    immutable=True,
+                ),
+            )
+        analysis = analyze_text(request)
+        duration = analysis["duration_seconds"] or DEFAULT_DURATION_SECONDS
+        brief_request = build_brief(artifact, analysis, project)
+        brief = self.record_workable_brief(project_id, brief_request)
+        shots: list[dict[str, Any]] = []
+        scene_plan = None
+        if request.create_plan and not self.repository.list_shots(project_id):
+            for spec in propose_shots(analysis, brief_request.beats):
+                shots.append(self.add_shot(project_id, ShotCreate(**spec)))
+            scene_plan = self.record_scene_plan(
+                project_id, scene_plan_markdown(shots, duration)
+            )
+        proposed_slots = [
+            {
+                "shot_id": shot["id"],
+                "stable_key": f"{shot['stable_key']}.visual",
+                "role": "primary visual",
+                "identity_requirement": "Original, non-protected subject",
+                "fact_requirement": "Matches the planned shot requirement",
+                "transformation_permission": "Composition and gentle animation",
+                "approved_sources": ["owned", "stock"],
+            }
+            for shot in shots
+        ]
+        return {
+            "source_artifact": artifact,
+            "analysis": {
+                **analysis,
+                "duration_seconds": str(duration),
+            },
+            "brief": brief,
+            "shots": shots,
+            "scene_plan": scene_plan,
+            "proposed_slots": proposed_slots,
+            "proposed_elements": propose_elements(request.text),
+        }
 
     def record_creative_element(
         self, project_id: str, request: CreativeElementCreate
@@ -1987,6 +2066,29 @@ class CreativeController:
             "assets": self.asset_costs(project_id),
         }
 
+    def _enforce_generation_routing(self, project_id: str, slot_id: str) -> None:
+        """Paid generation is only allowed where the slot routing permits it."""
+
+        slot = self.repository.get_slot(slot_id)
+        if slot["project_id"] != project_id:
+            raise ConflictError("Slot belongs to a different project")
+        approved = {source.lower() for source in slot["approved_sources"]}
+        if not approved & GENERATED_SOURCES:
+            raise RightsEligibilityError(
+                "Paid generation is not an approved source for this slot; use owned, "
+                "stock or deterministic composition, or record a new routing decision"
+            )
+        primary = self.repository.slot_asset_by_role(
+            slot_id, SlotAssetRole.PRIMARY.value
+        )
+        if primary:
+            artifact = self.repository.get_artifact(primary["artifact_id"])
+            if artifact["status"] != ArtifactStatus.STALE.value:
+                raise ConflictError(
+                    "A current primary asset already satisfies this slot; replace it "
+                    "before paying for generation"
+                )
+
     def reserve_budget_item(
         self,
         project_id: str,
@@ -2030,6 +2132,8 @@ class CreativeController:
             raise IntegrityError(
                 "Job provider and operation must match the approved budget plan item"
             )
+        if item["slot_id"]:
+            self._enforce_generation_routing(project_id, item["slot_id"])
         job = self.reserve_job(project_id, request)
         linked = self.repository.link_budget_item_job(
             project_id, plan_id, item_key, job.id
@@ -2237,6 +2341,21 @@ class CreativeController:
             for assignment in self.repository.list_slot_assets(project_id)
             if assignment["slot_id"] in selected_slot_ids
         ]
+        if "render" in phases:
+            gaps = []
+            for slot in slots:
+                roles = {
+                    assignment["role"]
+                    for assignment in slot_assets
+                    if assignment["slot_id"] == slot["id"]
+                }
+                if not {"primary", "backup"} <= roles:
+                    gaps.append(slot["stable_key"])
+            if gaps:
+                raise IntegrityError(
+                    "Paid render requires a primary and backup asset for every slot: "
+                    + ", ".join(sorted(gaps))
+                )
         treatment_decisions = [
             decision
             for decision in self.repository.list_treatment_decisions(project_id)

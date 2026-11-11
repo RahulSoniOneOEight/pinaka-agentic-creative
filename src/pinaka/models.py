@@ -535,6 +535,16 @@ class VarianceDecisionCreate(StrictModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class TextBriefRequest(StrictModel):
+    text: str = Field(min_length=1, max_length=100000)
+    audience: str | None = Field(default=None, max_length=500)
+    language: str | None = Field(default=None, min_length=2, max_length=20)
+    output_format: str | None = Field(default=None, max_length=50)
+    destination: str | None = Field(default=None, max_length=100)
+    duration_seconds: Decimal | None = Field(default=None, gt=0, le=300)
+    create_plan: bool = True
+
+
 class ClientProfile(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     website: HttpUrl

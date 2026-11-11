@@ -134,9 +134,28 @@ The canonical JSON artifact contains:
 - allowed phases and output declaration; and
 - explicit controller authority, spending limit, no-publication, and exact-hash approval statements.
 
-Storyboard, composition, render, and review scopes require a current scene plan. Idempotency is
-enforced by the existing `(project, tool profile, idempotency key)` operation constraint and by the
-packet artifact's content hash.
+Storyboard, composition, render, and review scopes require a current scene plan. Paid render scopes
+also require an approved storyboard, and every slot in a render scope needs a primary and a backup
+asset. Idempotency is enforced by the existing `(project, tool profile, idempotency key)` operation
+constraint and by the packet artifact's content hash.
+
+## Local-first generation routing
+
+Paid generation through a planned budget item is refused unless the target slot explicitly permits a
+generated source:
+
+```text
+slot.approved_sources must include one of: generated, paid_generation, ai_generated, ai, synthesis
+```
+
+A slot that already has a current primary asset is also refused, so existing owned or stock material
+is used before paying to generate a replacement.
+
+## Raw text planning
+
+`pinaka plan-from-text` converts one informal request into a workable brief, shots, and a scene plan.
+See [`raw-text-planner.md`](raw-text-planner.md).
+
 
 ## Result return
 

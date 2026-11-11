@@ -87,6 +87,7 @@ from .models import (
     StudioResultPacketImport,
     StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
+    TextBriefRequest,
     ToolOperationRequest,
     ToolProfileCreate,
     VarianceDecisionCreate,
@@ -892,6 +893,11 @@ def cmd_pending_variances(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_asset_costs(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).asset_costs(args.project_id)
+
+
+def cmd_plan_from_text(args: argparse.Namespace) -> dict[str, Any]:
+    request = TextBriefRequest.model_validate(_load_json(args.file))
+    return _controller(args).plan_from_text(args.project_id, request)
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -2115,6 +2121,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     asset_cost_parser.add_argument("project_id")
     asset_cost_parser.set_defaults(handler=cmd_asset_costs)
+
+    text_plan_parser = subparsers.add_parser(
+        "plan-from-text",
+        help="Derive a governed workable brief, shots and scene plan from raw text",
+    )
+    text_plan_parser.add_argument("project_id")
+    text_plan_parser.add_argument("--file", required=True)
+    text_plan_parser.set_defaults(handler=cmd_plan_from_text)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"
