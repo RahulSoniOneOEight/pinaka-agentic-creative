@@ -81,7 +81,41 @@ The generated source is a **scaffold**: timed scenes with beat, narrative and el
 visual layers (character artwork, backgrounds, props) are added by the render/composition step, not
 invented here.
 
-## Verified
+## Asset layers
+
+Assigned slot assets are embedded into the composition as image layers, so the animatic shows the
+actual artwork rather than text placeholders.
+
+```text
+slot asset assignment (primary/backup)
+  → image read from the project artifact store
+  → base64 data URI inside the scene
+  → layer class from the slot role
+```
+
+| Slot role | Layer treatment |
+|---|---|
+| `background`, `world`, `location`, `environment` | full-bleed, `object-fit: cover` |
+| anything else | contained subject, centred near the bottom |
+
+Limits: 1.5 MB per layer, 4 MB embedded per composition. Oversized or non-image layers are skipped
+and reported in `layers_skipped`, never silently dropped.
+
+## Narration and mux
+
+```powershell
+pinaka synthesize-narration-vertex <project-id> --script "One, two, three…" --voice Kore
+pinaka mux-narration <project-id> --video <render-artifact> --audio <audio-artifact>
+```
+
+- Narration is Vertex TTS over ADC, registered as an `audio` artifact with model, voice, character
+  count, duration, text hash and an estimated cost.
+- Mux normalizes loudness (two-pass) and produces a new `render` artifact that depends on both the
+  silent video and the narration.
+- Mux refuses a non-audio artifact or an unknown duration.
+
+## Verified render
+
 
 Authored from the kids-rhyme plan: 3 shots, 10 seconds, valid, 3.2 KB, rendered through Chromium at
 540×960 with no clipping, correct 9:16 framing, beat label and element chip visible.
@@ -89,8 +123,13 @@ Authored from the kids-rhyme plan: 3 shots, 10 seconds, valid, 3.2 KB, rendered 
 Rendered end to end: 100 frames at 10 fps in 81 seconds → 10.0 s H.264 MP4, 540×960, 34 KB, no audio,
 hash verified. A frame extracted at t=4 s shows the second scene with correct timing.
 
+Full pass with artwork and narration: 6 embedded layers (pond background, duck subject) across three
+shots, 100 frames at 10 fps, live Vertex TTS narration (8.5 s), loudness-normalized mux → 10.0 s
+H.264 + AAC, 476 KB, verified. Inspected frames show full-bleed background, the duck subject and
+legible text.
+
 ## Not implemented
 
-- Asset layers (character artwork, backgrounds, props) inside the composition.
-- Audio track and caption burn-in inside the composition.
+- Caption burn-in inside the composition.
+- Character animation inside a shot (the subject is static per scene).
 - Multi-pass render or partial re-render of a single shot.

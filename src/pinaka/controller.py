@@ -136,6 +136,9 @@ from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json, utc_n
 from .vertex import (
     DEFAULT_LOCATION,
     DEFAULT_PROJECT,
+    TTS_MODEL,
+    VertexTTSAdapter,
+    estimate_tts_cost_minor,
     verify_models,
     vertex_provider_profile,
 )
@@ -233,6 +236,19 @@ GENERATED_SOURCES = frozenset(
 )
 STUDIO_CAPABILITY_NAME = "openmontage.studio"
 STUDIO_READINESS_TTL_SECONDS = 12 * 60 * 60
+MAX_LAYER_BYTES = 1_500_000
+MAX_EMBEDDED_BYTES = 4_000_000
+IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+}
+
+
+def _image_mime(path: Any) -> str | None:
+    return IMAGE_MIME.get(str(getattr(path, "suffix", "")).lower())
 
 
 class CreativeController:
@@ -2882,6 +2898,55 @@ class CreativeController:
         )
         return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
 
+    def _composition_layers(
+        self, project_id: str, shots: list[dict[str, Any]]
+    ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+        import base64
+
+        slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
+        shots_by_id = {shot["id"]: shot for shot in shots}
+        layers: dict[str, list[dict[str, Any]]] = {}
+        skipped: list[dict[str, Any]] = []
+        total = 0
+        for assignment in self.repository.list_slot_assets(project_id):
+            slot = slots.get(assignment["slot_id"])
+            if not slot:
+                continue
+            shot = shots_by_id.get(slot["shot_id"])
+            if not shot:
+                continue
+            artifact = self.repository.get_artifact(assignment["artifact_id"])
+            path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+            mime = _image_mime(path)
+            if mime is None:
+                skipped.append(
+                    {
+                        "artifact_id": artifact["id"],
+                        "reason": f"unsupported media type {path.suffix!r}",
+                    }
+                )
+                continue
+            if not path.is_file():
+                skipped.append(
+                    {"artifact_id": artifact["id"], "reason": "file missing"}
+                )
+                continue
+            data = path.read_bytes()
+            if len(data) > MAX_LAYER_BYTES or total + len(data) > MAX_EMBEDDED_BYTES:
+                skipped.append(
+                    {"artifact_id": artifact["id"], "reason": "layer too large"}
+                )
+                continue
+            total += len(data)
+            layers.setdefault(shot["stable_key"], []).append(
+                {
+                    "role": slot["role"] or assignment["role"],
+                    "mime": mime,
+                    "data": base64.b64encode(data).decode("ascii"),
+                }
+            )
+        return layers, skipped
+
     def author_composition(
         self,
         project_id: str,
@@ -2889,9 +2954,9 @@ class CreativeController:
         width: int = 1080,
         height: int = 1920,
         title: str | None = None,
+        embed_layers: bool = True,
     ) -> dict[str, Any]:
         """Author one editable HyperFrames composition from the governed plan."""
-
         project = self.repository.get_project(project_id)
         if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
             raise ConflictError(
@@ -2904,12 +2969,16 @@ class CreativeController:
         if not shots:
             raise IntegrityError("A composition requires at least one planned shot")
         elements = self.repository.list_creative_elements(project_id)
+        layers, skipped = (
+            self._composition_layers(project_id, shots) if embed_layers else ({}, [])
+        )
         html = build_composition(
             title=title or project.name,
             width=width,
             height=height,
             shots=shots,
             elements=elements,
+            layers=layers,
         )
         report = validate_composition(html)
         if not report["valid"]:
@@ -2949,6 +3018,8 @@ class CreativeController:
             "validation": report,
             "content_hash": digest,
             "shot_count": report["shot_count"],
+            "layers_embedded": report["layer_count"],
+            "layers_skipped": skipped,
         }
 
     def render_composition(
@@ -3049,6 +3120,118 @@ class CreativeController:
             "duration_seconds": duration_text,
             "metadata": encoded.metadata,
             "command_hash": encoded.command_hash,
+        }
+
+    def synthesize_narration_vertex(
+        self,
+        project_id: str,
+        *,
+        script: str,
+        voice: str = "Kore",
+        model: str | None = None,
+        adapter: NarrationAdapter | None = None,
+    ) -> dict[str, Any]:
+        """Synthesize narration audio through Vertex TTS and register it."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot add narration to a {project.status.value} project"
+            )
+        text = (script or "").strip()
+        if not text:
+            raise IntegrityError("Narration script is empty")
+        narration = (
+            adapter or VertexTTSAdapter(voice=voice, model=model or TTS_MODEL)
+        ).synthesize(text)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.AUDIO,
+            relative_path=f"audio/narration-{narration.content_hash[:12]}.wav",
+            content=narration.content,
+            operation={
+                "type": "tts",
+                "provider": "google-vertex",
+                "model": narration.model_name,
+                "voice": narration.voice,
+                "duration_seconds": narration.duration_seconds,
+                "chars": len(text),
+                "text_hash": narration.text_hash,
+                "sample_rate": narration.sample_rate,
+                "estimated_cost_minor": estimate_tts_cost_minor(text),
+            },
+        )
+        return {
+            "artifact": artifact,
+            "duration_seconds": narration.duration_seconds,
+            "voice": narration.voice,
+            "model": narration.model_name,
+            "text_hash": narration.text_hash,
+        }
+
+    def mux_narration(
+        self,
+        project_id: str,
+        *,
+        video_artifact_id: str,
+        audio_artifact_id: str,
+        adapter: MuxAdapter | None = None,
+    ) -> dict[str, Any]:
+        """Mux normalized narration over the silent composition render."""
+
+        video = self.repository.get_artifact(video_artifact_id)
+        audio = self.repository.get_artifact(audio_artifact_id)
+        for artifact in (video, audio):
+            if artifact["project_id"] != project_id:
+                raise ConflictError("Artifact belongs to a different project")
+        if audio["kind"] != ArtifactKind.AUDIO.value:
+            raise IntegrityError("Narration artifact must be audio")
+        duration = float(
+            video["operation"].get("duration_seconds")
+            or audio["operation"].get("duration_seconds")
+            or 0
+        )
+        if duration <= 0:
+            raise IntegrityError("Cannot mux without a known duration")
+        video_path = self.artifact_store.resolve(project_id, video["relative_path"])
+        audio_path = self.artifact_store.resolve(project_id, audio["relative_path"])
+        for path in (video_path, audio_path):
+            if not path.is_file():
+                raise NotFoundError(f"Media file missing: {path.name}")
+        muxed = (adapter or FFmpegMuxAdapter()).mux(
+            video_path=video_path,
+            audio_path=audio_path,
+            duration_seconds=duration,
+        )
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.RENDER,
+            relative_path=f"renders/narrated-{muxed.content_hash[:12]}.mp4",
+            content=muxed.content,
+            operation={
+                "type": "narration_mux",
+                "duration_seconds": duration,
+                "video_artifact_id": video["id"],
+                "audio_artifact_id": audio["id"],
+                "loudness": muxed.loudness,
+            },
+            dependencies=(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=video["id"],
+                    entity_hash=video["content_hash"],
+                ),
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=audio["id"],
+                    entity_hash=audio["content_hash"],
+                ),
+            ),
+        )
+        return {
+            "video": artifact,
+            "loudness": muxed.loudness,
+            "metadata": muxed.metadata,
         }
 
     def _latest_composition(self, project_id: str) -> dict[str, Any] | None:

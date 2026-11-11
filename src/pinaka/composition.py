@@ -34,6 +34,13 @@ def _escape(value: str) -> str:
     )
 
 
+BACKGROUND_ROLES = {"background", "world", "location", "environment"}
+
+
+def _layer_class(role: str) -> str:
+    return "layer background" if role.lower() in BACKGROUND_ROLES else "layer subject"
+
+
 def build_composition(
     *,
     title: str,
@@ -41,6 +48,7 @@ def build_composition(
     height: int,
     shots: list[dict[str, Any]],
     elements: list[dict[str, Any]] | None = None,
+    layers: dict[str, list[dict[str, Any]]] | None = None,
     background: str = "#101418",
     foreground: str = "#f5f1e8",
     accent: str = "#f2b544",
@@ -85,15 +93,27 @@ def build_composition(
             for item in (elements or ())
             if item.get("kind") in {"character", "prop", "location"}
         )
+        image_layers = "".join(
+            f'<img class="{_layer_class(str(layer.get("role", "visual")))}" '
+            f'data-role="{_escape(layer.get("role", "visual"))}" '
+            f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
+            for layer in sorted(
+                (layers or {}).get(shot["stable_key"], ()),
+                key=lambda item: (
+                    str(item.get("role", "")).lower() not in BACKGROUND_ROLES
+                ),
+            )
+        )
         scenes.append(
             f'  <section class="scene" data-shot="{_escape(shot["stable_key"])}" '
             f'data-start="{start}" data-end="{end}" data-duration="{duration}" '
             f'style="animation: scene-{index} {total}s linear infinite">\n'
-            f'    <div class="content">\n'
+            f'    <div class="layers">{image_layers}</div>\n'
+            f'    <div class="content"><div>\n'
             f'      <p class="beat">{_escape(str(shot.get("beat", "")))}</p>\n'
             f'      <p class="narrative">{_escape(str(shot.get("narrative", "")))}</p>\n'
             f'      <div class="elements">{labels}</div>\n'
-            f"    </div>\n"
+            f"    </div></div>\n"
             f"  </section>"
         )
 
@@ -123,11 +143,41 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   position: absolute;
   inset: 0;
   opacity: 0;
+  overflow: hidden;
+}}
+.content {{
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   padding: 6%;
+  text-align: center;
+  z-index: 2;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55);
 }}
-.content {{ max-width: 84%; text-align: center; }}
+.content > div {{ max-width: 84%; }}
+.layers {{
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}}
+.layer {{
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  object-fit: contain;
+}}
+.layer.background {{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}}
+.layer.subject {{
+  max-width: 62%;
+  max-height: 62%;
+  bottom: 8%;
+  top: auto;
+}}
 .beat {{
   color: var(--accent);
   letter-spacing: 0.08em;
@@ -201,6 +251,7 @@ def validate_composition(html: str) -> dict[str, Any]:
         "problems": problems,
         "shot_count": len(shots),
         "shots": shots,
+        "layer_count": html.count('<img class="layer'),
         "bytes": len(html.encode("utf-8")),
     }
 

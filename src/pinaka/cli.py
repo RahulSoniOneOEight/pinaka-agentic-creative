@@ -937,6 +937,25 @@ def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def cmd_synthesize_narration_vertex(args: argparse.Namespace) -> dict[str, Any]:
+    script = (
+        Path(args.script_file).read_text(encoding="utf-8")
+        if args.script_file
+        else (args.script or "")
+    )
+    return _controller(args).synthesize_narration_vertex(
+        args.project_id, script=script, voice=args.voice, model=args.model
+    )
+
+
+def cmd_mux_narration(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).mux_narration(
+        args.project_id,
+        video_artifact_id=args.video,
+        audio_artifact_id=args.audio,
+    )
+
+
 def cmd_render_composition(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).render_composition(
         args.project_id,
@@ -953,6 +972,7 @@ def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
         width=args.width,
         height=args.height,
         title=args.title,
+        embed_layers=getattr(args, "embed_layers", True),
     )
 
 
@@ -2361,7 +2381,33 @@ def build_parser() -> argparse.ArgumentParser:
     composition_parser.add_argument("--width", type=int, default=1080)
     composition_parser.add_argument("--height", type=int, default=1920)
     composition_parser.add_argument("--title")
-    composition_parser.set_defaults(handler=cmd_author_composition)
+    composition_parser.add_argument(
+        "--no-embed-layers",
+        dest="embed_layers",
+        action="store_false",
+        help="Author the scaffold without embedding assigned image layers",
+    )
+    composition_parser.set_defaults(handler=cmd_author_composition, embed_layers=True)
+
+    narration_parser = subparsers.add_parser(
+        "synthesize-narration-vertex",
+        help="Synthesize narration with Vertex TTS (ADC)",
+    )
+    narration_parser.add_argument("project_id")
+    narration_parser.add_argument("--script")
+    narration_parser.add_argument("--script-file")
+    narration_parser.add_argument("--voice", default="Kore")
+    narration_parser.add_argument("--model")
+    narration_parser.set_defaults(handler=cmd_synthesize_narration_vertex)
+
+    mux_parser = subparsers.add_parser(
+        "mux-narration",
+        help="Mux narration over a silent composition render",
+    )
+    mux_parser.add_argument("project_id")
+    mux_parser.add_argument("--video", required=True)
+    mux_parser.add_argument("--audio", required=True)
+    mux_parser.set_defaults(handler=cmd_mux_narration)
 
     render_parser = subparsers.add_parser(
         "render-composition",
