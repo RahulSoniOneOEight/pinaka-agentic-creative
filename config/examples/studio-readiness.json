@@ -1,0 +1,11 @@
+{
+  "connected": true,
+  "account_state": "signed-in",
+  "full_access": true,
+  "providers": ["Google", "OpenRouter", "fal", "Recraft"],
+  "studio_version": "0.1.6",
+  "production_folder": "C:\\Users\\LENOVO\\Documents\\OpenMontage Productions",
+  "status": "working",
+  "checked_at": "2026-11-11T00:00:00.000Z",
+  "details": {}
+}

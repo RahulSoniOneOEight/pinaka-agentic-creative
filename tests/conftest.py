@@ -8,11 +8,33 @@ from pinaka.controller import CreativeController
 from pinaka.enums import (
     ApprovalStage,
     ArtifactKind,
+    CapabilityStatus,
     ContentMode,
     ProjectStatus,
     QAStatus,
 )
-from pinaka.models import ApprovalRequest, FactSetCreate, Money, ProjectCreate
+from pinaka.models import (
+    ApprovalRequest,
+    FactSetCreate,
+    Money,
+    ProjectCreate,
+    StudioReadinessReport,
+)
+
+
+def record_studio_ready(controller: CreativeController) -> dict:
+    """Record one healthy Studio readiness probe for session-gate tests."""
+
+    return controller.record_studio_readiness(
+        StudioReadinessReport(
+            connected=True,
+            account_state="signed-in",
+            full_access=True,
+            providers=("Google", "OpenRouter", "fal"),
+            studio_version="0.1.6",
+            status=CapabilityStatus.WORKING,
+        )
+    )
 
 
 @pytest.fixture

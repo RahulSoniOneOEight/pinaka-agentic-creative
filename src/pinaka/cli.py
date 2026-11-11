@@ -84,6 +84,7 @@ from .models import (
     ProviderModelProfileCreate,
     SegmentCreate,
     ShotElementBindingCreate,
+    StudioReadinessReport,
     StudioResultPacketImport,
     StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
@@ -898,6 +899,15 @@ def cmd_asset_costs(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_plan_from_text(args: argparse.Namespace) -> dict[str, Any]:
     request = TextBriefRequest.model_validate(_load_json(args.file))
     return _controller(args).plan_from_text(args.project_id, request)
+
+
+def cmd_studio_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).studio_status()
+
+
+def cmd_studio_check(args: argparse.Namespace) -> dict[str, Any]:
+    report = StudioReadinessReport.model_validate(_load_json(args.file))
+    return _controller(args).record_studio_readiness(report)
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -2129,6 +2139,19 @@ def build_parser() -> argparse.ArgumentParser:
     text_plan_parser.add_argument("project_id")
     text_plan_parser.add_argument("--file", required=True)
     text_plan_parser.set_defaults(handler=cmd_plan_from_text)
+
+    studio_status_parser = subparsers.add_parser(
+        "studio-status",
+        help="Show whether Studio readiness has been verified recently",
+    )
+    studio_status_parser.set_defaults(handler=cmd_studio_status)
+
+    studio_check_parser = subparsers.add_parser(
+        "studio-check",
+        help="Record one live Studio readiness probe for this session",
+    )
+    studio_check_parser.add_argument("--file", required=True)
+    studio_check_parser.set_defaults(handler=cmd_studio_check)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"

@@ -5,6 +5,7 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from pinaka.cli import main
 from pinaka.controller import CreativeController
@@ -33,6 +34,7 @@ from pinaka.models import (
     ShotCreate,
     ShotElementBindingCreate,
     SlotCreate,
+    StudioReadinessReport,
     StudioResultOutputImport,
     StudioResultPacketImport,
     StudioScope,
@@ -45,7 +47,7 @@ from pinaka.schema import MIGRATIONS, SCHEMA_VERSION
 from pinaka.studio import DeterministicStudioAdapter
 from pinaka.utils import sha256_bytes
 
-from .conftest import create_project
+from .conftest import create_project, record_studio_ready
 
 
 def _source_artifact(controller, project_id, tmp_path):
@@ -113,6 +115,7 @@ def _brief_request(source, *, concept="Three original ducklings count together")
 
 
 def _studio_profile(controller):
+    record_studio_ready(controller)
     return controller.register_tool_profile(
         ToolProfileCreate(
             stable_key="openmontage-deterministic",
@@ -564,6 +567,80 @@ def test_paid_render_requires_an_approved_storyboard(controller, tmp_path):
     )
     with pytest.raises(ApprovalRequiredError, match="approved storyboard"):
         controller.prepare_studio_work_packet(project.id, request)
+
+
+def test_studio_packet_requires_a_fresh_readiness_check(controller, tmp_path):
+    project, *_ = _planned_project(controller, tmp_path)
+    profile = controller.register_tool_profile(
+        ToolProfileCreate(
+            stable_key="openmontage-unverified",
+            name="Unverified Studio profile",
+            integration_mode=ToolIntegrationMode.SPECIALIST_HANDOFF,
+            executable_or_endpoint="controller:deterministic-studio",
+            supported_operations=("openmontage.execute_work_packet",),
+        )
+    )
+    status = controller.studio_status()
+    assert status["ready"] is False
+    assert status["checked_at"] is None
+
+    with pytest.raises(ApprovalRequiredError, match="readiness must be verified"):
+        controller.prepare_studio_work_packet(
+            project.id,
+            StudioWorkPacketRequest(
+                tool_profile_id=profile["id"],
+                idempotency_key="unverified-v1",
+                instructions="Storyboard only.",
+                scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+                output_declaration={"roles": ["storyboard_manifest"]},
+            ),
+        )
+
+
+def test_stale_studio_readiness_is_refused(controller, tmp_path):
+    project, *_ = _planned_project(controller, tmp_path)
+    profile = _studio_profile(controller)
+    assert controller.studio_status()["ready"] is True
+
+    with controller.repository.database.transaction() as connection:
+        connection.execute(
+            "UPDATE capability_checks SET checked_at = ? WHERE name = ?",
+            ("2026-01-01T00:00:00.000Z", "openmontage.studio"),
+        )
+    status = controller.studio_status()
+    assert status["ready"] is False
+    assert status["stale"] is True
+
+    with pytest.raises(ApprovalRequiredError, match="readiness must be verified"):
+        controller.prepare_studio_work_packet(
+            project.id,
+            StudioWorkPacketRequest(
+                tool_profile_id=profile["id"],
+                idempotency_key="stale-v1",
+                instructions="Storyboard only.",
+                scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+                output_declaration={"roles": ["storyboard_manifest"]},
+            ),
+        )
+
+
+def test_studio_readiness_report_captures_the_connection(controller):
+    report = record_studio_ready(controller)
+    assert report["ready"] is True
+    assert report["report"]["account_state"] == "signed-in"
+    assert report["report"]["full_access"] is True
+    assert "fal" in report["report"]["providers"]
+    assert report["ttl_seconds"] == 12 * 60 * 60
+
+
+def test_ready_status_requires_a_live_connection():
+    with pytest.raises(ValidationError, match="live connection"):
+        StudioReadinessReport(
+            connected=False,
+            account_state="signed-out",
+            full_access=False,
+            status=CapabilityStatus.WORKING,
+        )
 
 
 def test_schema_v8_migrates_to_v10_without_losing_project(tmp_path):

@@ -545,6 +545,29 @@ class TextBriefRequest(StrictModel):
     create_plan: bool = True
 
 
+class StudioReadinessReport(StrictModel):
+    """Outcome of one live Studio readiness probe, recorded by the operator."""
+
+    connected: bool
+    account_state: str = Field(min_length=1, max_length=100)
+    full_access: bool
+    providers: tuple[str, ...] = ()
+    studio_version: str | None = Field(default=None, max_length=50)
+    production_folder: str | None = Field(default=None, max_length=1000)
+    checked_at: str | None = Field(default=None, max_length=50)
+    status: CapabilityStatus = CapabilityStatus.WORKING
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def ready_reports_must_be_connected(self) -> StudioReadinessReport:
+        if self.status in {CapabilityStatus.WORKING, CapabilityStatus.CONFIGURED}:
+            if not self.connected:
+                raise ValueError("A ready report must record a live connection")
+            if not self.full_access:
+                raise ValueError("A ready report requires Full access")
+        return self
+
+
 class ClientProfile(StrictModel):
     name: str = Field(min_length=1, max_length=200)
     website: HttpUrl

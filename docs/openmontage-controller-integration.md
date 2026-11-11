@@ -120,8 +120,19 @@ pinaka import-studio-result --file studio-result.json
 Examples are under `config/examples/`. Replace placeholder IDs and hashes with records returned by
 the controller. The source artifact must belong to the project and its hash must match exactly.
 
-## Work-packet contents
+## Session readiness
 
+Studio readiness must be verified and recorded at the start of every session:
+
+```powershell
+pinaka studio-status
+pinaka studio-check --file studio-readiness.json
+```
+
+`prepare-studio-work-packet` fails closed when the check is missing, stale (older than 12 hours), or
+non-ready. See [`studio-session-readiness.md`](studio-session-readiness.md).
+
+## Work-packet contents
 The canonical JSON artifact contains:
 
 - project intent and technical profile;

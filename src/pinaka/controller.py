@@ -70,6 +70,7 @@ from .models import (
     AssetUseContext,
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
+    CapabilityResult,
     CreativeElementCreate,
     DeliverableCreate,
     DeliverableRecord,
@@ -88,6 +89,7 @@ from .models import (
     ShotCreate,
     ShotElementBindingCreate,
     SlotCreate,
+    StudioReadinessReport,
     StudioResultPacketImport,
     StudioScope,
     StudioSpendApprovalCreate,
@@ -111,7 +113,7 @@ from .repository import Repository
 from .review_policy import CampaignRisk, ReviewPolicy, decide_review
 from .sourcing import clear_resolved_uncertainty, evaluate_asset_candidate
 from .studio import StudioAdapter
-from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json
+from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json, utc_now
 
 ALLOWED_TRANSITIONS: dict[ProjectStatus, set[ProjectStatus]] = {
     ProjectStatus.DRAFT: {ProjectStatus.PLANNED, ProjectStatus.CANCELLED},
@@ -204,6 +206,8 @@ DEFAULT_CREATIVE_TARGET_MINOR = {"USD": 100, "INR": 8500}
 GENERATED_SOURCES = frozenset(
     {"generated", "paid_generation", "ai_generated", "ai", "synthesis"}
 )
+STUDIO_CAPABILITY_NAME = "openmontage.studio"
+STUDIO_READINESS_TTL_SECONDS = 12 * 60 * 60
 
 
 class CreativeController:
@@ -1840,6 +1844,67 @@ class CreativeController:
             )
         return Money(amount=scope.max_amount, currency=currency)
 
+    def record_studio_readiness(self, report: StudioReadinessReport) -> dict[str, Any]:
+        """Record one live Studio readiness probe for this session."""
+
+        self._reject_sensitive_payload(
+            report.model_dump(mode="json"), "studio_readiness"
+        )
+        self.repository.record_capability(
+            CapabilityResult(
+                name=STUDIO_CAPABILITY_NAME,
+                status=report.status,
+                detail=json.dumps(report.model_dump(mode="json"), sort_keys=True),
+                checked_at=utc_now(),
+            )
+        )
+        return self.studio_status()
+
+    def studio_status(self) -> dict[str, Any]:
+        """Report whether Studio has been verified recently enough to use."""
+
+        latest = self.repository.latest_capability(STUDIO_CAPABILITY_NAME)
+        if not latest:
+            return {
+                "ready": False,
+                "stale": True,
+                "age_seconds": None,
+                "ttl_seconds": STUDIO_READINESS_TTL_SECONDS,
+                "status": None,
+                "checked_at": None,
+                "report": None,
+                "reason": "Studio readiness has never been checked in this home",
+            }
+        age = None
+        try:
+            stamp = datetime.fromisoformat(latest["checked_at"].replace("Z", "+00:00"))
+            age = int((datetime.now(timezone.utc) - stamp).total_seconds())
+        except (AttributeError, ValueError):
+            stamp = None
+        stale = age is None or age > STUDIO_READINESS_TTL_SECONDS
+        report = json.loads(latest["detail"]) if latest["detail"] else None
+        healthy = latest["status"] in {
+            CapabilityStatus.WORKING.value,
+            CapabilityStatus.CONFIGURED.value,
+        }
+        ready = healthy and not stale
+        return {
+            "ready": ready,
+            "stale": stale,
+            "age_seconds": age,
+            "ttl_seconds": STUDIO_READINESS_TTL_SECONDS,
+            "status": latest["status"],
+            "checked_at": latest["checked_at"],
+            "report": report,
+            "reason": None
+            if ready
+            else (
+                "The last Studio check is stale; run pinaka studio-check again"
+                if stale
+                else "Studio reported a non-ready status"
+            ),
+        }
+
     def approve_studio_spend(
         self, project_id: str, request: StudioSpendApprovalCreate
     ) -> dict[str, Any]:
@@ -2185,6 +2250,12 @@ class CreativeController:
         if operation_name not in profile["supported_operations"]:
             raise IntegrityError(
                 f"Tool profile {profile['stable_key']} does not support {operation_name}"
+            )
+        readiness = self.studio_status()
+        if not readiness["ready"]:
+            raise ApprovalRequiredError(
+                "Studio readiness must be verified before authorizing work: "
+                f"{readiness['reason']}"
             )
         if request.required_approval_stage:
             approval = self.repository.active_approval(

@@ -5057,6 +5057,25 @@ class Repository:
                 payload={"name": result.name, "status": result.status.value},
             )
 
+    def latest_capability(self, name: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM capability_checks
+                WHERE name = ? ORDER BY checked_at DESC, rowid DESC LIMIT 1
+                """,
+                (name,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "status": row["status"],
+                "detail": row["detail"],
+                "checked_at": row["checked_at"],
+            }
+
     def events(self, project_id: str | None = None) -> list[dict[str, Any]]:
         with self.database.read() as connection:
             if project_id:

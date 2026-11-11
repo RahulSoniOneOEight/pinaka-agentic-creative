@@ -29,7 +29,7 @@ from pinaka.models import (
     ToolProfileCreate,
 )
 
-from .conftest import advance_to_sourcing, create_project
+from .conftest import advance_to_sourcing, create_project, record_studio_ready
 
 
 def _text_request(text: str, **overrides) -> TextBriefRequest:
@@ -196,6 +196,7 @@ def test_paid_generation_is_refused_when_a_primary_already_exists(controller):
 
 
 def _studio_profile(controller):
+    record_studio_ready(controller)
     return controller.register_tool_profile(
         ToolProfileCreate(
             stable_key="openmontage-deterministic",
