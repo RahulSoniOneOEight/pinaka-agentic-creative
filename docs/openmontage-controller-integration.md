@@ -48,18 +48,24 @@ with `blocked_work: ["narration"]` does not prevent a storyboard-only packet.
 
 ## Per-run spending policy
 
-Each Studio run reserves an explicit USD cap before authorization. Overall creative funding is
-planned separately with a USD 1.00 target — see
+Each Studio run reserves an explicit cap in the **project currency** before authorization. Overall
+creative funding is planned separately against a one-unit target — see
 [`creative-budget-planning.md`](creative-budget-planning.md).
 
-- **At or below USD 1.00** — the controller authorizes automatically, provided the project has
-  enough unreserved budget.
-- **Above USD 1.00** — a human must first approve that exact work request. The approval is bound to
-  the request hash and can be consumed once.
-- `max_credits` must remain `0`; Studio runs use a USD reservation, not credits.
+- **At or below the automatic limit** — the controller authorizes automatically, provided the project
+  has enough unreserved budget.
+- **Above the automatic limit** — a human must first approve that exact work request. The approval is
+  bound to the request hash and can be consumed once.
+- `max_credits` must remain `0`; Studio runs use a money reservation, not credits.
 - `allow_publication` must remain `false`.
-- The project budget must be denominated in USD. No implicit currency conversion is performed, so a
-  project budgeted in another currency cannot authorize USD Studio spending.
+- A run must reserve in the project currency. A mismatched `max_currency` is refused rather than
+  silently converted.
+
+| Currency | Automatic per-run limit |
+|---|---|
+| USD | 1.00 |
+| INR | 85.00 |
+
 
 The reservation is a real controller budget hold:
 

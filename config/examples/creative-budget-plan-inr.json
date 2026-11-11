@@ -1,0 +1,32 @@
+{
+  "creative_summary": "Five-second counting rhyme for a five-year-old (INR project)",
+  "target_amount": "85.00",
+  "tolerance_bps": 5000,
+  "tolerance_floor_amount": "10.00",
+  "items": [
+    {
+      "stable_key": "hero-image",
+      "ordinal": 1,
+      "category": "asset_generation",
+      "provider": "fal",
+      "operation": "image_generate",
+      "estimated_cost": { "amount": "35.00", "currency": "INR" },
+      "priority": "required",
+      "shot_id": null,
+      "slot_id": null,
+      "notes": "Single representative storyboard frame"
+    },
+    {
+      "stable_key": "narration",
+      "ordinal": 2,
+      "category": "narration",
+      "provider": "elevenlabs",
+      "operation": "speech",
+      "estimated_cost": { "amount": "20.00", "currency": "INR" },
+      "priority": "required",
+      "shot_id": null,
+      "slot_id": null,
+      "notes": "Ten-second warm adult read"
+    }
+  ]
+}

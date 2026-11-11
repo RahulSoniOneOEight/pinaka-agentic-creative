@@ -390,16 +390,24 @@ class StudioScope(StrictModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     allow_paid_generation: bool = True
     max_credits: int = Field(default=0, ge=0)
-    max_usd: Decimal = Field(default=Decimal(1), ge=0, decimal_places=2)
+    max_amount: Decimal | None = Field(default=None, ge=0, decimal_places=2)
+    max_currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     allow_publication: bool = False
 
     @model_validator(mode="after")
     def enforce_spend_shape_and_no_publication(self) -> StudioScope:
         if self.max_credits:
-            raise ValueError("Studio work packets use a USD reservation, not credits")
-        if bool(self.max_usd) != self.allow_paid_generation:
+            raise ValueError("Studio work packets use a money reservation, not credits")
+        if (self.max_amount is None) != (self.max_currency is None):
+            raise ValueError("max_amount and max_currency must be supplied together")
+        if self.max_amount is not None:
+            if bool(self.max_amount) != self.allow_paid_generation:
+                raise ValueError(
+                    "Paid generation must be enabled exactly when max_amount is positive"
+                )
+        elif not self.allow_paid_generation:
             raise ValueError(
-                "Paid generation must be enabled exactly when max_usd is positive"
+                "A zero-cost run must declare max_amount 0 in the project currency"
             )
         if self.allow_publication:
             raise ValueError("Studio publication authority is not permitted")
@@ -426,8 +434,10 @@ class StudioSpendApprovalCreate(StrictModel):
 
     @model_validator(mode="after")
     def approval_is_only_for_exception_spend(self) -> StudioSpendApprovalCreate:
-        if self.work_packet.scope.max_usd <= Decimal(1):
-            raise ValueError("Human spend approval is only needed above USD 1.00")
+        if self.work_packet.scope.max_amount is None:
+            raise ValueError(
+                "Spend approval requires an explicit max_amount and max_currency"
+            )
         if self.work_packet.spend_approval_id:
             raise ValueError("Approval requests cannot reference an existing approval")
         return self
@@ -448,9 +458,7 @@ class StudioResultPacketImport(StrictModel):
     elapsed_ms: int = Field(ge=0)
     outputs: tuple[StudioResultOutputImport, ...] = ()
     response_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
-    actual_cost: Money = Field(
-        default_factory=lambda: Money(amount=Decimal(0), currency="USD")
-    )
+    actual_cost: Money | None = None
     details: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -482,20 +490,13 @@ class BudgetPlanItemCreate(StrictModel):
     slot_id: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=1000)
 
-    @field_validator("estimated_cost")
-    @classmethod
-    def cost_must_be_usd(cls, value: Money) -> Money:
-        if value.currency != "USD":
-            raise ValueError("Creative budget plans must be denominated in USD")
-        return value
-
 
 class BudgetPlanCreate(StrictModel):
     creative_summary: str = Field(min_length=1, max_length=2000)
     items: tuple[BudgetPlanItemCreate, ...] = Field(min_length=1)
-    target_usd: Decimal = Field(default=Decimal(1), gt=0, decimal_places=2)
-    tolerance_bps: int = Field(default=1000, ge=0, le=5000)
-    tolerance_floor_usd: Decimal = Field(
+    target_amount: Decimal | None = Field(default=None, gt=0, decimal_places=2)
+    tolerance_bps: int = Field(default=5000, ge=0, le=10000)
+    tolerance_floor_amount: Decimal = Field(
         default=Decimal("0.10"), ge=0, decimal_places=2
     )
 
@@ -507,7 +508,14 @@ class BudgetPlanCreate(StrictModel):
             raise ValueError("Budget item keys must be unique")
         if len(ordinals) != len(set(ordinals)):
             raise ValueError("Budget item ordinals must be unique")
+        currencies = {item.estimated_cost.currency for item in self.items}
+        if len(currencies) != 1:
+            raise ValueError("All budget items must share one currency")
         return self
+
+    @property
+    def currency(self) -> str:
+        return self.items[0].estimated_cost.currency
 
     @property
     def planned_total_minor(self) -> int:

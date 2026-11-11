@@ -189,7 +189,7 @@ def test_material_overrun_requires_further_approval(controller):
         controller.settle_job(
             reserved["job"]["id"],
             target=JobStatus.SUCCEEDED,
-            actual_cost=Money(amount=Decimal("0.60"), currency="USD"),
+            actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
         )
     job = controller.repository.get_job(reserved["job"]["id"])
     assert job.status == JobStatus.BUDGET_RESERVED
@@ -227,7 +227,7 @@ def test_budget_plan_versions_and_archived_projects(controller):
         )
 
 
-def test_budget_plan_requires_usd_project_currency(controller):
+def test_budget_plan_supports_inr_projects(controller):
     project = controller.create_project(
         ProjectCreate(
             name="Rupee creative",
@@ -240,8 +240,41 @@ def test_budget_plan_requires_usd_project_currency(controller):
             max_budget=Money(amount=Decimal("500.00"), currency="INR"),
         )
     )
-    with pytest.raises(IntegrityError, match="denominated in USD"):
-        controller.plan_creative_budget(project.id, _within_plan())
+    plan_request = BudgetPlanCreate(
+        creative_summary="Rupee creative",
+        items=(
+            BudgetPlanItemCreate(
+                stable_key="hero-image",
+                ordinal=1,
+                category=BudgetCategory.ASSET_GENERATION,
+                provider="fal",
+                operation="image_generate",
+                estimated_cost=Money(amount=Decimal("40.00"), currency="INR"),
+            ),
+        ),
+    )
+    result = controller.plan_creative_budget(project.id, plan_request)
+    assert result["plan"]["currency"] == "INR"
+    assert _amount(result["target"]) == Decimal("85.00")
+    assert result["within_target"] is True
+
+    with pytest.raises(IntegrityError, match="must match the project budget currency"):
+        controller.plan_creative_budget(
+            project.id,
+            BudgetPlanCreate(
+                creative_summary="Wrong currency",
+                items=(
+                    BudgetPlanItemCreate(
+                        stable_key="hero-image",
+                        ordinal=1,
+                        category=BudgetCategory.ASSET_GENERATION,
+                        provider="fal",
+                        operation="image_generate",
+                        estimated_cost=Money(amount=Decimal("0.40"), currency="USD"),
+                    ),
+                ),
+            ),
+        )
 
 
 def test_budget_plan_migration_adds_tables(tmp_path):
@@ -297,3 +330,182 @@ def test_budget_plan_migration_adds_tables(tmp_path):
             ).fetchone()[0]
             == ProjectStatus.DRAFT.value
         )
+
+
+def test_schema_v11_migrates_budget_tables_to_multi_currency(tmp_path):
+    path = tmp_path / "v11.sqlite"
+    with sqlite3.connect(path) as connection:
+        for version in range(1, 12):
+            connection.executescript(MIGRATIONS[version])
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, f"2026-11-11T00:00:{version:02d}.000Z"),
+            )
+        connection.execute(
+            """
+            INSERT INTO projects(
+                id, slug, name, objective, mode, audience, output_format, language,
+                duration_seconds, status, max_budget_minor, currency, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "prj_v11",
+                "v11",
+                "V11 project",
+                "Preserve this project",
+                "product",
+                "Reviewers",
+                "9:16",
+                "en",
+                "10",
+                "draft",
+                1000,
+                "USD",
+                "2026-11-11T00:00:00.000Z",
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO budget_plans(
+                id, project_id, version, creative_summary, target_minor,
+                planned_total_minor, currency, tolerance_bps, tolerance_floor_minor,
+                status, content_hash, is_current, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "budgetplan_legacy",
+                "prj_v11",
+                1,
+                "Legacy plan",
+                100,
+                80,
+                "USD",
+                1000,
+                10,
+                "within_target",
+                "a" * 64,
+                1,
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO budget_plan_items(
+                id, plan_id, project_id, stable_key, ordinal, category, provider,
+                operation, estimated_minor, priority, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "budgetitem_legacy",
+                "budgetplan_legacy",
+                "prj_v11",
+                "hero-image",
+                1,
+                "asset_generation",
+                "fal",
+                "image_generate",
+                80,
+                "required",
+                "planned",
+                "2026-11-11T00:00:00.000Z",
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO budget_plan_approvals(
+                id, project_id, plan_id, plan_hash, approved_total_minor,
+                currency, approved_by, reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "budgetapproval_legacy",
+                "prj_v11",
+                "budgetplan_legacy",
+                "a" * 64,
+                80,
+                "USD",
+                "producer",
+                "Legacy approval",
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO studio_spend_approvals(
+                id, project_id, scope_hash, max_cost_minor, currency, approved_by,
+                reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "spendapproval_legacy",
+                "prj_v11",
+                "b" * 64,
+                250,
+                "USD",
+                "producer",
+                "Legacy studio approval",
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        connection.execute("PRAGMA user_version = 11")
+
+    from pinaka.database import Database
+
+    Database(path).initialize()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert (
+            connection.execute(
+                "SELECT creative_summary FROM budget_plans WHERE id = ?",
+                ("budgetplan_legacy",),
+            ).fetchone()[0]
+            == "Legacy plan"
+        )
+        assert (
+            connection.execute(
+                "SELECT estimated_minor FROM budget_plan_items WHERE id = ?",
+                ("budgetitem_legacy",),
+            ).fetchone()[0]
+            == 80
+        )
+        assert (
+            connection.execute(
+                "SELECT approved_by FROM budget_plan_approvals WHERE id = ?",
+                ("budgetapproval_legacy",),
+            ).fetchone()[0]
+            == "producer"
+        )
+        assert (
+            connection.execute(
+                "SELECT max_cost_minor FROM studio_spend_approvals WHERE id = ?",
+                ("spendapproval_legacy",),
+            ).fetchone()[0]
+            == 250
+        )
+        connection.execute(
+            """
+            INSERT INTO budget_plans(
+                id, project_id, version, creative_summary, target_minor,
+                planned_total_minor, currency, tolerance_bps, tolerance_floor_minor,
+                status, content_hash, is_current, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "budgetplan_inr",
+                "prj_v11",
+                2,
+                "INR plan",
+                8500,
+                4000,
+                "INR",
+                5000,
+                10,
+                "within_target",
+                "c" * 64,
+                0,
+                "2026-11-11T00:00:00.000Z",
+            ),
+        )
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []

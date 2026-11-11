@@ -1,8 +1,8 @@
 {
   "creative_summary": "Five-second counting rhyme for a five-year-old",
-  "target_usd": "1.00",
-  "tolerance_bps": 1000,
-  "tolerance_floor_usd": "0.10",
+  "target_amount": "1.00",
+  "tolerance_bps": 5000,
+  "tolerance_floor_amount": "0.10",
   "items": [
     {
       "stable_key": "hero-image",

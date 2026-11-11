@@ -86,6 +86,7 @@ from .models import (
     ShotElementBindingCreate,
     SlotCreate,
     StudioResultPacketImport,
+    StudioScope,
     StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
     ToolOperationRequest,
@@ -184,6 +185,9 @@ SENSITIVE_KEY_PARTS = (
 )
 
 STUDIO_AUTO_SPEND_MINOR = 100
+SPEND_CURRENCIES = ("USD", "INR")
+DEFAULT_RUN_CAP_MINOR = {"USD": 100, "INR": 8500}
+DEFAULT_CREATIVE_TARGET_MINOR = {"USD": 100, "INR": 8500}
 
 
 class CreativeController:
@@ -1699,6 +1703,29 @@ class CreativeController:
         payload["spend_approval_id"] = None
         return sha256_json({"project_id": project_id, "work_packet": payload})
 
+    @staticmethod
+    def _auto_run_cap_minor(currency: str) -> int:
+        if currency not in DEFAULT_RUN_CAP_MINOR:
+            raise IntegrityError(
+                f"Unsupported spending currency {currency!r}; "
+                f"supported: {', '.join(SPEND_CURRENCIES)}"
+            )
+        return DEFAULT_RUN_CAP_MINOR[currency]
+
+    @classmethod
+    def _resolve_run_cap(cls, project: ProjectRecord, scope: StudioScope) -> Money:
+        currency = project.max_budget.currency
+        auto_minor = cls._auto_run_cap_minor(currency)
+        if scope.max_amount is None:
+            return Money.from_minor(
+                auto_minor if scope.allow_paid_generation else 0, currency
+            )
+        if scope.max_currency != currency:
+            raise IntegrityError(
+                f"Studio runs must reserve in the project currency {currency}"
+            )
+        return Money(amount=scope.max_amount, currency=currency)
+
     def approve_studio_spend(
         self, project_id: str, request: StudioSpendApprovalCreate
     ) -> dict[str, Any]:
@@ -1710,10 +1737,10 @@ class CreativeController:
         self._reject_sensitive_payload(
             request.model_dump(mode="json"), "studio_spend_approval"
         )
-        maximum = Money(amount=request.work_packet.scope.max_usd, currency="USD")
-        if project.max_budget.currency != "USD":
+        maximum = self._resolve_run_cap(project, request.work_packet.scope)
+        if maximum.minor <= self._auto_run_cap_minor(maximum.currency):
             raise IntegrityError(
-                "Studio USD spending requires a project budget denominated in USD"
+                "A run within the automatic limit does not need spend approval"
             )
         return self.repository.record_studio_spend_approval(
             project_id,
@@ -1726,7 +1753,7 @@ class CreativeController:
     def plan_creative_budget(
         self, project_id: str, request: BudgetPlanCreate
     ) -> dict[str, Any]:
-        """Plan one creative against a USD target and decide if approval is needed."""
+        """Plan one creative against a currency target and decide on approval."""
 
         project = self.repository.get_project(project_id)
         if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
@@ -1734,7 +1761,18 @@ class CreativeController:
                 f"Cannot plan a budget for a {project.status.value} project"
             )
         self._reject_sensitive_payload(request.model_dump(mode="json"), "budget_plan")
-        target_minor = Money(amount=request.target_usd, currency="USD").minor
+        currency = request.currency
+        self._auto_run_cap_minor(currency)
+        if currency != project.max_budget.currency:
+            raise IntegrityError(
+                "Creative budget plan currency must match the project budget "
+                f"currency {project.max_budget.currency}"
+            )
+        target_minor = (
+            Money(amount=request.target_amount, currency=currency).minor
+            if request.target_amount is not None
+            else DEFAULT_CREATIVE_TARGET_MINOR[currency]
+        )
         planned_minor = request.planned_total_minor
         status = (
             BudgetPlanStatus.WITHIN_TARGET
@@ -1742,16 +1780,16 @@ class CreativeController:
             else BudgetPlanStatus.APPROVAL_REQUIRED
         )
         plan = self.repository.record_budget_plan(
-            project_id, request, status=status.value
+            project_id, request, status=status.value, target_minor=target_minor
         )
         return {
             "plan": plan,
-            "target": Money.from_minor(target_minor, "USD").model_dump(mode="json"),
-            "planned_total": Money.from_minor(planned_minor, "USD").model_dump(
+            "target": Money.from_minor(target_minor, currency).model_dump(mode="json"),
+            "planned_total": Money.from_minor(planned_minor, currency).model_dump(
                 mode="json"
             ),
             "overage": Money.from_minor(
-                max(0, planned_minor - target_minor), "USD"
+                max(0, planned_minor - target_minor), currency
             ).model_dump(mode="json"),
             "within_target": status == BudgetPlanStatus.WITHIN_TARGET,
             "requires_approval": status == BudgetPlanStatus.APPROVAL_REQUIRED,
@@ -1787,7 +1825,9 @@ class CreativeController:
             project_id,
             plan_id=plan["id"],
             plan_hash=plan["content_hash"],
-            approved_total=Money.from_minor(plan["planned_total_minor"], "USD"),
+            approved_total=Money.from_minor(
+                plan["planned_total_minor"], plan["currency"]
+            ),
             approved_by=request.approved_by,
             reason=request.reason,
         )
@@ -1815,7 +1855,10 @@ class CreativeController:
                 available_minor, project.max_budget.currency
             ).model_dump(mode="json"),
             "automatic_run_cap": Money.from_minor(
-                STUDIO_AUTO_SPEND_MINOR, "USD"
+                DEFAULT_RUN_CAP_MINOR.get(
+                    project.max_budget.currency, project.max_budget.minor
+                ),
+                project.max_budget.currency,
             ).model_dump(mode="json"),
         }
         if not plan:
@@ -1860,9 +1903,9 @@ class CreativeController:
                 "planned_total": plan["planned_total"],
                 "planned_total_minor": plan["planned_total_minor"],
                 "tolerance_bps": plan["tolerance_bps"],
-                "tolerance_allowance": Money.from_minor(allowance, "USD").model_dump(
-                    mode="json"
-                ),
+                "tolerance_allowance": Money.from_minor(
+                    allowance, plan["currency"]
+                ).model_dump(mode="json"),
                 "tolerance_allowance_minor": allowance,
             },
             "items": {
@@ -1878,17 +1921,19 @@ class CreativeController:
             },
             "execution": {
                 "settled_estimated": Money.from_minor(
-                    settled_estimate, "USD"
+                    settled_estimate, plan["currency"]
                 ).model_dump(mode="json"),
-                "settled_actual": Money.from_minor(settled_actual, "USD").model_dump(
+                "settled_actual": Money.from_minor(
+                    settled_actual, plan["currency"]
+                ).model_dump(mode="json"),
+                "variance": Money.from_minor(variance, plan["currency"]).model_dump(
                     mode="json"
                 ),
-                "variance": Money.from_minor(variance, "USD").model_dump(mode="json"),
                 "variance_minor": variance,
                 "within_tolerance": variance <= allowance,
                 "remaining_in_plan": Money.from_minor(
                     max(0, plan["planned_total_minor"] - settled_actual),
-                    "USD",
+                    plan["currency"],
                 ).model_dump(mode="json"),
             },
             "requires_approval": plan["status"]
@@ -1927,7 +1972,7 @@ class CreativeController:
             raise ConflictError(f"Budget item {item_key} is already {item['status']}")
         if (
             request.estimated_cost.minor != item["estimated_minor"]
-            or request.estimated_cost.currency != "USD"
+            or request.estimated_cost.currency != plan["currency"]
         ):
             raise IntegrityError(
                 "Job estimate must match the approved budget plan item"
@@ -1999,16 +2044,13 @@ class CreativeController:
                 raise ApprovalRequiredError(
                     f"Active {request.required_approval_stage.value} approval is required"
                 )
-        maximum_cost = Money(amount=request.scope.max_usd, currency="USD")
+        maximum_cost = self._resolve_run_cap(project, request.scope)
+        auto_cap_minor = self._auto_run_cap_minor(maximum_cost.currency)
         approval_scope_hash = self._studio_spend_scope_hash(project_id, request)
         existing_for_request = self.repository.tool_operation_by_idempotency(
             project_id, request.tool_profile_id, request.idempotency_key
         )
         if maximum_cost.minor:
-            if project.max_budget.currency != "USD":
-                raise IntegrityError(
-                    "Studio USD spending requires a project budget denominated in USD"
-                )
             available_minor = (
                 project.max_budget.minor - project.spent.minor - project.reserved.minor
             )
@@ -2017,10 +2059,11 @@ class CreativeController:
                     f"Insufficient budget: requested {maximum_cost.minor} minor units, "
                     f"available {available_minor}"
                 )
-            if maximum_cost.minor > STUDIO_AUTO_SPEND_MINOR:
+            if maximum_cost.minor > auto_cap_minor:
                 if not request.spend_approval_id:
                     raise ApprovalRequiredError(
-                        "Studio runs above USD 1.00 require human spend approval"
+                        "This Studio run exceeds the automatic per-run limit and "
+                        "requires human spend approval"
                     )
                 spend_approval = self.repository.get_studio_spend_approval(
                     request.spend_approval_id
@@ -2029,7 +2072,7 @@ class CreativeController:
                     spend_approval["project_id"] != project_id
                     or spend_approval["scope_hash"] != approval_scope_hash
                     or spend_approval["max_cost_minor"] != maximum_cost.minor
-                    or spend_approval["currency"] != "USD"
+                    or spend_approval["currency"] != maximum_cost.currency
                 ):
                     raise ApprovalRequiredError(
                         "Studio spend approval does not match this exact work request"
@@ -2044,7 +2087,7 @@ class CreativeController:
                     )
             elif request.spend_approval_id:
                 raise IntegrityError(
-                    "Studio runs at or below USD 1.00 do not use a spend approval"
+                    "Studio runs within the automatic limit do not use a spend approval"
                 )
         elif request.spend_approval_id:
             raise IntegrityError("Zero-cost Studio runs do not use a spend approval")
@@ -2209,8 +2252,11 @@ class CreativeController:
                 "publication_authorized": False,
                 "paid_generation_authorized": bool(maximum_cost.minor),
                 "max_credits": 0,
-                "max_usd": str(maximum_cost.amount),
-                "automatic_spend_limit_usd": "1.00",
+                "max_amount": str(maximum_cost.amount),
+                "max_currency": maximum_cost.currency,
+                "automatic_spend_limit": Money.from_minor(
+                    auto_cap_minor, maximum_cost.currency
+                ).model_dump(mode="json"),
                 "spend_approval_id": request.spend_approval_id,
             },
         }
@@ -2265,7 +2311,7 @@ class CreativeController:
             limits={
                 "paid": bool(maximum_cost.minor),
                 "max_cost_minor": maximum_cost.minor,
-                "currency": "USD",
+                "currency": maximum_cost.currency,
                 "max_credits": 0,
                 "allow_publication": False,
             },
@@ -2300,6 +2346,7 @@ class CreativeController:
                 input_artifact_ids=tuple(input_ids),
                 spend_approval_id=request.spend_approval_id,
                 approval_scope_hash=approval_scope_hash,
+                requires_spend_approval=(maximum_cost.minor > auto_cap_minor),
             )
         else:
             operation = self.reserve_tool_operation(project_id, operation_request)

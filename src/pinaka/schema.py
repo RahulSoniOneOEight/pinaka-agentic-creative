@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -624,6 +624,88 @@ CREATE TABLE IF NOT EXISTS budget_plan_approvals (
 """
 
 
+SCHEMA_V12 = r"""
+CREATE TABLE budget_plans_v12 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    creative_summary TEXT NOT NULL,
+    target_minor INTEGER NOT NULL CHECK (target_minor > 0),
+    planned_total_minor INTEGER NOT NULL CHECK (planned_total_minor >= 0),
+    currency TEXT NOT NULL,
+    tolerance_bps INTEGER NOT NULL CHECK (tolerance_bps >= 0 AND tolerance_bps <= 10000),
+    tolerance_floor_minor INTEGER NOT NULL CHECK (tolerance_floor_minor >= 0),
+    status TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, version)
+);
+INSERT INTO budget_plans_v12(
+    id, project_id, version, creative_summary, target_minor, planned_total_minor,
+    currency, tolerance_bps, tolerance_floor_minor, status, content_hash,
+    is_current, created_at
+)
+SELECT
+    id, project_id, version, creative_summary, target_minor, planned_total_minor,
+    currency, tolerance_bps, tolerance_floor_minor, status, content_hash,
+    is_current, created_at
+FROM budget_plans;
+DROP TABLE budget_plans;
+ALTER TABLE budget_plans_v12 RENAME TO budget_plans;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_plans_current
+    ON budget_plans(project_id) WHERE is_current = 1;
+
+CREATE TABLE budget_plan_approvals_v12 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL UNIQUE REFERENCES budget_plans(id) ON DELETE CASCADE,
+    plan_hash TEXT NOT NULL,
+    approved_total_minor INTEGER NOT NULL CHECK (approved_total_minor > 0),
+    currency TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+INSERT INTO budget_plan_approvals_v12(
+    id, project_id, plan_id, plan_hash, approved_total_minor, currency,
+    approved_by, reason, created_at
+)
+SELECT
+    id, project_id, plan_id, plan_hash, approved_total_minor, currency,
+    approved_by, reason, created_at
+FROM budget_plan_approvals;
+DROP TABLE budget_plan_approvals;
+ALTER TABLE budget_plan_approvals_v12 RENAME TO budget_plan_approvals;
+
+CREATE TABLE studio_spend_approvals_v12 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    scope_hash TEXT NOT NULL,
+    max_cost_minor INTEGER NOT NULL CHECK (max_cost_minor > 0),
+    currency TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    consumed_operation_id TEXT REFERENCES tool_operations(id),
+    created_at TEXT NOT NULL,
+    consumed_at TEXT,
+    UNIQUE(project_id, scope_hash, max_cost_minor, currency)
+);
+INSERT INTO studio_spend_approvals_v12(
+    id, project_id, scope_hash, max_cost_minor, currency, approved_by, reason,
+    consumed_operation_id, created_at, consumed_at
+)
+SELECT
+    id, project_id, scope_hash, max_cost_minor, currency, approved_by, reason,
+    consumed_operation_id, created_at, consumed_at
+FROM studio_spend_approvals;
+DROP TABLE studio_spend_approvals;
+ALTER TABLE studio_spend_approvals_v12 RENAME TO studio_spend_approvals;
+CREATE INDEX IF NOT EXISTS idx_studio_spend_approvals_project
+    ON studio_spend_approvals(project_id, consumed_operation_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -636,4 +718,5 @@ MIGRATIONS = {
     9: SCHEMA_V9,
     10: SCHEMA_V10,
     11: SCHEMA_V11,
+    12: SCHEMA_V12,
 }

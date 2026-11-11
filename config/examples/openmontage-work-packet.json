@@ -13,7 +13,8 @@
     },
     "allow_paid_generation": true,
     "max_credits": 0,
-    "max_usd": "1.00",
+    "max_amount": "1.00",
+    "max_currency": "USD",
     "allow_publication": false
   },
   "input_artifact_ids": [],

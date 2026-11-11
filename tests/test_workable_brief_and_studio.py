@@ -244,7 +244,9 @@ def test_studio_packet_partial_blocking_idempotency_and_fake_return(
         "max_credits": 0,
         "paid": True,
     }
-    assert prepared["packet"]["controller_authority"]["max_usd"] == "1"
+    authority = prepared["packet"]["controller_authority"]
+    assert authority["max_amount"] == "1"
+    assert authority["max_currency"] == "USD"
     assert prepared["packet"]["slots"][0]["stable_key"] == "shot-01.characters"
     assert prepared["packet"]["slot_asset_assignments"] == []
     assert prepared["packet"]["audio_beds"] == []
@@ -259,7 +261,8 @@ def test_studio_packet_partial_blocking_idempotency_and_fake_return(
                     "idempotency_key": "kids-rhyme-narration-v1",
                     "scope": StudioScope(
                         phases=(StudioWorkPhase.NARRATION,),
-                        max_usd=Decimal(0),
+                        max_amount=Decimal(0),
+                        max_currency="USD",
                         allow_paid_generation=False,
                     ),
                 }
@@ -314,7 +317,8 @@ def test_external_studio_result_import_validates_hash_lineage_and_zero_cost(
             instructions="Return one storyboard manifest.",
             scope=StudioScope(
                 phases=(StudioWorkPhase.STORYBOARD,),
-                max_usd=Decimal(0),
+                max_amount=Decimal(0),
+                max_currency="USD",
                 allow_paid_generation=False,
             ),
             output_declaration={"roles": ["storyboard_manifest"]},
@@ -428,11 +432,12 @@ def test_studio_spend_above_one_dollar_requires_matching_approval(controller, tm
         instructions="Return one premium storyboard manifest.",
         scope=StudioScope(
             phases=(StudioWorkPhase.STORYBOARD,),
-            max_usd=Decimal("2.50"),
+            max_amount=Decimal("2.50"),
+            max_currency="USD",
         ),
         output_declaration={"roles": ["storyboard_manifest"]},
     )
-    with pytest.raises(ApprovalRequiredError, match="above USD 1.00"):
+    with pytest.raises(ApprovalRequiredError, match="automatic per-run limit"):
         controller.prepare_studio_work_packet(project.id, request)
 
     approval = controller.approve_studio_spend(
@@ -481,7 +486,8 @@ def test_studio_spend_above_one_dollar_requires_matching_approval(controller, tm
         instructions="Another premium request.",
         scope=StudioScope(
             phases=(StudioWorkPhase.STORYBOARD,),
-            max_usd=Decimal("2.50"),
+            max_amount=Decimal("2.50"),
+            max_currency="USD",
         ),
         output_declaration={"roles": ["storyboard_manifest"]},
     )
@@ -492,7 +498,7 @@ def test_studio_spend_above_one_dollar_requires_matching_approval(controller, tm
         )
 
 
-def test_studio_spend_requires_usd_budget_and_available_funds(controller, tmp_path):
+def test_studio_spend_supports_inr_and_checks_available_funds(controller, tmp_path):
     rupees = controller.create_project(
         ProjectCreate(
             name="Rupee project",
@@ -505,6 +511,9 @@ def test_studio_spend_requires_usd_budget_and_available_funds(controller, tmp_pa
             max_budget=Money(amount=Decimal("500.00"), currency="INR"),
         )
     )
+    source = _source_artifact(controller, rupees.id, tmp_path)
+    controller.record_workable_brief(rupees.id, _brief_request(source))
+    controller.record_scene_plan(rupees.id, "# Scene plan\n\n- shot-01\n")
     profile = _studio_profile(controller)
     payload = {
         "tool_profile_id": profile["id"],
@@ -512,10 +521,27 @@ def test_studio_spend_requires_usd_budget_and_available_funds(controller, tmp_pa
         "scope": StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
         "output_declaration": {"roles": ["storyboard_manifest"]},
     }
-    with pytest.raises(IntegrityError, match="denominated in USD"):
+    prepared = controller.prepare_studio_work_packet(
+        rupees.id,
+        StudioWorkPacketRequest(idempotency_key="rupee-v1", **payload),
+    )
+    assert prepared["operation"]["limits"]["currency"] == "INR"
+    assert prepared["operation"]["limits"]["max_cost_minor"] == 8500
+    assert prepared["budget_job"]["estimated_cost"]["currency"] == "INR"
+    assert prepared["packet"]["controller_authority"]["max_currency"] == "INR"
+
+    with pytest.raises(IntegrityError, match="project currency"):
         controller.prepare_studio_work_packet(
             rupees.id,
-            StudioWorkPacketRequest(idempotency_key="rupee-v1", **payload),
+            StudioWorkPacketRequest(
+                idempotency_key="rupee-v2",
+                scope=StudioScope(
+                    phases=(StudioWorkPhase.STORYBOARD,),
+                    max_amount=Decimal("1.00"),
+                    max_currency="USD",
+                ),
+                **{k: v for k, v in payload.items() if k != "scope"},
+            ),
         )
 
     small, *_ = _planned_project(controller, tmp_path, budget="0.50")

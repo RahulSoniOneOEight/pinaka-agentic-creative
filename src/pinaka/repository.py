@@ -2958,16 +2958,17 @@ class Repository:
         approved_by: str,
         reason: str,
     ) -> dict[str, Any]:
-        if max_cost.currency != "USD" or max_cost.minor <= 100:
+        if max_cost.minor <= 0:
             raise IntegrityError(
-                "Studio spend approvals must authorize more than USD 1.00"
+                "Studio spend approvals must authorize a positive amount"
             )
         now = utc_now()
         with self.database.transaction() as connection:
             project = self._require_project(connection, project_id)
-            if project["currency"] != "USD":
+            if project["currency"] != max_cost.currency:
                 raise IntegrityError(
-                    "Studio USD spending requires a project budget denominated in USD"
+                    "Studio spend approvals must use the project currency "
+                    f"{project['currency']}"
                 )
             existing = connection.execute(
                 """
@@ -3059,6 +3060,7 @@ class Repository:
         input_artifact_ids: tuple[str, ...],
         spend_approval_id: str | None,
         approval_scope_hash: str,
+        requires_spend_approval: bool,
     ) -> tuple[dict[str, Any], dict[str, Any], JobRecord]:
         """Atomically reserve budget, authorize Studio work and record its handoff."""
 
@@ -3136,17 +3138,16 @@ class Repository:
                 raise IntegrityError(
                     "Studio budget jobs must use the openmontage provider"
                 )
-            if budget_request.estimated_cost.currency != "USD":
-                raise IntegrityError("Studio work must reserve budget in USD")
             if project["currency"] != budget_request.estimated_cost.currency:
                 raise IntegrityError(
-                    "Studio USD spending requires a project budget denominated in USD"
+                    "Studio spending must reserve in the project currency "
+                    f"{project['currency']}"
                 )
             requested_minor = budget_request.estimated_cost.minor
-            if requested_minor > 100:
+            if requires_spend_approval:
                 if not spend_approval_id:
                     raise ApprovalRequiredError(
-                        "Studio runs above USD 1.00 require human spend approval"
+                        "This Studio run requires human spend approval"
                     )
                 approval = connection.execute(
                     "SELECT * FROM studio_spend_approvals WHERE id = ?",
@@ -3160,7 +3161,7 @@ class Repository:
                     approval["project_id"] != project_id
                     or approval["scope_hash"] != approval_scope_hash
                     or approval["max_cost_minor"] != requested_minor
-                    or approval["currency"] != "USD"
+                    or approval["currency"] != project["currency"]
                 ):
                     raise ApprovalRequiredError(
                         "Studio spend approval does not match this exact work request"
@@ -3171,7 +3172,7 @@ class Repository:
                     )
             elif spend_approval_id:
                 raise IntegrityError(
-                    "Studio runs at or below USD 1.00 do not use a spend approval"
+                    "Studio runs below the automatic limit do not use a spend approval"
                 )
             exposure = project["spent_minor"] + project["reserved_minor"]
             if exposure + requested_minor > project["max_budget_minor"]:
@@ -3574,7 +3575,7 @@ class Repository:
                 raise IntegrityError(
                     "Paid specialist execution is missing a controller budget reservation"
                 )
-            elif cost is not None:
+            elif cost is None:
                 project = self._require_project(connection, operation["project_id"])
                 currency = project["currency"]
             receipt_content = {
@@ -4286,7 +4287,7 @@ class Repository:
             return self._job_from_row(self._require_job(connection, job_id))
 
     @staticmethod
-    def _budget_item_dict(row: sqlite3.Row) -> dict[str, Any]:
+    def _budget_item_dict(row: sqlite3.Row, currency: str) -> dict[str, Any]:
         return {
             "id": row["id"],
             "plan_id": row["plan_id"],
@@ -4297,7 +4298,7 @@ class Repository:
             "provider": row["provider"],
             "operation": row["operation"],
             "estimated_cost": Money.from_minor(
-                row["estimated_minor"], "USD"
+                row["estimated_minor"], currency
             ).model_dump(mode="json"),
             "estimated_minor": row["estimated_minor"],
             "priority": row["priority"],
@@ -4339,21 +4340,28 @@ class Repository:
             "content_hash": row["content_hash"],
             "is_current": bool(row["is_current"]),
             "created_at": row["created_at"],
-            "items": [self._budget_item_dict(item) for item in items],
+            "items": [self._budget_item_dict(item, row["currency"]) for item in items],
         }
 
     def record_budget_plan(
-        self, project_id: str, request: BudgetPlanCreate, *, status: str
+        self,
+        project_id: str,
+        request: BudgetPlanCreate,
+        *,
+        status: str,
+        target_minor: int,
     ) -> dict[str, Any]:
         now = utc_now()
         payload = request.model_dump(mode="json")
         content_hash = sha256_json(payload)
         planned_total = request.planned_total_minor
+        currency = request.currency
         with self.database.transaction() as connection:
             project = self._require_project(connection, project_id)
-            if project["currency"] != "USD":
+            if project["currency"] != currency:
                 raise IntegrityError(
-                    "Creative budget plans require a project budget denominated in USD"
+                    "Creative budget plan currency must match the project budget "
+                    f"currency {project['currency']}"
                 )
             current = connection.execute(
                 "SELECT * FROM budget_plans WHERE project_id = ? AND is_current = 1",
@@ -4381,11 +4389,13 @@ class Repository:
                     project_id,
                     version,
                     request.creative_summary,
-                    Money(amount=request.target_usd, currency="USD").minor,
+                    target_minor,
                     planned_total,
-                    "USD",
+                    currency,
                     request.tolerance_bps,
-                    Money(amount=request.tolerance_floor_usd, currency="USD").minor,
+                    Money(
+                        amount=request.tolerance_floor_amount, currency=currency
+                    ).minor,
                     status,
                     content_hash,
                     now,
@@ -4575,7 +4585,7 @@ class Repository:
     ) -> dict[str, Any]:
         now = utc_now()
         with self.database.transaction() as connection:
-            self._require_project(connection, project_id)
+            project = self._require_project(connection, project_id)
             item = connection.execute(
                 """
                 SELECT * FROM budget_plan_items
@@ -4587,7 +4597,7 @@ class Repository:
                 raise NotFoundError(f"Budget item not found in plan: {item_key}")
             if item["job_id"]:
                 if item["job_id"] == job_id:
-                    return self._budget_item_dict(item)
+                    return self._budget_item_dict(item, project["currency"])
                 raise ConflictError("Budget item already reserved for another job")
             job = connection.execute(
                 "SELECT id FROM jobs WHERE id = ? AND project_id = ?",
@@ -4618,7 +4628,7 @@ class Repository:
             updated = connection.execute(
                 "SELECT * FROM budget_plan_items WHERE id = ?", (item["id"],)
             ).fetchone()
-            return self._budget_item_dict(updated)
+            return self._budget_item_dict(updated, project["currency"])
 
     def settle_budget_item_for_job(
         self, connection: sqlite3.Connection, job_id: str, actual_minor: int

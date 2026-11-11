@@ -26,22 +26,34 @@ creative idea
 
 1. **Plan first.** A paid call must belong to a planned line item. The job estimate must equal the
    planned estimate, and the provider and operation must match.
-2. **Target, not hard wall.** The USD 1.00 target decides whether a human must approve the plan. It
-   does not block a plan that a person has approved.
+2. **Target, not hard wall.** The target decides whether a human must approve the plan. It does not
+   block a plan that a person has approved.
 3. **Automatic below target.** A plan at or below the target is authorized immediately, provided the
    project has the unreserved budget.
 4. **Approval binds the plan.** Approval is stored against the exact plan hash and total. Editing the
    plan creates a new version, which needs its own approval.
 5. **Slight variance is expected.** Allowed variance per item is
-   `max(estimate × tolerance_bps, tolerance_floor)`. Defaults: 10% with a USD 0.10 floor.
+   `max(estimate × tolerance_bps, tolerance_floor)`. Defaults: **50%** with a floor of 0.10 in the
+   plan currency.
 6. **Material overrun stops.** An actual cost beyond tolerance is refused at settlement and requires
    further approval rather than being charged silently.
 7. **Project budget still governs.** A tolerated overrun cannot push `spent` above the project
    maximum.
-8. **USD only.** Creative budget plans require a project budget denominated in USD. No implicit
-   currency conversion is performed.
+8. **Currency follows the project.** A plan, its items, and its approvals use the project budget
+   currency. Supported currencies are USD and INR. Mixed currencies inside one plan are rejected.
+
+## Currency targets
+
+| Currency | Default creative target | Default per-run cap |
+|---|---|---|
+| USD | 1.00 | 1.00 |
+| INR | 85.00 | 85.00 |
+
+The INR figures are policy equivalents of the one-dollar policy. They are fixed constants, not a
+live exchange rate, and can be overridden per plan or per run.
 
 ## Persisted records
+
 
 Schema v11 adds:
 

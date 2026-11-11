@@ -33,30 +33,44 @@ class Database:
 
     def initialize(self) -> None:
         with self.connect() as connection:
-            current = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if current > SCHEMA_VERSION:
-                raise ConfigurationError(
-                    f"Database schema {current} is newer than supported schema {SCHEMA_VERSION}"
-                )
-            for version in range(current + 1, SCHEMA_VERSION + 1):
-                migration = MIGRATIONS.get(version)
-                if migration is None:
-                    raise ConfigurationError(f"Missing database migration {version}")
-                applied_at = utc_now().replace("'", "''")
-                script = (
-                    "BEGIN IMMEDIATE;\n"
-                    f"{migration}\n"
-                    "INSERT OR IGNORE INTO schema_migrations(version, applied_at) "
-                    f"VALUES ({version}, '{applied_at}');\n"
-                    f"PRAGMA user_version = {version};\n"
-                    "COMMIT;"
-                )
-                try:
-                    connection.executescript(script)
-                except sqlite3.DatabaseError:
-                    if connection.in_transaction:
-                        connection.rollback()
-                    raise
+            # Table rebuilds are part of the migration path, so foreign key
+            # enforcement is suspended while migrations run and verified after.
+            connection.execute("PRAGMA foreign_keys = OFF")
+            try:
+                current = int(connection.execute("PRAGMA user_version").fetchone()[0])
+                if current > SCHEMA_VERSION:
+                    raise ConfigurationError(
+                        f"Database schema {current} is newer than supported schema "
+                        f"{SCHEMA_VERSION}"
+                    )
+                for version in range(current + 1, SCHEMA_VERSION + 1):
+                    migration = MIGRATIONS.get(version)
+                    if migration is None:
+                        raise ConfigurationError(
+                            f"Missing database migration {version}"
+                        )
+                    applied_at = utc_now().replace("'", "''")
+                    script = (
+                        "BEGIN IMMEDIATE;\n"
+                        f"{migration}\n"
+                        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) "
+                        f"VALUES ({version}, '{applied_at}');\n"
+                        f"PRAGMA user_version = {version};\n"
+                        "COMMIT;"
+                    )
+                    try:
+                        connection.executescript(script)
+                    except sqlite3.DatabaseError:
+                        if connection.in_transaction:
+                            connection.rollback()
+                        raise
+                violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise ConfigurationError(
+                        f"Migration left {len(violations)} foreign key violations"
+                    )
+            finally:
+                connection.execute("PRAGMA foreign_keys = ON")
 
     @contextmanager
     def transaction(self, *, immediate: bool = True) -> Iterator[sqlite3.Connection]:
