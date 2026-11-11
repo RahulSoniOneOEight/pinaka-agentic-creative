@@ -356,12 +356,16 @@ class CreativeController:
         brief = self.record_workable_brief(project_id, brief_request)
         shots: list[dict[str, Any]] = []
         scene_plan = None
-        if request.create_plan and not self.repository.list_shots(project_id):
-            for spec in propose_shots(analysis, brief_request.beats):
-                shots.append(self.add_shot(project_id, ShotCreate(**spec)))
-            scene_plan = self.record_scene_plan(
-                project_id, scene_plan_markdown(shots, duration)
-            )
+        skipped_reason = None
+        if request.create_plan:
+            if self.repository.list_shots(project_id):
+                skipped_reason = "project already has shots; plan not recreated"
+            else:
+                for spec in propose_shots(analysis, brief_request.beats):
+                    shots.append(self.add_shot(project_id, ShotCreate(**spec)))
+                scene_plan = self.record_scene_plan(
+                    project_id, scene_plan_markdown(shots, duration)
+                )
         proposed_slots = [
             {
                 "shot_id": shot["id"],
@@ -383,6 +387,8 @@ class CreativeController:
             "brief": brief,
             "shots": shots,
             "scene_plan": scene_plan,
+            "plan_created": scene_plan is not None,
+            "plan_skipped_reason": skipped_reason,
             "proposed_slots": proposed_slots,
             "proposed_elements": propose_elements(request.text),
         }
@@ -4739,7 +4745,7 @@ class CreativeController:
             ),
             ProjectStatus.PLANNED: (
                 "approve_brief",
-                "Obtain human approval for the normalized brief and zero-spend provider policy.",
+                "Obtain human approval for the normalized brief and its budget plan.",
             ),
             ProjectStatus.BRIEF_APPROVED: (
                 "ground",

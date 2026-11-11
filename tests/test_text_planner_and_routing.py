@@ -76,6 +76,20 @@ def test_plan_from_text_derives_a_governed_brief(controller):
     assert result["proposed_slots"][0]["approved_sources"] == ["owned", "stock"]
 
 
+def test_plan_from_text_does_not_duplicate_existing_shots(controller):
+    project = create_project(controller, budget="10.00")
+    first = controller.plan_from_text(
+        project.id, _text_request("Make a 5 second rhyme for kids")
+    )
+    assert first["plan_created"] is True
+    second = controller.plan_from_text(
+        project.id, _text_request("Make a 5 second rhyme for kids")
+    )
+    assert second["plan_created"] is False
+    assert second["plan_skipped_reason"]
+    assert len(controller.repository.list_shots(project.id)) == len(first["shots"])
+
+
 def test_plan_from_text_assumes_a_duration_when_missing(controller):
     project = create_project(controller, budget="10.00")
     result = controller.plan_from_text(

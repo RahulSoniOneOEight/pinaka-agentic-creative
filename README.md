@@ -126,9 +126,22 @@ workspace/
 
 ## Current scope and next gate
 
-Implemented: the Phase 1 controller and production pipeline, plus the Phase 2 governance layer —
-creative rules, recipes and slots, rights-aware sourcing, provider routing, external-spend
-reconciliation, publication preflight, font licensing, localisation planning and A/B analytics.
+Implemented: the Phase 1 controller and production pipeline, the Phase 2 governance layer, and the
+Phase 3 governed-Studio foundation — creative rules, recipes and slots, rights-aware sourcing,
+provider routing, external-spend reconciliation, publication preflight, font licensing, localisation
+planning and A/B analytics.
+
+The governed-Studio foundation adds:
+
+- a deterministic raw-text planner that derives a workable brief, shots and scene plan;
+- versioned reusable elements with shot bindings and continuity invalidation;
+- per-creative budget plans with a 50% variance tolerance and an approval loop for overruns;
+- a USD-or-INR per-run Studio cap with human approval above the automatic limit;
+- per-asset generation cost recorded against the slot, artifact and provider;
+- local-first routing and primary/backup coverage gates before paid work;
+- session-scoped Studio readiness checks; and
+- verified-hash final approval that requires passing QA.
+
 The archived 10-second pilot remains the verified production baseline.
 
 Local tools now include FFmpeg, ImageMagick, Playwright/Chromium, Blender, Inkscape, GIMP, Krita,
@@ -139,7 +152,9 @@ Nano Banana is implemented as a free-tier-only route and requires `GEMINI_API_KE
 is enabled.
 
 See `docs/implementation-report.md` for verified evidence, capability findings, deferred work, and
-residual risks. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
+residual risks. See `docs/openmontage-controller-integration.md` for the Studio work-packet boundary,
+`docs/creative-budget-planning.md` for budget plans and variance approval, `docs/raw-text-planner.md`
+for text intake, and `docs/studio-session-readiness.md` for the per-session Studio check. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
 production tools and managed services, their roles, licensing boundaries, and current integration
 status. See `docs/two-phase-production-implementation-plan.md` for the two-phase delivery roadmap.
 See `docs/nano-banana.md` for the exact ADC/API-key image routes, models, pricing, commands and
