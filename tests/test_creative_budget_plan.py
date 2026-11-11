@@ -23,8 +23,10 @@ from pinaka.models import (
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
     BudgetPlanItemCreate,
+    BudgetRaiseCreate,
     JobRequest,
     Money,
+    OverageReconcileCreate,
     ProjectCreate,
     VarianceDecisionCreate,
 )
@@ -431,6 +433,73 @@ def test_approving_a_variance_cannot_exceed_the_project_budget(controller):
         controller.repository.get_variance_request(pending["id"])["status"] == "pending"
     )
     assert controller.repository.get_project(project.id).reserved.minor == 40
+
+
+def test_raise_budget_unblocks_work(controller):
+    project = create_project(controller, budget="0.30")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    with pytest.raises(BudgetExceededError, match="Insufficient budget"):
+        controller.reserve_budget_item(project.id, plan["id"], "hero-image", _job())
+
+    raised = controller.raise_project_budget(
+        project.id,
+        BudgetRaiseCreate(
+            new_max=Money(amount=Decimal("5.00"), currency="USD"),
+            raised_by="producer",
+            reason="Two frames are required for this creative",
+        ),
+    )
+    assert _amount(raised["project"]["max_budget"]) == Decimal("5.00")
+    assert any(
+        event["event_type"] == "budget.raised"
+        for event in controller.repository.events(project.id)
+    )
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    assert reserved["job"]["status"] == "budget_reserved"
+
+    with pytest.raises(IntegrityError, match="must increase"):
+        controller.raise_project_budget(
+            project.id,
+            BudgetRaiseCreate(
+                new_max=Money(amount=Decimal("1.00"), currency="USD"),
+                raised_by="producer",
+                reason="Lower it",
+            ),
+        )
+
+
+def test_reconcile_overage_settles_a_blocked_run(controller):
+    project = create_project(controller, budget="10.00")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    pending = controller.settle_budget_item(
+        project.id,
+        reserved["job"]["id"],
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+    )
+    assert pending["status"] == "approval_required"
+
+    reconciled = controller.reconcile_overage(
+        project.id,
+        OverageReconcileCreate(
+            job_id=reserved["job"]["id"],
+            actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+            reconciled_by="producer",
+            reason="Provider invoiced the higher amount",
+        ),
+    )
+    assert reconciled["job"]["status"] == "succeeded"
+    settled = controller.repository.get_project(project.id)
+    assert settled.spent.minor == 70
+    assert settled.reserved.minor == 0
+    assert any(
+        event["event_type"] == "budget.overage_reconciled"
+        for event in controller.repository.events(project.id)
+    )
 
 
 def test_budget_plan_migration_adds_tables(tmp_path):

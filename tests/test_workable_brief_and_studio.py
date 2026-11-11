@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -641,6 +642,60 @@ def test_ready_status_requires_a_live_connection():
             full_access=False,
             status=CapabilityStatus.WORKING,
         )
+
+
+def test_cli_studio_status_and_check(tmp_path, capsys):
+    home = tmp_path / "cli"
+    assert main(["--home", str(home), "studio-status"]) == 0
+    assert json.loads(capsys.readouterr().out)["ready"] is False
+
+    example = (
+        Path(__file__).parents[1] / "config" / "examples" / "studio-readiness.json"
+    )
+    assert (
+        main(
+            [
+                "--home",
+                str(home),
+                "studio-check",
+                "--file",
+                str(example),
+            ]
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert report["ready"] is True
+    assert report["report"]["account_state"] == "signed-in"
+
+    assert main(["--home", str(home), "studio-status"]) == 0
+    assert json.loads(capsys.readouterr().out)["ready"] is True
+
+
+def test_cli_generate_asset_dry_run(tmp_path, capsys):
+    home = tmp_path / "cli-assets"
+    assert (
+        main(
+            [
+                "--home",
+                str(home),
+                "generate-asset",
+                "prj_placeholder",
+                "--plan",
+                "plan_placeholder",
+                "--item",
+                "hero",
+                "--prompt",
+                "a paper-cut duckling",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["schema"] == "pinaka.fal.image-request/v1"
+    assert payload["payload"]["prompt"] == "a paper-cut duckling"
+    assert len(payload["request_hash"]) == 64
 
 
 def test_schema_v8_migrates_to_v10_without_losing_project(tmp_path):

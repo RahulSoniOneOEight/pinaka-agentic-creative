@@ -72,6 +72,7 @@ from .models import (
     AssetUseContext,
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
+    BudgetRaiseCreate,
     CreativeElementCreate,
     DeliverableCreate,
     ExecutionReceiptCreate,
@@ -79,6 +80,7 @@ from .models import (
     GroundingBundleCreate,
     JobRequest,
     Money,
+    OverageReconcileCreate,
     PilotContract,
     ProjectCreate,
     ProviderModelProfileCreate,
@@ -908,6 +910,98 @@ def cmd_studio_status(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_studio_check(args: argparse.Namespace) -> dict[str, Any]:
     report = StudioReadinessReport.model_validate(_load_json(args.file))
     return _controller(args).record_studio_readiness(report)
+
+
+def cmd_studio_run(args: argparse.Namespace) -> dict[str, Any]:
+    from .studio_gateway import DeterministicStudioTransport, SpoolStudioTransport
+
+    if args.transport == "deterministic":
+        workdir = Path(args.spool or (Path(args.home) / "studio-work"))
+        transport = DeterministicStudioTransport(workdir=workdir)
+    else:
+        if not args.spool:
+            raise ValueError("--spool is required for the spool transport")
+        transport = SpoolStudioTransport(args.spool)
+    return _controller(args).run_studio_production(
+        args.project_id,
+        args.operation_id,
+        transport,
+        max_polls=args.max_polls,
+        requested_by=args.requested_by,
+    )
+
+
+def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).studio_production(args.operation_id) or {
+        "production": None
+    }
+
+
+def cmd_raise_budget(args: argparse.Namespace) -> dict[str, Any]:
+    request = BudgetRaiseCreate.model_validate(_load_json(args.file))
+    return _controller(args).raise_project_budget(args.project_id, request)
+
+
+def cmd_reconcile_overage(args: argparse.Namespace) -> dict[str, Any]:
+    request = OverageReconcileCreate.model_validate(_load_json(args.file))
+    return _controller(args).reconcile_overage(args.project_id, request)
+
+
+def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
+    from .adapters.fal_image import (
+        DEFAULT_IMAGE_MODEL,
+        FalImageAdapter,
+        dry_run_payload,
+    )
+    from .adapters.mock import MockGenerationAdapter
+    from .fal import FalClient
+
+    controller = _controller(args)
+    if args.dry_run:
+        return dry_run_payload(
+            args.prompt or "",
+            aspect_ratio=args.aspect_ratio,
+            model=args.model or DEFAULT_IMAGE_MODEL,
+        )
+    plan = controller.repository.get_budget_plan(args.plan)
+    item = next(
+        (entry for entry in plan["items"] if entry["stable_key"] == args.item), None
+    )
+    if not item:
+        raise NotFoundError(f"Budget item not found in plan: {args.item}")
+    cost = Money.from_minor(item["estimated_minor"], plan["currency"])
+    request = JobRequest(
+        provider=item["provider"],
+        endpoint=args.endpoint or f"{item['provider']}://{item['operation']}",
+        operation=item["operation"],
+        idempotency_key=args.key or f"plan:{args.plan}:{args.item}",
+        estimated_cost=cost,
+        parameters={
+            "prompt": args.prompt,
+            "aspect_ratio": args.aspect_ratio,
+            "model": args.model,
+        },
+    )
+    if args.adapter == "mock":
+        adapter = MockGenerationAdapter()
+    else:
+        adapter = FalImageAdapter(
+            FalClient(api_key=args.api_key),
+            model=args.model or DEFAULT_IMAGE_MODEL,
+        )
+    suffix = "png" if args.adapter == "fal" else "json"
+    job, artifact = controller.run_adapter_once(
+        args.project_id,
+        request,
+        adapter,
+        artifact_path=f"artifacts/assets/{args.item}.{suffix}",
+        budget_plan_item=(args.plan, args.item),
+    )
+    return {
+        "job": job.model_dump(mode="json"),
+        "artifact": artifact,
+        "asset_costs": controller.asset_costs(args.project_id),
+    }
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -2152,6 +2246,60 @@ def build_parser() -> argparse.ArgumentParser:
     )
     studio_check_parser.add_argument("--file", required=True)
     studio_check_parser.set_defaults(handler=cmd_studio_check)
+
+    studio_run_parser = subparsers.add_parser(
+        "studio-run",
+        help="Drive one authorized Studio production through a transport",
+    )
+    studio_run_parser.add_argument("project_id")
+    studio_run_parser.add_argument("operation_id")
+    studio_run_parser.add_argument(
+        "--transport", choices=["deterministic", "spool"], default="deterministic"
+    )
+    studio_run_parser.add_argument("--spool")
+    studio_run_parser.add_argument("--max-polls", type=int, default=3)
+    studio_run_parser.add_argument("--requested-by")
+    studio_run_parser.set_defaults(handler=cmd_studio_run)
+
+    studio_production_parser = subparsers.add_parser(
+        "studio-production", help="Show a Studio production and its jobs"
+    )
+    studio_production_parser.add_argument("operation_id")
+    studio_production_parser.set_defaults(handler=cmd_studio_production)
+
+    generate_asset_parser = subparsers.add_parser(
+        "generate-asset",
+        help="Run governed asset generation for one budget-plan item",
+    )
+    generate_asset_parser.add_argument("project_id")
+    generate_asset_parser.add_argument("--plan", required=True)
+    generate_asset_parser.add_argument("--item", required=True)
+    generate_asset_parser.add_argument("--prompt")
+    generate_asset_parser.add_argument("--aspect-ratio")
+    generate_asset_parser.add_argument("--model")
+    generate_asset_parser.add_argument("--endpoint")
+    generate_asset_parser.add_argument("--key")
+    generate_asset_parser.add_argument("--api-key")
+    generate_asset_parser.add_argument(
+        "--adapter", choices=["mock", "fal"], default="mock"
+    )
+    generate_asset_parser.add_argument("--dry-run", action="store_true")
+    generate_asset_parser.set_defaults(handler=cmd_generate_asset)
+
+    raise_budget_parser = subparsers.add_parser(
+        "raise-budget", help="Increase the project budget ceiling with a reason"
+    )
+    raise_budget_parser.add_argument("project_id")
+    raise_budget_parser.add_argument("--file", required=True)
+    raise_budget_parser.set_defaults(handler=cmd_raise_budget)
+
+    reconcile_overage_parser = subparsers.add_parser(
+        "reconcile-overage",
+        help="Record a human-accepted provider overrun and settle the job",
+    )
+    reconcile_overage_parser.add_argument("project_id")
+    reconcile_overage_parser.add_argument("--file", required=True)
+    reconcile_overage_parser.set_defaults(handler=cmd_reconcile_overage)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"

@@ -76,6 +76,24 @@ def test_plan_from_text_derives_a_governed_brief(controller):
     assert result["proposed_slots"][0]["approved_sources"] == ["owned", "stock"]
 
 
+def test_persist_elements_records_proposed_elements(controller):
+    project = create_project(controller, budget="10.00")
+    result = controller.plan_from_text(
+        project.id,
+        _text_request(
+            "Make a 5 second rhyme about ducks swimming on a pond",
+            persist_elements=True,
+        ),
+    )
+    recorded = {element["stable_key"] for element in result["recorded_elements"]}
+    assert {"character.duck", "location.pond"} <= recorded
+    stored = {
+        element["stable_key"]
+        for element in controller.list_creative_elements(project.id)
+    }
+    assert recorded <= stored
+
+
 def test_plan_from_text_does_not_duplicate_existing_shots(controller):
     project = create_project(controller, budget="10.00")
     first = controller.plan_from_text(

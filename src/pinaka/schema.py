@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 16
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -756,6 +756,82 @@ CREATE INDEX IF NOT EXISTS idx_asset_costs_slot
 """
 
 
+SCHEMA_V15 = r"""
+CREATE TABLE IF NOT EXISTS studio_productions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL UNIQUE REFERENCES tool_operations(id) ON DELETE CASCADE,
+    transport TEXT NOT NULL,
+    external_production_id TEXT,
+    title TEXT NOT NULL,
+    autonomy TEXT NOT NULL,
+    budget_minor INTEGER NOT NULL CHECK (budget_minor >= 0),
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    packet_hash TEXT NOT NULL,
+    last_error TEXT,
+    opened_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_studio_productions_project
+    ON studio_productions(project_id, status);
+
+CREATE TABLE IF NOT EXISTS studio_jobs (
+    id TEXT PRIMARY KEY,
+    production_id TEXT NOT NULL REFERENCES studio_productions(id) ON DELETE CASCADE,
+    external_job_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    status TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    detail_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(production_id, external_job_id)
+);
+"""
+
+
+SCHEMA_V16 = r"""
+CREATE TABLE budget_variance_requests_v16 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL DEFAULT 'plan_item',
+    plan_id TEXT REFERENCES budget_plans(id) ON DELETE CASCADE,
+    item_id TEXT REFERENCES budget_plan_items(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    operation_id TEXT REFERENCES tool_operations(id) ON DELETE CASCADE,
+    estimated_minor INTEGER NOT NULL CHECK (estimated_minor >= 0),
+    actual_minor INTEGER NOT NULL CHECK (actual_minor >= 0),
+    allowed_minor INTEGER NOT NULL CHECK (allowed_minor >= 0),
+    overage_minor INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT,
+    reason TEXT,
+    decided_by TEXT,
+    decision_reason TEXT,
+    decided_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(job_id, actual_minor, currency)
+);
+INSERT INTO budget_variance_requests_v16(
+    id, project_id, kind, plan_id, item_id, job_id, operation_id, estimated_minor,
+    actual_minor, allowed_minor, overage_minor, currency, status, requested_by,
+    reason, decided_by, decision_reason, decided_at, created_at
+)
+SELECT
+    id, project_id, 'plan_item', plan_id, item_id, job_id, NULL, estimated_minor,
+    actual_minor, allowed_minor, overage_minor, currency, status, requested_by,
+    reason, decided_by, decision_reason, decided_at, created_at
+FROM budget_variance_requests;
+DROP TABLE budget_variance_requests;
+ALTER TABLE budget_variance_requests_v16 RENAME TO budget_variance_requests;
+CREATE INDEX IF NOT EXISTS idx_budget_variance_pending
+    ON budget_variance_requests(project_id, status);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -771,4 +847,6 @@ MIGRATIONS = {
     12: SCHEMA_V12,
     13: SCHEMA_V13,
     14: SCHEMA_V14,
+    15: SCHEMA_V15,
+    16: SCHEMA_V16,
 }

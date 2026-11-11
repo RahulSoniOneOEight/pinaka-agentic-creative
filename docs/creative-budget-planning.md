@@ -74,6 +74,23 @@ planned → reserved → skipped        (variance rejected)
 A settled item records the job, the actual cost, and the variance. The variance event is written to
 the event log, so overrun history survives project changes.
 
+## Budget resolution
+
+Two commands resolve the states that otherwise stall a run:
+
+| Command | Resolves |
+|---|---|
+| `pinaka raise-budget` | a request blocked by the project ceiling |
+| `pinaka reconcile-overage` | a provider job whose real cost exceeds the plan tolerance |
+
+Both require a named person and a reason, are event-logged, and never bypass the currency or
+committed-spend checks.
+
+```powershell
+pinaka raise-budget <project-id> --file budget-raise.json
+pinaka reconcile-overage <project-id> --file overage-reconcile.json
+```
+
 ## Overrun approval loop
 
 ```text

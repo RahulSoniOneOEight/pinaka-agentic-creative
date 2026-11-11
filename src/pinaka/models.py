@@ -543,6 +543,20 @@ class TextBriefRequest(StrictModel):
     destination: str | None = Field(default=None, max_length=100)
     duration_seconds: Decimal | None = Field(default=None, gt=0, le=300)
     create_plan: bool = True
+    persist_elements: bool = False
+
+
+class BudgetRaiseCreate(StrictModel):
+    new_max: Money
+    raised_by: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class OverageReconcileCreate(StrictModel):
+    job_id: str = Field(min_length=1, max_length=120)
+    actual_cost: Money
+    reconciled_by: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 class StudioReadinessReport(StrictModel):

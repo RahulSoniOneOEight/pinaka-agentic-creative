@@ -120,8 +120,20 @@ pinaka import-studio-result --file studio-result.json
 Examples are under `config/examples/`. Replace placeholder IDs and hashes with records returned by
 the controller. The source artifact must belong to the project and its hash must match exactly.
 
-## Session readiness
+## Live production
 
+[`studio-gateway.md`](studio-gateway.md) drives an authorized packet through one Studio production:
+explicit budget, single submission, resumable polling, hash-verified collection and controller
+settlement.
+
+## Scope boundaries
+
+The routing, coverage, asset-cost, variance and approval gates apply to **planned** work — budget
+plan items, Studio work packets and final approval. Legacy zero-cost paths (`generate-image` free
+tier, local ComfyUI, the demo, older specialist operations) bypass them by design; they cannot spend
+money, but they also do not produce per-asset cost rows.
+
+## Session readiness
 Studio readiness must be verified and recorded at the start of every session:
 
 ```powershell

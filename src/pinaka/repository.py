@@ -3451,6 +3451,257 @@ class Repository:
                 )
             return self._specialist_handoff_dict(row)
 
+    @staticmethod
+    def _studio_production_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "operation_id": row["operation_id"],
+            "transport": row["transport"],
+            "external_production_id": row["external_production_id"],
+            "title": row["title"],
+            "autonomy": row["autonomy"],
+            "budget_minor": row["budget_minor"],
+            "currency": row["currency"],
+            "status": row["status"],
+            "packet_hash": row["packet_hash"],
+            "last_error": row["last_error"],
+            "opened_at": row["opened_at"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def open_studio_production(
+        self,
+        project_id: str,
+        *,
+        operation_id: str,
+        transport: str,
+        title: str,
+        autonomy: str,
+        budget_minor: int,
+        currency: str,
+        packet_hash: str,
+        external_production_id: str | None,
+        status: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            existing = connection.execute(
+                "SELECT * FROM studio_productions WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if existing:
+                return self._studio_production_dict(existing)
+            production_id = new_id("studio")
+            connection.execute(
+                """
+                INSERT INTO studio_productions(
+                    id, project_id, operation_id, transport, external_production_id,
+                    title, autonomy, budget_minor, currency, status, packet_hash,
+                    opened_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    production_id,
+                    project_id,
+                    operation_id,
+                    transport,
+                    external_production_id,
+                    title,
+                    autonomy,
+                    budget_minor,
+                    currency,
+                    status,
+                    packet_hash,
+                    now,
+                    now,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="studio_production",
+                entity_id=production_id,
+                event_type="studio_production.opened",
+                payload={
+                    "operation_id": operation_id,
+                    "external_production_id": external_production_id,
+                    "budget_minor": budget_minor,
+                    "currency": currency,
+                    "status": status,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM studio_productions WHERE id = ?", (production_id,)
+            ).fetchone()
+            return self._studio_production_dict(row)
+
+    def get_studio_production(self, operation_id: str) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM studio_productions WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            return self._studio_production_dict(row) if row else None
+
+    def update_studio_production(
+        self,
+        production_id: str,
+        *,
+        status: str | None = None,
+        external_production_id: str | None = None,
+        last_error: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM studio_productions WHERE id = ?", (production_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Studio production not found: {production_id}")
+            connection.execute(
+                """
+                UPDATE studio_productions
+                SET status = COALESCE(?, status),
+                    external_production_id = COALESCE(?, external_production_id),
+                    last_error = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, external_production_id, last_error, now, production_id),
+            )
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="studio_production",
+                entity_id=production_id,
+                event_type="studio_production.updated",
+                payload={"from": row["status"], "to": status},
+            )
+            updated = connection.execute(
+                "SELECT * FROM studio_productions WHERE id = ?", (production_id,)
+            ).fetchone()
+            return self._studio_production_dict(updated)
+
+    @staticmethod
+    def _studio_job_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "production_id": row["production_id"],
+            "external_job_id": row["external_job_id"],
+            "phase": row["phase"],
+            "status": row["status"],
+            "request_hash": row["request_hash"],
+            "detail": json.loads(row["detail_json"]) if row["detail_json"] else None,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def record_studio_job(
+        self,
+        production_id: str,
+        *,
+        external_job_id: str,
+        phase: str,
+        status: str,
+        request_hash: str,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM studio_productions WHERE id = ?", (production_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Studio production not found: {production_id}")
+            existing = connection.execute(
+                """
+                SELECT * FROM studio_jobs
+                WHERE production_id = ? AND external_job_id = ?
+                """,
+                (production_id, external_job_id),
+            ).fetchone()
+            if existing:
+                return self._studio_job_dict(existing)
+            job_id = new_id("studiojob")
+            connection.execute(
+                """
+                INSERT INTO studio_jobs(
+                    id, production_id, external_job_id, phase, status, request_hash,
+                    detail_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    job_id,
+                    production_id,
+                    external_job_id,
+                    phase,
+                    status,
+                    request_hash,
+                    canonical_json(detail or {}),
+                    now,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="studio_job",
+                entity_id=job_id,
+                event_type="studio_job.submitted",
+                payload={
+                    "production_id": production_id,
+                    "external_job_id": external_job_id,
+                    "phase": phase,
+                },
+            )
+            created = connection.execute(
+                "SELECT * FROM studio_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return self._studio_job_dict(created)
+
+    def update_studio_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM studio_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Studio job not found: {job_id}")
+            connection.execute(
+                """
+                UPDATE studio_jobs
+                SET status = ?, detail_json = COALESCE(?, detail_json), updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    canonical_json(detail) if detail is not None else None,
+                    now,
+                    job_id,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM studio_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            return self._studio_job_dict(updated)
+
+    def studio_jobs(self, production_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            rows = connection.execute(
+                "SELECT * FROM studio_jobs WHERE production_id = ? ORDER BY created_at",
+                (production_id,),
+            ).fetchall()
+            return [self._studio_job_dict(row) for row in rows]
+
     def complete_specialist_handoff(
         self,
         operation_id: str,
@@ -3534,6 +3785,7 @@ class Repository:
         result_packet_hash: str,
         tool_version: str | None = None,
         operator_note: str | None = None,
+        approved_variance_minor: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Atomically settle a specialist operation and its linked handoff."""
 
@@ -3568,10 +3820,24 @@ class Repository:
                         "Studio actual cost currency does not match its reservation"
                     )
                 if actual_minor > budget_job["reserved_cost_minor"]:
-                    raise BudgetExceededError(
-                        "Studio actual cost exceeds the controller reservation; "
-                        "manual reconciliation is required"
+                    if (
+                        approved_variance_minor is None
+                        or approved_variance_minor != actual_minor
+                    ):
+                        raise BudgetExceededError(
+                            "Studio actual cost exceeds the controller reservation; "
+                            "manual reconciliation is required"
+                        )
+                    project_row = self._require_project(
+                        connection, operation["project_id"]
                     )
+                    if (
+                        project_row["spent_minor"] + actual_minor
+                        > project_row["max_budget_minor"]
+                    ):
+                        raise BudgetExceededError(
+                            "Studio actual cost would exceed the project budget"
+                        )
             elif actual_minor:
                 raise IntegrityError(
                     "Paid specialist execution is missing a controller budget reservation"
@@ -4175,6 +4441,7 @@ class Repository:
         response: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
         approved_variance_minor: int | None = None,
+        asset_artifact_id: str | None = None,
     ) -> JobRecord:
         if target not in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
             raise IntegrityError(f"Invalid terminal status: {target.value}")
@@ -4286,6 +4553,10 @@ class Repository:
                     note=f"Provider cost for {target.value} job",
                 )
             self.settle_budget_item_for_job(connection, job_id, actual_cost.minor)
+            if asset_artifact_id:
+                self._record_asset_cost_tx(
+                    connection, job_id, asset_artifact_id, actual_cost.minor, now
+                )
             self._event(
                 connection,
                 project_id=job["project_id"],
@@ -4691,9 +4962,11 @@ class Repository:
         return {
             "id": row["id"],
             "project_id": row["project_id"],
+            "kind": row["kind"],
             "plan_id": row["plan_id"],
             "item_id": row["item_id"],
             "job_id": row["job_id"],
+            "operation_id": row["operation_id"],
             "estimated": Money.from_minor(
                 row["estimated_minor"], row["currency"]
             ).model_dump(mode="json"),
@@ -4724,8 +4997,8 @@ class Repository:
         self,
         project_id: str,
         *,
-        plan_id: str,
-        item_id: str,
+        plan_id: str | None,
+        item_id: str | None,
         job_id: str,
         estimated_minor: int,
         actual_minor: int,
@@ -4733,6 +5006,8 @@ class Repository:
         currency: str,
         requested_by: str | None,
         reason: str | None,
+        kind: str = "plan_item",
+        operation_id: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
         with self.database.transaction() as connection:
@@ -4750,17 +5025,19 @@ class Repository:
             connection.execute(
                 """
                 INSERT INTO budget_variance_requests(
-                    id, project_id, plan_id, item_id, job_id, estimated_minor,
-                    actual_minor, allowed_minor, overage_minor, currency, status,
-                    requested_by, reason, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, project_id, kind, plan_id, item_id, job_id, operation_id,
+                    estimated_minor, actual_minor, allowed_minor, overage_minor,
+                    currency, status, requested_by, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
                     project_id,
+                    kind,
                     plan_id,
                     item_id,
                     job_id,
+                    operation_id,
                     estimated_minor,
                     actual_minor,
                     allowed_minor,
@@ -4837,6 +5114,173 @@ class Repository:
             "variance_minor": row["variance_minor"],
             "created_at": row["created_at"],
         }
+
+    def _record_asset_cost_tx(
+        self,
+        connection: sqlite3.Connection,
+        job_id: str,
+        artifact_id: str,
+        actual_minor: int,
+        now: str,
+    ) -> None:
+        item = connection.execute(
+            "SELECT * FROM budget_plan_items WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if not item:
+            return
+        existing = connection.execute(
+            "SELECT id FROM asset_costs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        if existing:
+            return
+        job = connection.execute(
+            "SELECT provider, operation, currency FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        cost_id = new_id("assetcost")
+        connection.execute(
+            """
+            INSERT INTO asset_costs(
+                id, project_id, job_id, plan_id, item_id, slot_id, artifact_id,
+                provider, operation, currency, estimated_minor, actual_minor,
+                variance_minor, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                cost_id,
+                item["project_id"],
+                job_id,
+                item["plan_id"],
+                item["id"],
+                item["slot_id"],
+                artifact_id,
+                job["provider"],
+                job["operation"],
+                job["currency"],
+                item["estimated_minor"],
+                actual_minor,
+                actual_minor - item["estimated_minor"],
+                now,
+            ),
+        )
+        self._event(
+            connection,
+            project_id=item["project_id"],
+            entity_type="asset_cost",
+            entity_id=cost_id,
+            event_type="asset_cost.recorded",
+            payload={
+                "job_id": job_id,
+                "slot_id": item["slot_id"],
+                "artifact_id": artifact_id,
+                "estimated_minor": item["estimated_minor"],
+                "actual_minor": actual_minor,
+            },
+        )
+
+    def discard_artifact(self, artifact_id: str) -> bool:
+        """Remove an artifact registered in this run; refuse if it is referenced."""
+
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+            ).fetchone()
+            if not row:
+                return False
+            dependents = connection.execute(
+                """
+                SELECT COUNT(*) FROM artifact_dependencies
+                WHERE entity_type = 'artifact' AND entity_id = ?
+                """,
+                (artifact_id,),
+            ).fetchone()[0]
+            if dependents:
+                raise ConflictError(
+                    "Artifact is referenced by other records and cannot be discarded"
+                )
+            connection.execute(
+                "DELETE FROM artifact_dependencies WHERE artifact_id = ?",
+                (artifact_id,),
+            )
+            connection.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="artifact",
+                entity_id=artifact_id,
+                event_type="artifact.discarded",
+                payload={"relative_path": row["relative_path"]},
+            )
+            return True
+
+    def raise_project_budget(
+        self,
+        project_id: str,
+        *,
+        new_max: Money,
+        raised_by: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            project = self._require_project(connection, project_id)
+            if new_max.currency != project["currency"]:
+                raise IntegrityError(f"Budget currency must stay {project['currency']}")
+            if new_max.minor <= project["max_budget_minor"]:
+                raise IntegrityError("A budget raise must increase the maximum")
+            committed = project["spent_minor"] + project["reserved_minor"]
+            if new_max.minor < committed:
+                raise IntegrityError(
+                    "The new budget cannot be below committed and reserved spend"
+                )
+            connection.execute(
+                """
+                UPDATE projects
+                SET max_budget_minor = ?, version = version + 1, updated_at = ?
+                WHERE id = ?
+                """,
+                (new_max.minor, now, project_id),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="project",
+                entity_id=project_id,
+                event_type="budget.raised",
+                payload={
+                    "from_minor": project["max_budget_minor"],
+                    "to_minor": new_max.minor,
+                    "currency": new_max.currency,
+                    "raised_by": raised_by,
+                    "reason": reason,
+                },
+            )
+            updated = self._require_project(connection, project_id)
+            return self._project_from_row(updated).model_dump(mode="json")
+
+    def record_overage_reconciliation(
+        self,
+        project_id: str,
+        *,
+        job_id: str,
+        actual_cost: Money,
+        reconciled_by: str,
+        reason: str,
+    ) -> None:
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="job",
+                entity_id=job_id,
+                event_type="budget.overage_reconciled",
+                payload={
+                    "actual_cost_minor": actual_cost.minor,
+                    "currency": actual_cost.currency,
+                    "reconciled_by": reconciled_by,
+                    "reason": reason,
+                },
+            )
 
     def record_asset_cost(
         self,
@@ -4930,6 +5374,20 @@ class Repository:
             if not row:
                 return None
             return self._artifact_dict(connection, row)
+
+    def approved_variance_for_job(
+        self, job_id: str, actual_minor: int
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM budget_variance_requests
+                WHERE job_id = ? AND actual_minor = ? AND status = 'approved'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (job_id, actual_minor),
+            ).fetchone()
+            return self._variance_request_dict(row) if row else None
 
     def pending_variance_requests(self, project_id: str) -> list[dict[str, Any]]:
         with self.database.read() as connection:

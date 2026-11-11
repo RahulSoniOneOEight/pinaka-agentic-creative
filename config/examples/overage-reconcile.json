@@ -1,0 +1,6 @@
+{
+  "job_id": "job_REPLACE_WITH_JOB_ID",
+  "actual_cost": { "amount": "0.70", "currency": "USD" },
+  "reconciled_by": "producer",
+  "reason": "Provider invoiced above the reserved estimate"
+}

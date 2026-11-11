@@ -55,6 +55,7 @@ from .errors import (
     IntegrityError,
     InvalidTransitionError,
     NotFoundError,
+    PinakaError,
     QuotaExceededError,
     RightsEligibilityError,
     VarianceApprovalRequiredError,
@@ -70,6 +71,7 @@ from .models import (
     AssetUseContext,
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
+    BudgetRaiseCreate,
     CapabilityResult,
     CreativeElementCreate,
     DeliverableCreate,
@@ -81,6 +83,7 @@ from .models import (
     JobRecord,
     JobRequest,
     Money,
+    OverageReconcileCreate,
     PilotContract,
     ProjectCreate,
     ProjectRecord,
@@ -90,6 +93,7 @@ from .models import (
     ShotElementBindingCreate,
     SlotCreate,
     StudioReadinessReport,
+    StudioResultOutputImport,
     StudioResultPacketImport,
     StudioScope,
     StudioSpendApprovalCreate,
@@ -113,6 +117,12 @@ from .repository import Repository
 from .review_policy import CampaignRisk, ReviewPolicy, decide_review
 from .sourcing import clear_resolved_uncertainty, evaluate_asset_candidate
 from .studio import StudioAdapter
+from .studio_gateway import (
+    StudioOpenRequest,
+    StudioPending,
+    StudioSubmission,
+    StudioTransport,
+)
 from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json, utc_now
 
 ALLOWED_TRANSITIONS: dict[ProjectStatus, set[ProjectStatus]] = {
@@ -378,6 +388,15 @@ class CreativeController:
             }
             for shot in shots
         ]
+        proposed_elements = propose_elements(request.text)
+        recorded_elements: list[dict[str, Any]] = []
+        if request.persist_elements:
+            for spec in proposed_elements:
+                recorded_elements.append(
+                    self.repository.record_creative_element(
+                        project_id, CreativeElementCreate(**spec)
+                    )
+                )
         return {
             "source_artifact": artifact,
             "analysis": {
@@ -390,7 +409,8 @@ class CreativeController:
             "plan_created": scene_plan is not None,
             "plan_skipped_reason": skipped_reason,
             "proposed_slots": proposed_slots,
-            "proposed_elements": propose_elements(request.text),
+            "proposed_elements": proposed_elements,
+            "recorded_elements": recorded_elements,
         }
 
     def record_creative_element(
@@ -2622,7 +2642,12 @@ class CreativeController:
         packet = json.loads(self.read_artifact_text(handoff["work_packet_artifact_id"]))
         return {"handoff": handoff, "packet": packet}
 
-    def import_studio_result(self, request: StudioResultPacketImport) -> dict[str, Any]:
+    def import_studio_result(
+        self,
+        request: StudioResultPacketImport,
+        *,
+        approved_variance_minor: int | None = None,
+    ) -> dict[str, Any]:
         self._reject_sensitive_payload(request.model_dump(mode="json"), "studio_result")
         operation = self.repository.get_tool_operation(request.operation_id)
         if operation["operation"] != "openmontage.execute_work_packet":
@@ -2703,21 +2728,37 @@ class CreativeController:
         self._reject_sensitive_payload(
             receipt_request.model_dump(mode="json"), "studio_receipt"
         )
-        receipt, handoff = self.repository.record_specialist_result(
-            request.operation_id,
-            receipt_request,
-            result_packet_hash=result_hash,
-            tool_version=(
-                str(request.details["tool_version"])
-                if request.details.get("tool_version")
-                else None
-            ),
-            operator_note=(
-                str(request.details["operator_note"])
-                if request.details.get("operator_note")
-                else None
-            ),
-        )
+        try:
+            receipt, handoff = self.repository.record_specialist_result(
+                request.operation_id,
+                receipt_request,
+                result_packet_hash=result_hash,
+                approved_variance_minor=approved_variance_minor,
+                tool_version=(
+                    str(request.details["tool_version"])
+                    if request.details.get("tool_version")
+                    else None
+                ),
+                operator_note=(
+                    str(request.details["operator_note"])
+                    if request.details.get("operator_note")
+                    else None
+                ),
+            )
+        except PinakaError:
+            for artifact in artifacts:
+                try:
+                    discarded = self.repository.discard_artifact(artifact["id"])
+                except (ConflictError, OSError):
+                    discarded = False
+                if discarded:
+                    try:
+                        self.artifact_store.resolve(
+                            artifact["project_id"], artifact["relative_path"]
+                        ).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            raise
         return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
 
     def run_studio_work_packet(
@@ -2825,6 +2866,265 @@ class CreativeController:
             tool_version="deterministic-fake/v1",
         )
         return {"handoff": handoff, "receipt": receipt, "artifacts": artifacts}
+
+    def studio_production(self, operation_id: str) -> dict[str, Any] | None:
+        production = self.repository.get_studio_production(operation_id)
+        if not production:
+            return None
+        return {
+            "production": production,
+            "jobs": self.repository.studio_jobs(production["id"]),
+        }
+
+    def run_studio_production(
+        self,
+        project_id: str,
+        operation_id: str,
+        transport: StudioTransport,
+        *,
+        max_polls: int = 3,
+        requested_by: str | None = None,
+    ) -> dict[str, Any]:
+        """Drive one authorized Studio production to completion or a resumable step."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot run Studio work for a {project.status.value} project"
+            )
+        readiness = self.studio_status()
+        if not readiness["ready"]:
+            raise ApprovalRequiredError(
+                "Studio readiness must be verified before a live run: "
+                f"{readiness['reason']}"
+            )
+        operation = self.repository.get_tool_operation(operation_id)
+        if operation["project_id"] != project_id:
+            raise ConflictError("Operation belongs to a different project")
+        if operation["operation"] != "openmontage.execute_work_packet":
+            raise IntegrityError("Operation is not an OpenMontage work packet")
+        handoff = self.repository.specialist_handoff_for_operation(operation_id)
+        if not handoff["budget_job_id"]:
+            raise IntegrityError("A Studio production requires a reserved budget job")
+        budget_job = self.repository.get_job(handoff["budget_job_id"])
+        packet = json.loads(self.read_artifact_text(handoff["work_packet_artifact_id"]))
+        packet["packet_hash"] = handoff["work_packet_hash"]
+
+        existing_receipt = self.repository.get_execution_receipt(operation_id)
+        if existing_receipt:
+            return {
+                "status": "settled",
+                "receipt": existing_receipt,
+                "production": self.repository.get_studio_production(operation_id),
+            }
+
+        production = self.repository.get_studio_production(operation_id)
+        if production is None:
+            if budget_job.status != JobStatus.BUDGET_RESERVED:
+                raise ConflictError(
+                    f"Budget job is {budget_job.status.value}; a run needs a fresh reservation"
+                )
+            open_request = StudioOpenRequest(
+                project_id=project_id,
+                title=f"{project.name} — {handoff['work_packet_hash'][:8]}",
+                intent=project.objective,
+                autonomy=str(packet["scope"].get("autonomy", "autopilot")),
+                max_cost_minor=budget_job.reserved_cost.minor,
+                currency=budget_job.reserved_cost.currency,
+                packet_hash=handoff["work_packet_hash"],
+                constraints={
+                    "publication": False,
+                    "paid_generation": True,
+                    "exact_hash_approval_required": True,
+                    "system_of_record": "pinaka.CreativeController",
+                },
+            )
+            try:
+                opened = transport.open_production(open_request)
+            except StudioPending as pending:
+                return {
+                    "status": "pending",
+                    "step": pending.step,
+                    "message": str(pending),
+                    "production": None,
+                }
+            production = self.repository.open_studio_production(
+                project_id,
+                operation_id=operation_id,
+                transport=transport.name,
+                title=open_request.title,
+                autonomy=open_request.autonomy,
+                budget_minor=open_request.max_cost_minor,
+                currency=open_request.currency,
+                packet_hash=handoff["work_packet_hash"],
+                external_production_id=opened.external_production_id,
+                status="opened",
+            )
+
+        jobs = self.repository.studio_jobs(production["id"])
+        if not jobs:
+            try:
+                submission = transport.submit(production, packet)
+            except StudioPending as pending:
+                return {
+                    "status": "pending",
+                    "step": pending.step,
+                    "message": str(pending),
+                    "production": production,
+                }
+            job_row = self.repository.record_studio_job(
+                production["id"],
+                external_job_id=submission.external_job_id,
+                phase="work_packet",
+                status=submission.status,
+                request_hash=handoff["work_packet_hash"],
+                detail=submission.raw,
+            )
+            production = self.repository.update_studio_production(
+                production["id"], status="submitted"
+            )
+        else:
+            job_row = jobs[0]
+            submission = StudioSubmission(
+                external_job_id=job_row["external_job_id"],
+                status=job_row["status"],
+                raw=job_row["detail"] or {},
+            )
+
+        terminal = {"completed", "failed", "cancelled"}
+        for _ in range(max(1, max_polls)):
+            if job_row["status"] in terminal:
+                break
+            try:
+                polled = transport.poll(production, submission)
+            except StudioPending as pending:
+                return {
+                    "status": "pending",
+                    "step": pending.step,
+                    "message": str(pending),
+                    "production": production,
+                }
+            job_row = self.repository.update_studio_job(
+                job_row["id"], status=polled.status, detail=polled.detail
+            )
+            if polled.status in terminal:
+                break
+
+        if job_row["status"] not in terminal:
+            production = self.repository.update_studio_production(
+                production["id"], status="working"
+            )
+            return {
+                "status": "pending",
+                "step": "poll",
+                "message": "Studio is still working; re-run to poll again",
+                "production": production,
+            }
+
+        if job_row["status"] != "completed":
+            outcome = ToolOperationStatus.FAILED
+            if job_row["status"] == "cancelled":
+                outcome = ToolOperationStatus.CANCELLED
+            result = self.import_studio_result(
+                StudioResultPacketImport(
+                    operation_id=operation_id,
+                    status=outcome,
+                    elapsed_ms=0,
+                    actual_cost=Money(
+                        amount=Decimal(0),
+                        currency=budget_job.reserved_cost.currency,
+                    ),
+                    details={
+                        "integration": "openmontage",
+                        "transport": transport.name,
+                        "external_job_id": submission.external_job_id,
+                        "studio_status": job_row["status"],
+                    },
+                )
+            )
+            production = self.repository.update_studio_production(
+                production["id"],
+                status=job_row["status"],
+                last_error=f"Studio job {job_row['status']}",
+            )
+            return {"status": job_row["status"], "production": production, **result}
+
+        try:
+            collected = transport.collect(production, submission)
+        except StudioPending as pending:
+            return {
+                "status": "pending",
+                "step": pending.step,
+                "message": str(pending),
+                "production": production,
+            }
+
+        approved = self.repository.approved_variance_for_job(
+            budget_job.id, collected.actual_cost_minor
+        )
+        result_packet = StudioResultPacketImport(
+            operation_id=operation_id,
+            status=ToolOperationStatus.SUCCEEDED,
+            elapsed_ms=0,
+            outputs=tuple(
+                StudioResultOutputImport(
+                    source_path=output.source_path,
+                    relative_path=output.relative_path,
+                    kind=output.kind,
+                    content_hash=output.content_hash,
+                    role=output.role,
+                    parent_artifact_id=output.parent_artifact_id,
+                )
+                for output in collected.outputs
+            ),
+            actual_cost=Money.from_minor(
+                collected.actual_cost_minor, budget_job.reserved_cost.currency
+            ),
+            details={
+                "integration": "openmontage",
+                "transport": transport.name,
+                "external_production_id": production["external_production_id"],
+                "external_job_id": submission.external_job_id,
+            },
+        )
+        try:
+            imported = self.import_studio_result(
+                result_packet,
+                approved_variance_minor=(
+                    collected.actual_cost_minor if approved else None
+                ),
+            )
+        except BudgetExceededError:
+            request = self.repository.record_variance_request(
+                project_id,
+                kind="studio_run",
+                plan_id=None,
+                item_id=None,
+                operation_id=operation_id,
+                job_id=budget_job.id,
+                estimated_minor=budget_job.reserved_cost.minor,
+                actual_minor=collected.actual_cost_minor,
+                allowed_minor=budget_job.reserved_cost.minor,
+                currency=budget_job.reserved_cost.currency,
+                requested_by=requested_by,
+                reason="Studio run cost exceeded its controller reservation",
+            )
+            production = self.repository.update_studio_production(
+                production["id"], status="awaiting_approval"
+            )
+            return {
+                "status": "approval_required",
+                "message": (
+                    "Studio reported a cost above the run reservation. Approve or "
+                    f"reject request {request['id']}, then run again."
+                ),
+                "request": request,
+                "production": production,
+            }
+        production = self.repository.update_studio_production(
+            production["id"], status="completed"
+        )
+        return {"status": "completed", "production": production, **imported}
 
     def run_tool_once(
         self,
@@ -4467,6 +4767,8 @@ class CreativeController:
         actual_cost: Money,
         response: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
+        asset_artifact_id: str | None = None,
+        approved_variance_minor: int | None = None,
     ) -> JobRecord:
         if response is not None:
             self._reject_sensitive_payload(response, "provider_response")
@@ -4478,6 +4780,8 @@ class CreativeController:
             actual_cost=actual_cost,
             response=response,
             error=error,
+            asset_artifact_id=asset_artifact_id,
+            approved_variance_minor=approved_variance_minor,
         )
 
     def settle_budget_item(
@@ -4528,6 +4832,62 @@ class CreativeController:
 
     def variance_requests(self, project_id: str) -> list[dict[str, Any]]:
         return self.repository.pending_variance_requests(project_id)
+
+    def raise_project_budget(
+        self, project_id: str, request: BudgetRaiseCreate
+    ) -> dict[str, Any]:
+        """Human-authorized increase of the project budget ceiling."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot raise the budget of a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(request.model_dump(mode="json"), "budget_raise")
+        updated = self.repository.raise_project_budget(
+            project_id,
+            new_max=request.new_max,
+            raised_by=request.raised_by,
+            reason=request.reason,
+        )
+        return {"project": updated, "summary": self.budget_summary(project_id)}
+
+    def reconcile_overage(
+        self, project_id: str, request: OverageReconcileCreate
+    ) -> dict[str, Any]:
+        """Record a human-accepted provider overrun and settle the job."""
+
+        job = self.repository.get_job(request.job_id)
+        if job.project_id != project_id:
+            raise ConflictError("Job belongs to a different project")
+        if job.status in {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }:
+            raise ConflictError(f"Job is already terminal: {job.status.value}")
+        if job.estimated_cost.currency != request.actual_cost.currency:
+            raise IntegrityError("Reconciled cost currency must match the job")
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "overage_reconcile"
+        )
+        settled = self.settle_job(
+            request.job_id,
+            target=JobStatus.SUCCEEDED,
+            actual_cost=request.actual_cost,
+            approved_variance_minor=request.actual_cost.minor,
+        )
+        self.repository.record_overage_reconciliation(
+            project_id,
+            job_id=request.job_id,
+            actual_cost=request.actual_cost,
+            reconciled_by=request.reconciled_by,
+            reason=request.reason,
+        )
+        return {
+            "job": settled.model_dump(mode="json"),
+            "summary": self.budget_summary(project_id),
+        }
 
     def asset_costs(self, project_id: str) -> dict[str, Any]:
         """Per-asset generation cost ledger with project and provider totals."""
@@ -4610,6 +4970,48 @@ class CreativeController:
         }:
             raise ConflictError(f"Job is already terminal: {job.status.value}")
         actual = Money.from_minor(variance["actual_minor"], variance["currency"])
+        if variance["kind"] == "studio_run":
+            if request.decision == "approve":
+                decision = self.repository.decide_variance_request(
+                    variance["id"],
+                    decision="approved",
+                    decided_by=request.decided_by,
+                    decision_reason=request.reason,
+                )
+                return {
+                    "decision": decision,
+                    "job": job.model_dump(mode="json"),
+                    "next": "run studio-run again to collect and settle the run",
+                    "summary": self.budget_summary(project_id),
+                }
+            self.repository.decide_variance_request(
+                variance["id"],
+                decision="rejected",
+                decided_by=request.decided_by,
+                decision_reason=request.reason,
+            )
+            cancelled = self.import_studio_result(
+                StudioResultPacketImport(
+                    operation_id=variance["operation_id"],
+                    status=ToolOperationStatus.CANCELLED,
+                    elapsed_ms=0,
+                    actual_cost=Money(amount=0, currency=variance["currency"]),
+                    details={
+                        "integration": "openmontage",
+                        "cancelled_reason": request.reason,
+                    },
+                )
+            )
+            production = self.repository.get_studio_production(variance["operation_id"])
+            if production:
+                self.repository.update_studio_production(
+                    production["id"], status="cancelled"
+                )
+            return {
+                "decision": self.repository.get_variance_request(variance["id"]),
+                "job": cancelled["receipt"],
+                "summary": self.budget_summary(project_id),
+            }
         if request.decision == "approve":
             settled = self.repository.settle_job(
                 variance["job_id"],
@@ -4669,10 +5071,8 @@ class CreativeController:
                 project_id, planned_plan_id, item_key, request
             )
             job = JobRecord.model_validate(reserved["job"])
-            planned_item = reserved["item"]
         else:
             planned_plan_id = None
-            planned_item = None
             job = self.reserve_job(project_id, request)
         if job.status == JobStatus.SUCCEEDED:
             return job, None
@@ -4719,21 +5119,8 @@ class CreativeController:
             target=JobStatus.SUCCEEDED,
             actual_cost=result.actual_cost,
             response=result.raw,
+            asset_artifact_id=artifact["id"] if budget_plan_item else None,
         )
-        if budget_plan_item and planned_item is not None:
-            self.repository.record_asset_cost(
-                project_id,
-                job_id=settled.id,
-                plan_id=planned_plan_id,
-                item_id=planned_item["id"],
-                slot_id=planned_item["slot_id"],
-                artifact_id=artifact["id"],
-                provider=request.provider,
-                operation=request.operation,
-                currency=settled.actual_cost.currency,
-                estimated_minor=planned_item["estimated_minor"],
-                actual_minor=settled.actual_cost.minor,
-            )
         return settled, artifact
 
     def next_action(self, project_id: str) -> dict[str, Any]:
