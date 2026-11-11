@@ -964,6 +964,18 @@ def cmd_export_captions(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).export_captions(args.project_id)
 
 
+def cmd_qa_render(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).qa_render(
+        args.project_id,
+        artifact_id=args.artifact_id,
+        expected_duration=args.duration,
+        expected_width=args.width,
+        expected_height=args.height,
+        expected_fps=args.fps,
+        expect_audio=not args.no_audio,
+    )
+
+
 def cmd_burn_captions(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).burn_captions(
         args.project_id,
@@ -2434,6 +2446,19 @@ def build_parser() -> argparse.ArgumentParser:
     captions_burn_parser.add_argument("--video", required=True)
     captions_burn_parser.add_argument("--captions", required=True)
     captions_burn_parser.set_defaults(handler=cmd_burn_captions)
+
+    qa_render_parser = subparsers.add_parser(
+        "qa-render",
+        help="Technical QA on a rendered deliverable, recorded per check",
+    )
+    qa_render_parser.add_argument("project_id")
+    qa_render_parser.add_argument("artifact_id")
+    qa_render_parser.add_argument("--duration", type=float)
+    qa_render_parser.add_argument("--width", type=int)
+    qa_render_parser.add_argument("--height", type=int)
+    qa_render_parser.add_argument("--fps", type=float)
+    qa_render_parser.add_argument("--no-audio", action="store_true")
+    qa_render_parser.set_defaults(handler=cmd_qa_render)
 
     mux_parser = subparsers.add_parser(
         "mux-narration",

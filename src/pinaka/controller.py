@@ -3360,6 +3360,159 @@ class CreativeController:
                 return artifact
         return None
 
+    def qa_render(
+        self,
+        project_id: str,
+        *,
+        artifact_id: str,
+        expected_duration: float | None = None,
+        expected_width: int | None = None,
+        expected_height: int | None = None,
+        expected_fps: float | None = None,
+        expect_audio: bool = True,
+        probe: Any | None = None,
+    ) -> dict[str, Any]:
+        """Technical QA on a rendered deliverable, recorded per check."""
+
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        if not self.verify_artifact(artifact_id):
+            raise IntegrityError("Rendered file does not match its registered hash")
+        path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        metadata = (probe or FFmpegEncodeAdapter().probe)(path)
+        checks: list[dict[str, Any]] = []
+
+        def record(
+            name: str, status: str, detail: str, evidence: dict[str, Any]
+        ) -> None:
+            self.repository.record_qa_result(
+                project_id=project_id,
+                artifact_id=artifact_id,
+                check_name=name,
+                status=status,
+                findings=evidence,
+                evidence_hash=artifact["content_hash"],
+            )
+            checks.append(
+                {
+                    "check": name,
+                    "status": status,
+                    "detail": detail,
+                    "evidence": evidence,
+                }
+            )
+
+        container = str(metadata.get("format", "")).lower()
+        container_tokens = {token.strip() for token in container.split(",")}
+        record(
+            "technical.container",
+            "pass" if container_tokens & {"mp4", "mov", "m4a"} else "fail",
+            f"container {container or 'unknown'}",
+            {"format": metadata.get("format")},
+        )
+        codec = str(metadata.get("codec", "")).lower()
+        record(
+            "technical.codec",
+            "pass" if codec in {"h264", "hevc"} else "warn",
+            f"video codec {codec or 'unknown'}",
+            {"codec": metadata.get("codec")},
+        )
+        duration = float(metadata.get("duration_seconds") or 0)
+        if expected_duration is None:
+            record(
+                "technical.duration",
+                "pass",
+                f"duration {duration}s",
+                {"duration_seconds": duration},
+            )
+        else:
+            delta = abs(duration - expected_duration)
+            status = "pass" if delta <= 0.25 else "warn" if delta <= 1.0 else "fail"
+            record(
+                "technical.duration",
+                status,
+                f"duration {duration}s vs expected {expected_duration}s",
+                {"duration_seconds": duration, "expected": expected_duration},
+            )
+        width = int(metadata.get("width_px") or 0)
+        height = int(metadata.get("height_px") or 0)
+        resolution_ok = True
+        if expected_width is not None:
+            resolution_ok = resolution_ok and width == expected_width
+        if expected_height is not None:
+            resolution_ok = resolution_ok and height == expected_height
+        record(
+            "technical.resolution",
+            "pass" if resolution_ok else "fail",
+            f"{width}x{height}",
+            {
+                "width_px": width,
+                "height_px": height,
+                "expected_width": expected_width,
+                "expected_height": expected_height,
+            },
+        )
+        if expected_fps is not None:
+            fps = float(metadata.get("fps") or 0)
+            record(
+                "technical.frame_rate",
+                "pass" if abs(fps - expected_fps) <= 0.51 else "warn",
+                f"{fps} fps",
+                {"fps": fps, "expected": expected_fps},
+            )
+        has_audio = bool(metadata.get("has_audio"))
+        record(
+            "technical.audio",
+            "pass" if has_audio == expect_audio else "fail",
+            f"audio stream {'present' if has_audio else 'absent'}",
+            {"has_audio": has_audio, "expected": expect_audio},
+        )
+
+        statuses = {check["status"] for check in checks}
+        overall = (
+            QAStatus.FAIL.value
+            if QAStatus.FAIL.value in statuses
+            else QAStatus.WARN.value
+            if QAStatus.WARN.value in statuses
+            else QAStatus.PASS.value
+        )
+        report = {
+            "schema": "pinaka.render-qa/v1",
+            "project_id": project_id,
+            "artifact_id": artifact_id,
+            "content_hash": artifact["content_hash"],
+            "overall": overall,
+            "metadata": metadata,
+            "checks": checks,
+        }
+        content = canonical_json(report).encode("utf-8")
+        digest = sha256_bytes(content)
+        report_artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.QA,
+            relative_path=f"qa/render-report-{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "render_qa",
+                "artifact_id": artifact_id,
+                "overall": overall,
+            },
+            dependencies=(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=artifact_id,
+                    entity_hash=artifact["content_hash"],
+                ),
+            ),
+        )
+        return {
+            "overall": overall,
+            "checks": checks,
+            "report": report,
+            "report_artifact": report_artifact,
+        }
+
     def studio_production(self, operation_id: str) -> dict[str, Any] | None:
         production = self.repository.get_studio_production(operation_id)
         if not production:

@@ -162,6 +162,27 @@ pinaka synthesize-narration-vertex <project-id> --script-file script.txt --reser
 With `--reserve`, the estimated TTS cost is reserved as a controller budget job before synthesis and
 settled afterwards; a failed synthesis cancels at zero. USD projects only.
 
+## Governed finish
+
+```powershell
+pinaka qa-render <project-id> <artifact-id> --duration 10 --width 540 --height 960 --fps 10
+```
+
+QA records one result per check against the exact artifact:
+
+| Check | Pass condition |
+|---|---|
+| `technical.container` | mp4 / mov / m4a |
+| `technical.codec` | h264 (hevc warns) |
+| `technical.duration` | within 0.25 s, warn to 1 s |
+| `technical.resolution` | exact width and height |
+| `technical.frame_rate` | within 0.5 fps |
+| `technical.audio` | audio present when required |
+
+A JSON report is stored as a `qa` artifact with the render as its dependency. Final approval then
+requires a current artifact whose hash matches `output_hash` **and** recorded QA with no failure, so
+the same gate enforces both provenance and quality.
+
 ## Verified render
 
 
@@ -175,6 +196,9 @@ Full pass with artwork and narration: 12 embedded layers (pond background + thre
 shot), 100 frames at 10 fps, live Vertex TTS narration, loudness-normalized mux and a soft caption
 track → 10.0 s H.264 + AAC + mov_text, verified. Inspected frames show three separated ducklings
 swimming, and the third scene revealing them one at a time.
+
+Governed finish: QA passed all six checks on the final hash, final approval bound to that exact hash,
+and the project archived — 12 artifacts, one budget job, **$0.01 spent**, nothing reserved.
 
 ## Not implemented
 
