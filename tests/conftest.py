@@ -5,7 +5,13 @@ from decimal import Decimal
 import pytest
 
 from pinaka.controller import CreativeController
-from pinaka.enums import ApprovalStage, ContentMode, ProjectStatus
+from pinaka.enums import (
+    ApprovalStage,
+    ArtifactKind,
+    ContentMode,
+    ProjectStatus,
+    QAStatus,
+)
 from pinaka.models import ApprovalRequest, FactSetCreate, Money, ProjectCreate
 
 
@@ -67,3 +73,24 @@ def advance_to_sourcing(controller: CreativeController, *, name: str = "Pilot Pr
         ),
     )
     return project, fact_set, sourcing_approval
+
+
+def record_final_candidate(controller: CreativeController, project_id: str) -> dict:
+    """Register a verifiable final render plus passing QA for approval tests."""
+
+    artifact = controller.write_artifact(
+        project_id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/final-candidate-v1.mp4",
+        content=b"final candidate v1",
+        operation={"type": "test_final_render"},
+    )
+    controller.repository.record_qa_result(
+        project_id=project_id,
+        artifact_id=artifact["id"],
+        check_name="technical.container",
+        status=QAStatus.PASS.value,
+        findings={"duration_seconds": 5, "codec": "h264"},
+        evidence_hash=artifact["content_hash"],
+    )
+    return artifact

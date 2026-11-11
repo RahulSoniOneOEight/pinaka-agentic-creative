@@ -4803,6 +4803,134 @@ class Repository:
                 raise NotFoundError(f"Variance request not found: {request_id}")
             return self._variance_request_dict(row)
 
+    @staticmethod
+    def _asset_cost_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "job_id": row["job_id"],
+            "plan_id": row["plan_id"],
+            "item_id": row["item_id"],
+            "slot_id": row["slot_id"],
+            "artifact_id": row["artifact_id"],
+            "provider": row["provider"],
+            "operation": row["operation"],
+            "currency": row["currency"],
+            "estimated": Money.from_minor(
+                row["estimated_minor"], row["currency"]
+            ).model_dump(mode="json"),
+            "actual": Money.from_minor(row["actual_minor"], row["currency"]).model_dump(
+                mode="json"
+            ),
+            "variance": Money.from_minor(
+                abs(row["variance_minor"]), row["currency"]
+            ).model_dump(mode="json"),
+            "variance_direction": (
+                "over"
+                if row["variance_minor"] > 0
+                else "under"
+                if row["variance_minor"] < 0
+                else "even"
+            ),
+            "estimated_minor": row["estimated_minor"],
+            "actual_minor": row["actual_minor"],
+            "variance_minor": row["variance_minor"],
+            "created_at": row["created_at"],
+        }
+
+    def record_asset_cost(
+        self,
+        project_id: str,
+        *,
+        job_id: str,
+        plan_id: str | None,
+        item_id: str | None,
+        slot_id: str | None,
+        artifact_id: str | None,
+        provider: str,
+        operation: str,
+        currency: str,
+        estimated_minor: int,
+        actual_minor: int,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            existing = connection.execute(
+                "SELECT * FROM asset_costs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if existing:
+                return self._asset_cost_dict(existing)
+            cost_id = new_id("assetcost")
+            connection.execute(
+                """
+                INSERT INTO asset_costs(
+                    id, project_id, job_id, plan_id, item_id, slot_id, artifact_id,
+                    provider, operation, currency, estimated_minor, actual_minor,
+                    variance_minor, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cost_id,
+                    project_id,
+                    job_id,
+                    plan_id,
+                    item_id,
+                    slot_id,
+                    artifact_id,
+                    provider,
+                    operation,
+                    currency,
+                    estimated_minor,
+                    actual_minor,
+                    actual_minor - estimated_minor,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="asset_cost",
+                entity_id=cost_id,
+                event_type="asset_cost.recorded",
+                payload={
+                    "job_id": job_id,
+                    "slot_id": slot_id,
+                    "artifact_id": artifact_id,
+                    "estimated_minor": estimated_minor,
+                    "actual_minor": actual_minor,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM asset_costs WHERE id = ?", (cost_id,)
+            ).fetchone()
+            return self._asset_cost_dict(row)
+
+    def list_asset_costs(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM asset_costs WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            ).fetchall()
+            return [self._asset_cost_dict(row) for row in rows]
+
+    def artifact_by_content_hash(
+        self, project_id: str, content_hash: str
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM artifacts
+                WHERE project_id = ? AND content_hash = ? AND status = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (project_id, content_hash, ArtifactStatus.CURRENT.value),
+            ).fetchone()
+            if not row:
+                return None
+            return self._artifact_dict(connection, row)
+
     def pending_variance_requests(self, project_id: str) -> list[dict[str, Any]]:
         with self.database.read() as connection:
             self._require_project(connection, project_id)

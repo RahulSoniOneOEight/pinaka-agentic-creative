@@ -9,7 +9,7 @@ from pinaka.judge import VisualJudgement, VisualScores
 from pinaka.models import ApprovalRequest
 from pinaka.review_policy import CampaignRisk, ReviewPolicy, decide_review
 
-from .conftest import advance_to_sourcing, create_project
+from .conftest import advance_to_sourcing, create_project, record_final_candidate
 
 
 def _archived_project(controller: CreativeController):
@@ -28,13 +28,14 @@ def _archived_project(controller: CreativeController):
     controller.transition_project(
         project.id, ProjectStatus.FINAL_CANDIDATE, reason="Final rendered"
     )
+    candidate = record_final_candidate(controller, project.id)
     controller.approve(
         project.id,
         ApprovalRequest(
             stage=ApprovalStage.FINAL,
             approved_by="reviewer",
             scope={"candidate": "final-v1"},
-            output_hash="a" * 64,
+            output_hash=candidate["content_hash"],
         ),
     )
     controller.archive_project(project.id)

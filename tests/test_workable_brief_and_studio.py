@@ -552,6 +552,20 @@ def test_studio_spend_supports_inr_and_checks_available_funds(controller, tmp_pa
         )
 
 
+def test_paid_render_requires_an_approved_storyboard(controller, tmp_path):
+    project, *_ = _planned_project(controller, tmp_path)
+    profile = _studio_profile(controller)
+    request = StudioWorkPacketRequest(
+        tool_profile_id=profile["id"],
+        idempotency_key="kids-rhyme-render-v1",
+        instructions="Render the final video.",
+        scope=StudioScope(phases=(StudioWorkPhase.RENDER,)),
+        output_declaration={"roles": ["final_render"]},
+    )
+    with pytest.raises(ApprovalRequiredError, match="approved storyboard"):
+        controller.prepare_studio_work_packet(project.id, request)
+
+
 def test_schema_v8_migrates_to_v10_without_losing_project(tmp_path):
     path = tmp_path / "v8.sqlite"
     with sqlite3.connect(path) as connection:

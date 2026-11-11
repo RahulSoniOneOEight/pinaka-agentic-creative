@@ -29,7 +29,7 @@ from pinaka.models import (
 )
 from pinaka.schema import SCHEMA_V1, SCHEMA_VERSION
 
-from .conftest import advance_to_sourcing, create_project
+from .conftest import advance_to_sourcing, create_project, record_final_candidate
 
 PILOT_CONTRACT = (
     Path(__file__).parents[1] / "config" / "pilots" / "pinaka-virtual-cfo-10s.json"
@@ -319,7 +319,8 @@ def test_archive_requires_and_preserves_exact_final_hash(controller):
     controller.transition_project(
         project.id, ProjectStatus.FINAL_CANDIDATE, reason="Final rendered"
     )
-    final_hash = "a" * 64
+    candidate = record_final_candidate(controller, project.id)
+    final_hash = candidate["content_hash"]
     controller.approve(
         project.id,
         ApprovalRequest(

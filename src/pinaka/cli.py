@@ -890,6 +890,10 @@ def cmd_pending_variances(args: argparse.Namespace) -> dict[str, Any]:
     return {"requests": _controller(args).variance_requests(args.project_id)}
 
 
+def cmd_asset_costs(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).asset_costs(args.project_id)
+
+
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).studio_work_packet(args.operation_id)
 
@@ -2104,6 +2108,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     variance_list_parser.add_argument("project_id")
     variance_list_parser.set_defaults(handler=cmd_pending_variances)
+
+    asset_cost_parser = subparsers.add_parser(
+        "asset-costs",
+        help="Show per-asset generation cost, variance and provider totals",
+    )
+    asset_cost_parser.add_argument("project_id")
+    asset_cost_parser.set_defaults(handler=cmd_asset_costs)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"

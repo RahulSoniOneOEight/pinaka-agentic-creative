@@ -40,6 +40,7 @@ from .enums import (
     GroundingBundleKind,
     JobStatus,
     ProjectStatus,
+    QAStatus,
     SlotAssetRole,
     ToolIntegrationMode,
     ToolOperationStatus,
@@ -565,6 +566,38 @@ class CreativeController:
                 )
         if request.stage == ApprovalStage.FINAL and not request.output_hash:
             raise IntegrityError("Final approval must bind to an exact output hash")
+        if request.stage == ApprovalStage.FINAL:
+            candidate = self.repository.artifact_by_content_hash(
+                project_id, request.output_hash or ""
+            )
+            if not candidate:
+                raise ApprovalRequiredError(
+                    "Final approval hash does not match a current artifact in this project"
+                )
+            if not self.verify_artifact(candidate["id"]):
+                raise IntegrityError(
+                    "Final candidate file does not match its registered hash"
+                )
+            checks = [
+                result
+                for result in self.repository.list_qa_results(project_id)
+                if result["artifact_id"] == candidate["id"]
+            ]
+            if not checks:
+                raise ApprovalRequiredError(
+                    "Final approval requires recorded QA for the exact candidate artifact"
+                )
+            if any(result["status"] == QAStatus.FAIL.value for result in checks):
+                raise ApprovalRequiredError(
+                    "Final candidate has failing QA checks and cannot be approved"
+                )
+            dependencies.append(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=candidate["id"],
+                    entity_hash=candidate["content_hash"],
+                )
+            )
 
         unique_dependencies = self._deduplicate_dependencies(dependencies)
         subject_hash = sha256_json(
@@ -1951,6 +1984,7 @@ class CreativeController:
                 self.repository.pending_variance_requests(project_id)
             ),
             "plan_exceeded_tolerance": variance > allowance,
+            "assets": self.asset_costs(project_id),
         }
 
     def reserve_budget_item(
@@ -2162,6 +2196,14 @@ class CreativeController:
             raise IntegrityError(
                 "Storyboard, composition, render and review work require a scene plan"
             )
+        if "render" in phases and maximum_cost.minor:
+            storyboard = self.repository.active_approval(
+                project_id, ApprovalStage.ANIMATIC.value
+            )
+            if not storyboard:
+                raise ApprovalRequiredError(
+                    "Paid render work requires an approved storyboard/animatic first"
+                )
         all_elements = self.repository.list_creative_elements(project_id)
         elements_by_id = {element["id"]: element for element in all_elements}
         if request.scope.element_ids:
@@ -4291,6 +4333,66 @@ class CreativeController:
     def variance_requests(self, project_id: str) -> list[dict[str, Any]]:
         return self.repository.pending_variance_requests(project_id)
 
+    def asset_costs(self, project_id: str) -> dict[str, Any]:
+        """Per-asset generation cost ledger with project and provider totals."""
+
+        project = self.repository.get_project(project_id)
+        costs = self.repository.list_asset_costs(project_id)
+        slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
+        currency = project.max_budget.currency
+        rows = []
+        by_provider: dict[str, dict[str, int]] = {}
+        total_estimated = 0
+        total_actual = 0
+        for cost in costs:
+            slot = slots.get(cost["slot_id"]) if cost["slot_id"] else None
+            row = {
+                **cost,
+                "slot_key": slot["stable_key"] if slot else None,
+                "slot_role": slot["role"] if slot else None,
+            }
+            rows.append(row)
+            total_estimated += cost["estimated_minor"]
+            total_actual += cost["actual_minor"]
+            bucket = by_provider.setdefault(
+                cost["provider"], {"estimated_minor": 0, "actual_minor": 0, "count": 0}
+            )
+            bucket["estimated_minor"] += cost["estimated_minor"]
+            bucket["actual_minor"] += cost["actual_minor"]
+            bucket["count"] += 1
+        variance = total_actual - total_estimated
+        return {
+            "project_id": project_id,
+            "currency": currency,
+            "count": len(rows),
+            "total_estimated": Money.from_minor(total_estimated, currency).model_dump(
+                mode="json"
+            ),
+            "total_actual": Money.from_minor(total_actual, currency).model_dump(
+                mode="json"
+            ),
+            "total_variance": Money.from_minor(abs(variance), currency).model_dump(
+                mode="json"
+            ),
+            "total_variance_minor": variance,
+            "total_variance_direction": (
+                "over" if variance > 0 else "under" if variance < 0 else "even"
+            ),
+            "by_provider": {
+                provider: {
+                    "count": values["count"],
+                    "estimated": Money.from_minor(
+                        values["estimated_minor"], currency
+                    ).model_dump(mode="json"),
+                    "actual": Money.from_minor(
+                        values["actual_minor"], currency
+                    ).model_dump(mode="json"),
+                }
+                for provider, values in sorted(by_provider.items())
+            },
+            "assets": rows,
+        }
+
     def decide_variance(
         self, project_id: str, request: VarianceDecisionCreate
     ) -> dict[str, Any]:
@@ -4366,10 +4468,15 @@ class CreativeController:
                 f"{adapter.provider_name!r}"
             )
         if budget_plan_item:
-            plan_id, item_key = budget_plan_item
-            reserved = self.reserve_budget_item(project_id, plan_id, item_key, request)
+            planned_plan_id, item_key = budget_plan_item
+            reserved = self.reserve_budget_item(
+                project_id, planned_plan_id, item_key, request
+            )
             job = JobRecord.model_validate(reserved["job"])
+            planned_item = reserved["item"]
         else:
+            planned_plan_id = None
+            planned_item = None
             job = self.reserve_job(project_id, request)
         if job.status == JobStatus.SUCCEEDED:
             return job, None
@@ -4417,6 +4524,20 @@ class CreativeController:
             actual_cost=result.actual_cost,
             response=result.raw,
         )
+        if budget_plan_item and planned_item is not None:
+            self.repository.record_asset_cost(
+                project_id,
+                job_id=settled.id,
+                plan_id=planned_plan_id,
+                item_id=planned_item["id"],
+                slot_id=planned_item["slot_id"],
+                artifact_id=artifact["id"],
+                provider=request.provider,
+                operation=request.operation,
+                currency=settled.actual_cost.currency,
+                estimated_minor=planned_item["estimated_minor"],
+                actual_minor=settled.actual_cost.minor,
+            )
         return settled, artifact
 
     def next_action(self, project_id: str) -> dict[str, Any]:

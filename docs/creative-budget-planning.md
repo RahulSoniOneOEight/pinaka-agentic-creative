@@ -90,9 +90,7 @@ creating duplicates.
 
 ## Summary
 
-`budget-summary` reports:
-
-- plan status and target;
+`budget-summary` reports:- plan status and target;
 - planned total and tolerance allowance;
 - reserved, settled, and outstanding required items;
 - settled estimate, settled actual, and variance (with `over` / `under` direction);
@@ -115,7 +113,33 @@ pinaka settle-budget-item <project-id> <job-id> --amount 0.70 --currency USD
 
 pinaka pending-variances <project-id>
 pinaka approve-variance <project-id> --file variance-decision.json
+
+# Per-asset generation cost, measured and recorded per asset artifact.
+pinaka asset-costs <project-id>
 ```
+
+## Per-asset generation cost
+
+Asset generation is the main place where cost can drift, so each generated asset gets its own cost
+record rather than only a plan-level total.
+
+```text
+planned slot + estimate
+  → provider job (fal, mock, ...)
+  → settled actual cost
+  → asset_costs row: slot, artifact, job, provider, estimated, actual, variance
+```
+
+`asset-costs` and `budget-summary` report:
+
+- one row per generated asset, with its slot key, artifact, provider and job;
+- estimated, actual, and variance with an `over` / `under` direction;
+- project totals; and
+- totals grouped by provider.
+
+A cost row is written only when a generation actually settled and produced an artifact, and it is
+idempotent per job, so retries never double-count.
+
 
 ## Relationship to the Studio run cap
 

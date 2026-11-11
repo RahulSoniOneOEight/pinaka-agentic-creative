@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -732,6 +732,30 @@ CREATE INDEX IF NOT EXISTS idx_budget_variance_pending
 """
 
 
+SCHEMA_V14 = r"""
+CREATE TABLE IF NOT EXISTS asset_costs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
+    plan_id TEXT REFERENCES budget_plans(id) ON DELETE SET NULL,
+    item_id TEXT REFERENCES budget_plan_items(id) ON DELETE SET NULL,
+    slot_id TEXT REFERENCES slots(id) ON DELETE SET NULL,
+    artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+    provider TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    estimated_minor INTEGER NOT NULL CHECK (estimated_minor >= 0),
+    actual_minor INTEGER NOT NULL CHECK (actual_minor >= 0),
+    variance_minor INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asset_costs_project
+    ON asset_costs(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_asset_costs_slot
+    ON asset_costs(slot_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -746,4 +770,5 @@ MIGRATIONS = {
     11: SCHEMA_V11,
     12: SCHEMA_V12,
     13: SCHEMA_V13,
+    14: SCHEMA_V14,
 }
