@@ -236,6 +236,34 @@ class StudioWorkPhase(ValueEnum):
     REVIEW = "review"
 
 
+class BudgetCategory(ValueEnum):
+    ASSET_GENERATION = "asset_generation"
+    NARRATION = "narration"
+    MUSIC = "music"
+    COMPOSITION = "composition"
+    RENDER = "render"
+    QA = "qa"
+    OTHER = "other"
+
+
+class BudgetPriority(ValueEnum):
+    REQUIRED = "required"
+    OPTIONAL = "optional"
+
+
+class BudgetPlanStatus(ValueEnum):
+    WITHIN_TARGET = "within_target"
+    APPROVAL_REQUIRED = "approval_required"
+    APPROVED = "approved"
+
+
+class BudgetItemStatus(ValueEnum):
+    PLANNED = "planned"
+    RESERVED = "reserved"
+    SETTLED = "settled"
+    SKIPPED = "skipped"
+
+
 class ProviderExecutionMode(ValueEnum):
     DISABLED = "disabled"
     DETERMINISTIC_FAKE = "deterministic_fake"

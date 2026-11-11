@@ -48,7 +48,9 @@ with `blocked_work: ["narration"]` does not prevent a storyboard-only packet.
 
 ## Per-run spending policy
 
-Each Studio run reserves an explicit USD cap before authorization:
+Each Studio run reserves an explicit USD cap before authorization. Overall creative funding is
+planned separately with a USD 1.00 target — see
+[`creative-budget-planning.md`](creative-budget-planning.md).
 
 - **At or below USD 1.00** — the controller authorizes automatically, provided the project has
   enough unreserved budget.

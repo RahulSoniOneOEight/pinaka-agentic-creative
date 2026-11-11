@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -563,6 +563,67 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_specialist_handoffs_budget_job
 """
 
 
+SCHEMA_V11 = r"""
+CREATE TABLE IF NOT EXISTS budget_plans (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    version INTEGER NOT NULL CHECK (version >= 1),
+    creative_summary TEXT NOT NULL,
+    target_minor INTEGER NOT NULL CHECK (target_minor > 0),
+    planned_total_minor INTEGER NOT NULL CHECK (planned_total_minor >= 0),
+    currency TEXT NOT NULL CHECK (currency = 'USD'),
+    tolerance_bps INTEGER NOT NULL CHECK (tolerance_bps >= 0 AND tolerance_bps <= 5000),
+    tolerance_floor_minor INTEGER NOT NULL CHECK (tolerance_floor_minor >= 0),
+    status TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_plans_current
+    ON budget_plans(project_id) WHERE is_current = 1;
+
+CREATE TABLE IF NOT EXISTS budget_plan_items (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES budget_plans(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    stable_key TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 1),
+    category TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    estimated_minor INTEGER NOT NULL CHECK (estimated_minor >= 0),
+    priority TEXT NOT NULL,
+    shot_id TEXT REFERENCES shots(id),
+    slot_id TEXT REFERENCES slots(id),
+    notes TEXT,
+    status TEXT NOT NULL,
+    job_id TEXT REFERENCES jobs(id),
+    actual_minor INTEGER CHECK (actual_minor IS NULL OR actual_minor >= 0),
+    variance_minor INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(plan_id, stable_key)
+);
+CREATE INDEX IF NOT EXISTS idx_budget_plan_items_plan
+    ON budget_plan_items(plan_id, ordinal);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budget_plan_items_job
+    ON budget_plan_items(job_id) WHERE job_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS budget_plan_approvals (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL UNIQUE REFERENCES budget_plans(id) ON DELETE CASCADE,
+    plan_hash TEXT NOT NULL,
+    approved_total_minor INTEGER NOT NULL CHECK (approved_total_minor > 0),
+    currency TEXT NOT NULL CHECK (currency = 'USD'),
+    approved_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -574,4 +635,5 @@ MIGRATIONS = {
     8: SCHEMA_V8,
     9: SCHEMA_V9,
     10: SCHEMA_V10,
+    11: SCHEMA_V11,
 }

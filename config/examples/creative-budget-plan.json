@@ -1,0 +1,44 @@
+{
+  "creative_summary": "Five-second counting rhyme for a five-year-old",
+  "target_usd": "1.00",
+  "tolerance_bps": 1000,
+  "tolerance_floor_usd": "0.10",
+  "items": [
+    {
+      "stable_key": "hero-image",
+      "ordinal": 1,
+      "category": "asset_generation",
+      "provider": "fal",
+      "operation": "image_generate",
+      "estimated_cost": { "amount": "0.40", "currency": "USD" },
+      "priority": "required",
+      "shot_id": null,
+      "slot_id": null,
+      "notes": "Single representative storyboard frame"
+    },
+    {
+      "stable_key": "backup-image",
+      "ordinal": 2,
+      "category": "asset_generation",
+      "provider": "fal",
+      "operation": "image_generate",
+      "estimated_cost": { "amount": "0.40", "currency": "USD" },
+      "priority": "optional",
+      "shot_id": null,
+      "slot_id": null,
+      "notes": "Backup only if the first frame fails review"
+    },
+    {
+      "stable_key": "narration",
+      "ordinal": 3,
+      "category": "narration",
+      "provider": "elevenlabs",
+      "operation": "speech",
+      "estimated_cost": { "amount": "0.20", "currency": "USD" },
+      "priority": "required",
+      "shot_id": null,
+      "slot_id": null,
+      "notes": "Ten-second warm adult read"
+    }
+  ]
+}

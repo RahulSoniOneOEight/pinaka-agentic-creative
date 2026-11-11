@@ -34,6 +34,8 @@ from .enums import (
     ArtifactKind,
     AssetEligibilityStatus,
     AssetUseClass,
+    BudgetItemStatus,
+    BudgetPlanStatus,
     CapabilityStatus,
     GroundingBundleKind,
     JobStatus,
@@ -63,6 +65,8 @@ from .models import (
     AssetEligibilityResult,
     AssetRightsRecord,
     AssetUseContext,
+    BudgetPlanApprovalCreate,
+    BudgetPlanCreate,
     CreativeElementCreate,
     DeliverableCreate,
     DeliverableRecord,
@@ -1718,6 +1722,228 @@ class CreativeController:
             approved_by=request.approved_by,
             reason=request.reason,
         )
+
+    def plan_creative_budget(
+        self, project_id: str, request: BudgetPlanCreate
+    ) -> dict[str, Any]:
+        """Plan one creative against a USD target and decide if approval is needed."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot plan a budget for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(request.model_dump(mode="json"), "budget_plan")
+        target_minor = Money(amount=request.target_usd, currency="USD").minor
+        planned_minor = request.planned_total_minor
+        status = (
+            BudgetPlanStatus.WITHIN_TARGET
+            if planned_minor <= target_minor
+            else BudgetPlanStatus.APPROVAL_REQUIRED
+        )
+        plan = self.repository.record_budget_plan(
+            project_id, request, status=status.value
+        )
+        return {
+            "plan": plan,
+            "target": Money.from_minor(target_minor, "USD").model_dump(mode="json"),
+            "planned_total": Money.from_minor(planned_minor, "USD").model_dump(
+                mode="json"
+            ),
+            "overage": Money.from_minor(
+                max(0, planned_minor - target_minor), "USD"
+            ).model_dump(mode="json"),
+            "within_target": status == BudgetPlanStatus.WITHIN_TARGET,
+            "requires_approval": status == BudgetPlanStatus.APPROVAL_REQUIRED,
+            "summary": self.budget_summary(project_id),
+        }
+
+    def approve_budget_plan(
+        self, project_id: str, request: BudgetPlanApprovalCreate
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot approve a budget for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "budget_plan_approval"
+        )
+        plan = self.repository.get_budget_plan(request.plan_id)
+        if plan["project_id"] != project_id:
+            raise ConflictError("Budget plan belongs to a different project")
+        if not plan["is_current"]:
+            raise ConflictError("A superseded budget plan cannot be approved")
+        if plan["status"] == BudgetPlanStatus.WITHIN_TARGET.value:
+            raise IntegrityError(
+                "A plan within the automatic target does not need approval"
+            )
+        if plan["status"] == BudgetPlanStatus.APPROVED.value:
+            existing = self.repository.budget_plan_approval(plan["id"])
+            if existing and existing["approved_by"] == request.approved_by:
+                return {"plan": plan, "approval": existing}
+            raise ConflictError("Budget plan is already approved")
+        approval = self.repository.record_budget_plan_approval(
+            project_id,
+            plan_id=plan["id"],
+            plan_hash=plan["content_hash"],
+            approved_total=Money.from_minor(plan["planned_total_minor"], "USD"),
+            approved_by=request.approved_by,
+            reason=request.reason,
+        )
+        return {
+            "plan": self.repository.get_budget_plan(plan["id"]),
+            "approval": approval,
+        }
+
+    def budget_plan(self, project_id: str) -> dict[str, Any] | None:
+        return self.repository.current_budget_plan(project_id)
+
+    def budget_summary(self, project_id: str) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        plan = self.repository.current_budget_plan(project_id)
+        available_minor = (
+            project.max_budget.minor - project.spent.minor - project.reserved.minor
+        )
+        base = {
+            "project_id": project_id,
+            "currency": project.max_budget.currency,
+            "project_budget": project.max_budget.model_dump(mode="json"),
+            "project_reserved": project.reserved.model_dump(mode="json"),
+            "project_spent": project.spent.model_dump(mode="json"),
+            "available": Money.from_minor(
+                available_minor, project.max_budget.currency
+            ).model_dump(mode="json"),
+            "automatic_run_cap": Money.from_minor(
+                STUDIO_AUTO_SPEND_MINOR, "USD"
+            ).model_dump(mode="json"),
+        }
+        if not plan:
+            return {
+                **base,
+                "plan": None,
+                "requires_approval": False,
+                "requires_further_approval": False,
+            }
+        settled = [
+            item
+            for item in plan["items"]
+            if item["status"] == BudgetItemStatus.SETTLED.value
+        ]
+        reserved = [
+            item
+            for item in plan["items"]
+            if item["status"] == BudgetItemStatus.RESERVED.value
+        ]
+        settled_actual = sum(item["actual_minor"] or 0 for item in settled)
+        settled_estimate = sum(item["estimated_minor"] for item in settled)
+        variance = settled_actual - settled_estimate
+        allowance = max(
+            plan["planned_total_minor"] * plan["tolerance_bps"] // 10000,
+            plan["tolerance_floor_minor"],
+        )
+        outstanding_required = [
+            item
+            for item in plan["items"]
+            if item["priority"] == "required"
+            and item["status"]
+            in {BudgetItemStatus.PLANNED.value, BudgetItemStatus.RESERVED.value}
+        ]
+        return {
+            **base,
+            "plan": {
+                "id": plan["id"],
+                "version": plan["version"],
+                "status": plan["status"],
+                "content_hash": plan["content_hash"],
+                "target": plan["target"],
+                "planned_total": plan["planned_total"],
+                "planned_total_minor": plan["planned_total_minor"],
+                "tolerance_bps": plan["tolerance_bps"],
+                "tolerance_allowance": Money.from_minor(allowance, "USD").model_dump(
+                    mode="json"
+                ),
+                "tolerance_allowance_minor": allowance,
+            },
+            "items": {
+                "total": len(plan["items"]),
+                "planned": sum(
+                    1
+                    for item in plan["items"]
+                    if item["status"] == BudgetItemStatus.PLANNED.value
+                ),
+                "reserved": len(reserved),
+                "settled": len(settled),
+                "outstanding_required": len(outstanding_required),
+            },
+            "execution": {
+                "settled_estimated": Money.from_minor(
+                    settled_estimate, "USD"
+                ).model_dump(mode="json"),
+                "settled_actual": Money.from_minor(settled_actual, "USD").model_dump(
+                    mode="json"
+                ),
+                "variance": Money.from_minor(variance, "USD").model_dump(mode="json"),
+                "variance_minor": variance,
+                "within_tolerance": variance <= allowance,
+                "remaining_in_plan": Money.from_minor(
+                    max(0, plan["planned_total_minor"] - settled_actual),
+                    "USD",
+                ).model_dump(mode="json"),
+            },
+            "requires_approval": plan["status"]
+            == BudgetPlanStatus.APPROVAL_REQUIRED.value,
+            "requires_further_approval": variance > allowance,
+        }
+
+    def reserve_budget_item(
+        self,
+        project_id: str,
+        plan_id: str,
+        item_key: str,
+        request: JobRequest,
+    ) -> dict[str, Any]:
+        """Reserve one planned line item before a provider call."""
+
+        plan = self.repository.get_budget_plan(plan_id)
+        if plan["project_id"] != project_id:
+            raise ConflictError("Budget plan belongs to a different project")
+        if not plan["is_current"]:
+            raise ConflictError("A superseded budget plan cannot authorize work")
+        if plan["status"] not in {
+            BudgetPlanStatus.WITHIN_TARGET.value,
+            BudgetPlanStatus.APPROVED.value,
+        }:
+            raise ApprovalRequiredError(
+                "Budget plan requires human approval before execution"
+            )
+        item = next(
+            (entry for entry in plan["items"] if entry["stable_key"] == item_key),
+            None,
+        )
+        if not item:
+            raise NotFoundError(f"Budget item not found in plan: {item_key}")
+        if item["status"] != BudgetItemStatus.PLANNED.value:
+            raise ConflictError(f"Budget item {item_key} is already {item['status']}")
+        if (
+            request.estimated_cost.minor != item["estimated_minor"]
+            or request.estimated_cost.currency != "USD"
+        ):
+            raise IntegrityError(
+                "Job estimate must match the approved budget plan item"
+            )
+        if (
+            request.provider != item["provider"]
+            or request.operation != item["operation"]
+        ):
+            raise IntegrityError(
+                "Job provider and operation must match the approved budget plan item"
+            )
+        job = self.reserve_job(project_id, request)
+        linked = self.repository.link_budget_item_job(
+            project_id, plan_id, item_key, job.id
+        )
+        return {"job": job.model_dump(mode="json"), "item": linked}
 
     @staticmethod
     def _blocked_studio_decisions(
@@ -3964,13 +4190,19 @@ class CreativeController:
         adapter: GenerationAdapter,
         *,
         artifact_path: str,
+        budget_plan_item: tuple[str, str] | None = None,
     ) -> tuple[JobRecord, dict[str, Any] | None]:
         if request.provider != adapter.provider_name:
             raise IntegrityError(
                 f"Request provider {request.provider!r} does not match adapter "
                 f"{adapter.provider_name!r}"
             )
-        job = self.reserve_job(project_id, request)
+        if budget_plan_item:
+            plan_id, item_key = budget_plan_item
+            reserved = self.reserve_budget_item(project_id, plan_id, item_key, request)
+            job = JobRecord.model_validate(reserved["job"])
+        else:
+            job = self.reserve_job(project_id, request)
         if job.status == JobStatus.SUCCEEDED:
             return job, None
         if job.status == JobStatus.BUDGET_RESERVED:

@@ -70,6 +70,8 @@ from .models import (
     ApprovalRequest,
     AssetCandidate,
     AssetUseContext,
+    BudgetPlanApprovalCreate,
+    BudgetPlanCreate,
     CreativeElementCreate,
     DeliverableCreate,
     ExecutionReceiptCreate,
@@ -848,6 +850,24 @@ def cmd_prepare_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_approve_studio_spend(args: argparse.Namespace) -> dict[str, Any]:
     request = StudioSpendApprovalCreate.model_validate(_load_json(args.file))
     return _controller(args).approve_studio_spend(args.project_id, request)
+
+
+def cmd_plan_budget(args: argparse.Namespace) -> dict[str, Any]:
+    request = BudgetPlanCreate.model_validate(_load_json(args.file))
+    return _controller(args).plan_creative_budget(args.project_id, request)
+
+
+def cmd_budget_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).budget_plan(args.project_id) or {"plan": None}
+
+
+def cmd_approve_budget_plan(args: argparse.Namespace) -> dict[str, Any]:
+    request = BudgetPlanApprovalCreate.model_validate(_load_json(args.file))
+    return _controller(args).approve_budget_plan(args.project_id, request)
+
+
+def cmd_budget_summary(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).budget_summary(args.project_id)
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -2009,6 +2029,35 @@ def build_parser() -> argparse.ArgumentParser:
     studio_spend_parser.add_argument("project_id")
     studio_spend_parser.add_argument("--file", required=True)
     studio_spend_parser.set_defaults(handler=cmd_approve_studio_spend)
+
+    budget_plan_parser = subparsers.add_parser(
+        "plan-budget",
+        help="Plan one creative's spend and decide whether approval is needed",
+    )
+    budget_plan_parser.add_argument("project_id")
+    budget_plan_parser.add_argument("--file", required=True)
+    budget_plan_parser.set_defaults(handler=cmd_plan_budget)
+
+    budget_show_parser = subparsers.add_parser(
+        "budget-plan", help="Show the current creative budget plan"
+    )
+    budget_show_parser.add_argument("project_id")
+    budget_show_parser.set_defaults(handler=cmd_budget_plan)
+
+    budget_approve_parser = subparsers.add_parser(
+        "approve-budget-plan",
+        help="Approve a creative budget plan above the automatic target",
+    )
+    budget_approve_parser.add_argument("project_id")
+    budget_approve_parser.add_argument("--file", required=True)
+    budget_approve_parser.set_defaults(handler=cmd_approve_budget_plan)
+
+    budget_summary_parser = subparsers.add_parser(
+        "budget-summary",
+        help="Show planned versus actual spend and any approval needed",
+    )
+    budget_summary_parser.add_argument("project_id")
+    budget_summary_parser.set_defaults(handler=cmd_budget_summary)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"
