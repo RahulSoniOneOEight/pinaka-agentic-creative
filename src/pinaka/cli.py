@@ -937,6 +937,31 @@ def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def cmd_vertex_check(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).verify_vertex_models(
+        project=args.project, location=args.location
+    )
+
+
+def cmd_register_vertex_profile(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).register_vertex_profile(
+        project=args.project, location=args.location
+    )
+
+
+def cmd_enhance_still_vertex(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).enhance_still_with_vertex(
+        args.project_id,
+        tool_profile_id=payload["tool_profile_id"],
+        source_artifact_id=payload["artifact_id"],
+        prompt=payload["prompt"],
+        model=payload.get("model", "gemini-3.1-flash-image"),
+        image_size=payload.get("image_size", "1K"),
+        aspect_ratio=payload.get("aspect_ratio", "16:9"),
+    )
+
+
 def cmd_raise_budget(args: argparse.Namespace) -> dict[str, Any]:
     request = BudgetRaiseCreate.model_validate(_load_json(args.file))
     return _controller(args).raise_project_budget(args.project_id, request)
@@ -2300,6 +2325,30 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_overage_parser.add_argument("project_id")
     reconcile_overage_parser.add_argument("--file", required=True)
     reconcile_overage_parser.set_defaults(handler=cmd_reconcile_overage)
+
+    vertex_check_parser = subparsers.add_parser(
+        "vertex-check",
+        help="Free check that the Vertex models Pinaka uses are available",
+    )
+    vertex_check_parser.add_argument("--project")
+    vertex_check_parser.add_argument("--location")
+    vertex_check_parser.set_defaults(handler=cmd_vertex_check)
+
+    vertex_profile_parser = subparsers.add_parser(
+        "register-vertex-profile",
+        help="Register the ADC-authenticated Vertex provider profile (disabled)",
+    )
+    vertex_profile_parser.add_argument("--project")
+    vertex_profile_parser.add_argument("--location")
+    vertex_profile_parser.set_defaults(handler=cmd_register_vertex_profile)
+
+    vertex_edit_parser = subparsers.add_parser(
+        "enhance-still-vertex",
+        help="Enhance a sourced still through the Vertex image adapter",
+    )
+    vertex_edit_parser.add_argument("project_id")
+    vertex_edit_parser.add_argument("--file", required=True)
+    vertex_edit_parser.set_defaults(handler=cmd_enhance_still_vertex)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"

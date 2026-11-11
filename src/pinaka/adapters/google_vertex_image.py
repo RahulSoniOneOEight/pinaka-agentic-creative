@@ -36,6 +36,16 @@ ESTIMATED_INPUT_TOKENS = 100
 ASPECT_PATTERN = re.compile(r"\d{1,2}:\d{1,2}")
 
 
+def _image_mime(path: Any) -> str:
+    suffix = str(getattr(path, "suffix", "")).lower()
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(suffix, "image/png")
+
+
 def estimate_cost_minor(
     model: str, image_size: str = "1K", *, input_tokens: int = ESTIMATED_INPUT_TOKENS
 ) -> int:
@@ -158,14 +168,17 @@ class GoogleVertexImageAdapter:
             "image_size": image_size,
             "aspect_ratio": aspect_ratio,
             "estimated_cost_minor": estimated,
+            "input_image_path": parameters.get("input_image_path"),
         }
 
     def execute(self, request: ToolOperationRequest) -> ToolExecutionResult:
-        if request.operation != "image.generate":
+        if request.operation not in {"image.generate", "image.edit"}:
             raise ValueError(
                 f"Vertex image adapter does not support {request.operation!r}"
             )
         parameters = self._parameters(request)
+        if request.operation == "image.edit" and not parameters["input_image_path"]:
+            raise ValueError("image.edit requires input_image_path")
         try:
             from google.genai import types
         except ImportError as error:
@@ -180,10 +193,23 @@ class GoogleVertexImageAdapter:
             ),
         )
         client = self._client_instance()
+        contents: Any = parameters["prompt"]
+        if parameters["input_image_path"]:
+            from pathlib import Path as _Path
+
+            source = _Path(str(parameters["input_image_path"])).expanduser()
+            if not source.is_file():
+                raise ValueError(f"Input image not found: {source}")
+            contents = [
+                types.Part.from_bytes(
+                    data=source.read_bytes(), mime_type=_image_mime(source)
+                ),
+                parameters["prompt"],
+            ]
         try:
             response = client.models.generate_content(
                 model=parameters["model"],
-                contents=parameters["prompt"],
+                contents=contents,
                 config=config,
             )
         except Exception as error:

@@ -1,0 +1,8 @@
+{
+  "tool_profile_id": "tool_REPLACE_WITH_VERTEX_PROFILE_ID",
+  "artifact_id": "art_REPLACE_WITH_SOURCED_ARTIFACT_ID",
+  "prompt": "Keep the duckling identical. Clean stray marks and even out the pond background.",
+  "model": "gemini-3.1-flash-image",
+  "image_size": "1K",
+  "aspect_ratio": "9:16"
+}

@@ -12,6 +12,10 @@ from .adapters.animatic import DeterministicAnimaticAdapter
 from .adapters.base import GenerationAdapter
 from .adapters.encode import FFmpegEncodeAdapter, VideoEncodeAdapter
 from .adapters.frames import ChromeFrameCapture, FrameCaptureAdapter
+from .adapters.google_vertex_image import (
+    GoogleVertexImageAdapter,
+    estimate_cost_minor,
+)
 from .adapters.mux import FFmpegMuxAdapter, MuxAdapter
 from .adapters.narration import KokoroNarrationAdapter, NarrationAdapter
 from .adapters.tool import ToolAdapter
@@ -124,6 +128,12 @@ from .studio_gateway import (
     StudioTransport,
 )
 from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json, utc_now
+from .vertex import (
+    DEFAULT_LOCATION,
+    DEFAULT_PROJECT,
+    verify_models,
+    vertex_provider_profile,
+)
 
 ALLOWED_TRANSITIONS: dict[ProjectStatus, set[ProjectStatus]] = {
     ProjectStatus.DRAFT: {ProjectStatus.PLANNED, ProjectStatus.CANCELLED},
@@ -3126,6 +3136,98 @@ class CreativeController:
         )
         return {"status": "completed", "production": production, **imported}
 
+    def register_vertex_profile(
+        self,
+        *,
+        project: str | None = None,
+        location: str | None = None,
+        enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Register the ADC-authenticated Vertex provider profile (disabled)."""
+
+        return self.register_provider_profile(
+            vertex_provider_profile(project=project, location=location, enabled=enabled)
+        )
+
+    def verify_vertex_models(
+        self,
+        *,
+        client: Any | None = None,
+        project: str | None = None,
+        location: str | None = None,
+    ) -> dict[str, Any]:
+        """Free availability check for the Vertex models Pinaka depends on."""
+
+        results = verify_models(client=client, project=project, location=location)
+        for result in results:
+            self.repository.record_capability(result)
+        ready = all(result.status == CapabilityStatus.WORKING for result in results)
+        return {
+            "ready": ready,
+            "project": project or DEFAULT_PROJECT,
+            "location": location or DEFAULT_LOCATION,
+            "auth": "application_default_credentials",
+            "models": [result.model_dump(mode="json") for result in results],
+        }
+
+    def enhance_still_with_vertex(
+        self,
+        project_id: str,
+        *,
+        tool_profile_id: str,
+        source_artifact_id: str,
+        prompt: str,
+        model: str = "gemini-3.1-flash-image",
+        image_size: str = "1K",
+        aspect_ratio: str = "16:9",
+        adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Enhance a sourced still through the Vertex image adapter."""
+
+        source = self.repository.get_artifact(source_artifact_id)
+        if source["project_id"] != project_id:
+            raise ConflictError("Source artifact belongs to a different project")
+        if source["kind"] == ArtifactKind.ORIGINAL or source["immutable"]:
+            raise IntegrityError("Enhance a working copy, not a protected original")
+        if not self.verify_artifact(source_artifact_id):
+            raise IntegrityError("Source artifact file does not match its hash")
+        path = self.artifact_store.resolve(project_id, source["relative_path"])
+        ceiling = estimate_cost_minor(model, image_size)
+        request = ToolOperationRequest(
+            tool_profile_id=tool_profile_id,
+            operation="image.edit",
+            idempotency_key=(
+                f"vertex-edit-{source['content_hash'][:12]}-"
+                f"{sha256_json({'prompt': prompt, 'model': model})[:12]}"
+            ),
+            parameters={
+                "prompt": prompt,
+                "model": model,
+                "image_size": image_size,
+                "aspect_ratio": aspect_ratio,
+                "input_image_path": str(path),
+            },
+            limits={"max_cost_minor": ceiling, "paid": True},
+            output_declaration={"media_type": "image", "model": model},
+            required_approval_stage=ApprovalStage.SOURCING,
+        )
+        operation, receipt, artifact = self.run_tool_once(
+            project_id,
+            request,
+            adapter or GoogleVertexImageAdapter(model=model),
+            artifact_path=f"artifacts/vertex-edit-{source['content_hash'][:12]}.png",
+            artifact_kind=ArtifactKind.DERIVATIVE,
+            parent_artifact_id=source_artifact_id,
+            dependencies=(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=source_artifact_id,
+                    entity_hash=source["content_hash"],
+                ),
+            ),
+        )
+        return {"operation": operation, "receipt": receipt, "artifact": artifact}
+
     def run_tool_once(
         self,
         project_id: str,
@@ -3135,6 +3237,7 @@ class CreativeController:
         artifact_path: str,
         artifact_kind: ArtifactKind = ArtifactKind.DERIVATIVE,
         dependencies: tuple[DependencyRef, ...] = (),
+        parent_artifact_id: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None]:
         profile = self.repository.get_tool_profile(request.tool_profile_id)
         if profile["stable_key"] != adapter.profile_key:
@@ -3188,6 +3291,7 @@ class CreativeController:
                 "operation_id": operation["id"],
                 "tool_profile": profile["stable_key"],
             },
+            parent_artifact_id=parent_artifact_id,
             dependencies=(
                 DependencyRef(entity_type="tool_operation", entity_id=operation["id"]),
                 *dependencies,

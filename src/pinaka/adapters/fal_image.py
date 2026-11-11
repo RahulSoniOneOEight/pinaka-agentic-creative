@@ -10,7 +10,7 @@ from ..fal import FalClient, _first_output_url
 from ..models import JobRequest, Money
 from ..utils import canonical_json, sha256_bytes
 
-DEFAULT_IMAGE_MODEL = "fal-ai/flux-2-pro"
+DEFAULT_IMAGE_MODEL = "fal-ai/flux/schnell"
 
 
 @dataclass
