@@ -304,24 +304,38 @@ def build_brief(
 def propose_shots(
     analysis: dict[str, Any], beats: tuple[dict[str, Any], ...]
 ) -> list[dict[str, Any]]:
+    actions = ("swim", "bob", "count", "wave", "bob", "still")
+    copy = analysis["spoken_copy"] or ""
+    count = 1
+    for word, value in (("five", 5), ("four", 4), ("three", 3), ("two", 2)):
+        if word in copy.lower():
+            count = value
+            break
     shots = []
     for index, beat in enumerate(beats, start=1):
         start = Decimal(beat["start"])
         end = Decimal(beat["end"])
+        if index == 1:
+            purpose = "establish"
+        elif index == len(beats):
+            purpose = "resolve"
+        else:
+            purpose = "develop"
         shots.append(
             {
                 "stable_key": f"shot-{index:02d}",
                 "ordinal": index,
-                "beat": beat["purpose"],
+                "beat": purpose,
                 "duration_seconds": end - start,
-                "narrative": (
-                    analysis["spoken_copy"]
-                    or f"{beat['purpose'].capitalize()} shot {index}"
-                ),
+                "narrative": copy or f"{beat['purpose'].capitalize()} shot {index}",
                 "requirements": {
                     "text": "none",
                     "start": beat["start"],
                     "end": beat["end"],
+                    "subject": {
+                        "action": actions[(index - 1) % len(actions)],
+                        "count": count,
+                    },
                 },
             }
         )

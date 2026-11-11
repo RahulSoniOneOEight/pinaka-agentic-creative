@@ -944,7 +944,11 @@ def cmd_synthesize_narration_vertex(args: argparse.Namespace) -> dict[str, Any]:
         else (args.script or "")
     )
     return _controller(args).synthesize_narration_vertex(
-        args.project_id, script=script, voice=args.voice, model=args.model
+        args.project_id,
+        script=script,
+        voice=args.voice,
+        model=args.model,
+        reserve=args.reserve,
     )
 
 
@@ -953,6 +957,18 @@ def cmd_mux_narration(args: argparse.Namespace) -> dict[str, Any]:
         args.project_id,
         video_artifact_id=args.video,
         audio_artifact_id=args.audio,
+    )
+
+
+def cmd_export_captions(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).export_captions(args.project_id)
+
+
+def cmd_burn_captions(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).burn_captions(
+        args.project_id,
+        video_artifact_id=args.video,
+        captions_artifact_id=args.captions,
     )
 
 
@@ -2398,7 +2414,26 @@ def build_parser() -> argparse.ArgumentParser:
     narration_parser.add_argument("--script-file")
     narration_parser.add_argument("--voice", default="Kore")
     narration_parser.add_argument("--model")
+    narration_parser.add_argument(
+        "--reserve",
+        action="store_true",
+        help="Reserve the estimated TTS cost against the project budget",
+    )
     narration_parser.set_defaults(handler=cmd_synthesize_narration_vertex)
+
+    captions_export_parser = subparsers.add_parser(
+        "export-captions", help="Write a deterministic SRT from the shot plan"
+    )
+    captions_export_parser.add_argument("project_id")
+    captions_export_parser.set_defaults(handler=cmd_export_captions)
+
+    captions_burn_parser = subparsers.add_parser(
+        "burn-captions", help="Attach the SRT as a soft subtitle track"
+    )
+    captions_burn_parser.add_argument("project_id")
+    captions_burn_parser.add_argument("--video", required=True)
+    captions_burn_parser.add_argument("--captions", required=True)
+    captions_burn_parser.set_defaults(handler=cmd_burn_captions)
 
     mux_parser = subparsers.add_parser(
         "mux-narration",

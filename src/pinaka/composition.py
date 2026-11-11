@@ -35,10 +35,123 @@ def _escape(value: str) -> str:
 
 
 BACKGROUND_ROLES = {"background", "world", "location", "environment"}
+SUBJECT_ACTIONS = {"swim", "bob", "wave", "count", "enter", "still"}
 
 
 def _layer_class(role: str) -> str:
     return "layer background" if role.lower() in BACKGROUND_ROLES else "layer subject"
+
+
+def _subject_plan(shot: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the per-shot subject behaviour from the shot requirements."""
+
+    configured = (shot.get("requirements") or {}).get("subject") or {}
+    action = str(configured.get("action", "")).lower()
+    if action not in SUBJECT_ACTIONS:
+        action = _infer_action(
+            str(shot.get("narrative", "")) + " " + str(shot.get("beat", ""))
+        )
+    count = configured.get("count")
+    if count is None:
+        count = _infer_count(str(shot.get("narrative", "")))
+    try:
+        count = max(1, min(5, int(count)))
+    except (TypeError, ValueError):
+        count = 1
+    scale = float(configured.get("scale", 0.62))
+    scale = min(0.95, max(0.2, scale))
+    return {"action": action, "count": count, "scale": scale}
+
+
+def _infer_action(text: str) -> str:
+    lowered = text.lower()
+    if "quack" in lowered:
+        return "bob"
+    if "count" in lowered or "one, two" in lowered:
+        return "count"
+    if "swim" in lowered or "row" in lowered or "drift" in lowered:
+        return "swim"
+    if "wave" in lowered or "hello" in lowered:
+        return "wave"
+    if "enter" in lowered or "appear" in lowered:
+        return "enter"
+    return "bob"
+
+
+def _infer_count(text: str) -> int:
+    lowered = text.lower()
+    for word, value in (
+        ("five", 5),
+        ("four", 4),
+        ("three", 3),
+        ("two", 2),
+        ("one", 1),
+    ):
+        if word in lowered:
+            return value
+    return 1
+
+
+def _subject_keyframes(
+    *,
+    name: str,
+    action: str,
+    start: Decimal,
+    duration: Decimal,
+    total: Decimal,
+    copy_index: int,
+    count: int,
+) -> tuple[str, str]:
+    """Return (keyframes, animation shorthand) for one subject copy."""
+
+    s = _pct(start, total)
+    e = _pct(start + duration, total)
+    mid = _pct(start + duration / 2, total)
+    if action == "swim":
+        frames = (
+            f"@keyframes {name} {{\n"
+            f"  0%, {s}% {{ transform: translateX(-18%) translateY(0); }}\n"
+            f"  {mid}% {{ transform: translateX(0%) translateY(-3%); }}\n"
+            f"  {e}%, 100% {{ transform: translateX(18%) translateY(0); }}\n"
+            f"}}"
+        )
+    elif action == "wave":
+        frames = (
+            f"@keyframes {name} {{\n"
+            f"  0%, {s}% {{ transform: rotate(0deg); }}\n"
+            f"  {mid}% {{ transform: rotate(-6deg); }}\n"
+            f"  {e}%, 100% {{ transform: rotate(6deg); }}\n"
+            f"}}"
+        )
+    elif action == "enter":
+        frames = (
+            f"@keyframes {name} {{\n"
+            f"  0%, {s}% {{ transform: translateX(-70%); opacity: 0; }}\n"
+            f"  {mid}% {{ transform: translateX(0%); opacity: 1; }}\n"
+            f"  {e}%, 100% {{ transform: translateX(0%); opacity: 1; }}\n"
+            f"}}"
+        )
+    elif action == "count":
+        step = (duration / Decimal(max(count, 2))) * Decimal(copy_index)
+        reveal = _pct(start + Decimal("0.05") + step, total)
+        frames = (
+            f"@keyframes {name} {{\n"
+            f"  0%, {reveal}% {{ transform: scale(0.6); opacity: 0; }}\n"
+            f"  {mid}% {{ transform: scale(1); opacity: 1; }}\n"
+            f"  {e}%, 100% {{ transform: scale(1); opacity: 1; }}\n"
+            f"}}"
+        )
+    elif action == "still":
+        return "", ""
+    else:  # bob
+        frames = (
+            f"@keyframes {name} {{\n"
+            f"  0%, {s}% {{ transform: translateY(0); }}\n"
+            f"  {mid}% {{ transform: translateY(-5%); }}\n"
+            f"  {e}%, 100% {{ transform: translateY(0); }}\n"
+            f"}}"
+        )
+    return frames, f"animation: {name} {total}s linear infinite"
 
 
 def build_composition(
@@ -93,22 +206,49 @@ def build_composition(
             for item in (elements or ())
             if item.get("kind") in {"character", "prop", "location"}
         )
-        image_layers = "".join(
-            f'<img class="{_layer_class(str(layer.get("role", "visual")))}" '
-            f'data-role="{_escape(layer.get("role", "visual"))}" '
-            f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
-            for layer in sorted(
-                (layers or {}).get(shot["stable_key"], ()),
-                key=lambda item: (
-                    str(item.get("role", "")).lower() not in BACKGROUND_ROLES
-                ),
-            )
-        )
+        image_layers = []
+        for layer in sorted(
+            (layers or {}).get(shot["stable_key"], ()),
+            key=lambda item: str(item.get("role", "")).lower() not in BACKGROUND_ROLES,
+        ):
+            role = str(layer.get("role", "visual"))
+            if role.lower() in BACKGROUND_ROLES:
+                image_layers.append(
+                    f'<img class="{_layer_class(role)}" data-role="{_escape(role)}" '
+                    f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
+                )
+                continue
+            plan = _subject_plan(shot)
+            for copy_index in range(plan["count"]):
+                name = f"subj-{index}-{copy_index}"
+                frames, animation = _subject_keyframes(
+                    name=name,
+                    action=plan["action"],
+                    start=start,
+                    duration=duration,
+                    total=total,
+                    copy_index=copy_index,
+                    count=plan["count"],
+                )
+                if frames:
+                    keyframes.append(frames)
+                per_scale = plan["scale"] / (1 + 0.6 * (plan["count"] - 1))
+                spread = (copy_index - (plan["count"] - 1) / 2) * (per_scale * 90.0)
+                image_layers.append(
+                    f'<img class="layer subject" data-role="{_escape(role)}" '
+                    f'data-action="{plan["action"]}" data-copy="{copy_index}" '
+                    f'data-count="{plan["count"]}" '
+                    f'style="max-width:{per_scale * 100:.0f}%;'
+                    f"max-height:{per_scale * 100:.0f}%;"
+                    f'left:{spread:.1f}%;{animation}" '
+                    f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
+                )
+        image_layers_html = "".join(image_layers)
         scenes.append(
             f'  <section class="scene" data-shot="{_escape(shot["stable_key"])}" '
             f'data-start="{start}" data-end="{end}" data-duration="{duration}" '
             f'style="animation: scene-{index} {total}s linear infinite">\n'
-            f'    <div class="layers">{image_layers}</div>\n'
+            f'    <div class="layers">{image_layers_html}</div>\n'
             f'    <div class="content"><div>\n'
             f'      <p class="beat">{_escape(str(shot.get("beat", "")))}</p>\n'
             f'      <p class="narrative">{_escape(str(shot.get("narrative", "")))}</p>\n'
@@ -175,7 +315,7 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
 .layer.subject {{
   max-width: 62%;
   max-height: 62%;
-  bottom: 8%;
+  bottom: 6%;
   top: auto;
 }}
 .beat {{
@@ -210,10 +350,40 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   }}
   var params = new URLSearchParams(window.location.search);
   var at = parseFloat(params.get("t") || "0");
-  if (!isNaN(at) && at > 0) {{
+  if (!isNaN(at)) {{
     document.querySelectorAll(".scene").forEach(function (el) {{
-      el.style.animationDelay = "-" + at + "s";
-      el.style.animationPlayState = "paused";
+      el.style.animation = "none";
+      var s = parseFloat(el.dataset.start || "0");
+      var e = parseFloat(el.dataset.end || "0");
+      var dur = Math.max(e - s, 0.0001);
+      var p = Math.max(0, Math.min(1, (at - s) / dur));
+      el.style.opacity = at >= s && at < e ? "1" : "0";
+      el.querySelectorAll(".layer.subject").forEach(function (img) {{
+        var action = img.dataset.action || "bob";
+        var copy = parseInt(img.dataset.copy || "0", 10);
+        var n = parseInt(img.dataset.count || "1", 10) || 1;
+        var transform = "none";
+        var opacity = 1;
+        if (action === "swim") {{
+          transform = "translateX(" + (-18 + 36 * p) + "%) translateY(" +
+            (-3 * Math.sin(Math.PI * p)) + "%)";
+        }} else if (action === "bob") {{
+          transform = "translateY(" + (-5 * Math.sin(Math.PI * p)) + "%)";
+        }} else if (action === "wave") {{
+          transform = "rotate(" + (-6 + 12 * p) + "deg)";
+        }} else if (action === "enter") {{
+          var q = Math.min(1, p * 2);
+          transform = "translateX(" + (-70 * (1 - q)) + "%)";
+          opacity = q;
+        }} else if (action === "count") {{
+          var reveal = 0.05 + copy / n;
+          opacity = p >= reveal ? 1 : 0;
+          transform = "scale(" + (opacity ? 1 : 0.7) + ")";
+        }}
+        img.style.animation = "none";
+        img.style.transform = transform;
+        img.style.opacity = opacity;
+      }});
     }});
   }}
   window.addEventListener("resize", fit);

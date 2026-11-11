@@ -114,6 +114,54 @@ pinaka mux-narration <project-id> --video <render-artifact> --audio <audio-artif
   silent video and the narration.
 - Mux refuses a non-audio artifact or an unknown duration.
 
+## Dynamic subjects
+
+Each shot declares a subject behaviour, so scenes differ instead of repeating one static image.
+
+```json
+"requirements": {
+  "subject": { "action": "swim", "count": 3, "scale": 0.62 }
+}
+```
+
+| Action | Behaviour |
+|---|---|
+| `swim` | drifts left → right with a gentle vertical dip |
+| `bob` | rises and settles |
+| `wave` | rotates ±6° |
+| `count` | copies appear one at a time |
+| `enter` | slides in from the left |
+| `still` | no motion |
+
+The planner assigns one action per shot (`swim`, `bob`, `count`, …) and derives `count` from the
+spoken copy (“three little ducks” → 3). Multiple copies are scaled down and spaced so they read as
+separate characters rather than a single blob.
+
+Frames are **deterministic**: at `?t=` the inline script stops CSS animation and computes each
+scene's opacity and each subject's transform from the timestamp, so a capture at 8.5 s always shows
+the same frame.
+
+## Captions
+
+```powershell
+pinaka export-captions <project-id>
+pinaka burn-captions <project-id> --video <mp4-artifact> --captions <srt-artifact>
+```
+
+- The SRT is derived deterministically from shot durations and narratives — no ASR needed for
+  supplied copy.
+- Burning attaches a soft `mov_text` track; it never re-encodes the video.
+- Both artifacts are hash-verified and linked as dependencies.
+
+## Narration budget
+
+```powershell
+pinaka synthesize-narration-vertex <project-id> --script-file script.txt --reserve
+```
+
+With `--reserve`, the estimated TTS cost is reserved as a controller budget job before synthesis and
+settled afterwards; a failed synthesis cancels at zero. USD projects only.
+
 ## Verified render
 
 
@@ -123,13 +171,13 @@ Authored from the kids-rhyme plan: 3 shots, 10 seconds, valid, 3.2 KB, rendered 
 Rendered end to end: 100 frames at 10 fps in 81 seconds → 10.0 s H.264 MP4, 540×960, 34 KB, no audio,
 hash verified. A frame extracted at t=4 s shows the second scene with correct timing.
 
-Full pass with artwork and narration: 6 embedded layers (pond background, duck subject) across three
-shots, 100 frames at 10 fps, live Vertex TTS narration (8.5 s), loudness-normalized mux → 10.0 s
-H.264 + AAC, 476 KB, verified. Inspected frames show full-bleed background, the duck subject and
-legible text.
+Full pass with artwork and narration: 12 embedded layers (pond background + three duck subjects per
+shot), 100 frames at 10 fps, live Vertex TTS narration, loudness-normalized mux and a soft caption
+track → 10.0 s H.264 + AAC + mov_text, verified. Inspected frames show three separated ducklings
+swimming, and the third scene revealing them one at a time.
 
 ## Not implemented
 
-- Caption burn-in inside the composition.
-- Character animation inside a shot (the subject is static per scene).
+- Caption burn-in as hard subtitles (the track is soft/selectable).
+- Physics or path authoring beyond the built-in actions.
 - Multi-pass render or partial re-render of a single shot.

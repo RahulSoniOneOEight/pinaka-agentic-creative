@@ -136,6 +136,27 @@ def test_vertex_narration_registers_audio(controller):
     assert artifact["relative_path"].startswith("audio/narration-")
 
 
+def test_narration_can_reserve_budget(controller):
+    from pinaka.vertex import estimate_tts_cost_minor
+
+    project = create_project(controller, budget="10.00")
+    result = controller.synthesize_narration_vertex(
+        project.id,
+        script="One, two, three little ducks.",
+        adapter=FakeNarration(),
+        reserve=True,
+    )
+    assert result["reservation"] is not None
+    settled = controller.repository.get_project(project.id)
+    assert settled.reserved.minor == 0
+    assert settled.spent.minor == estimate_tts_cost_minor(
+        "One, two, three little ducks."
+    )
+    assert (
+        result["artifact"]["operation"]["budget_job_id"] == result["reservation"]["id"]
+    )
+
+
 def test_narration_rejects_empty_script(controller):
     project = create_project(controller, budget="10.00")
     with pytest.raises(IntegrityError, match="empty"):
