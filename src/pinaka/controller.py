@@ -31,7 +31,11 @@ from .assets import (
 )
 from .budget import TieredBudget, evaluate_spend, spend_summary
 from .capabilities import probe_all
-from .composition import build_composition, validate_composition
+from .composition import (
+    build_composition,
+    composition_duration,
+    validate_composition,
+)
 from .correction import FFmpegCompositeAdapter, FFmpegCorrectionAdapter
 from .database import Database
 from .enums import (
@@ -2946,6 +2950,114 @@ class CreativeController:
             "content_hash": digest,
             "shot_count": report["shot_count"],
         }
+
+    def render_composition(
+        self,
+        project_id: str,
+        *,
+        composition_artifact_id: str | None = None,
+        fps: int = 24,
+        width: int = 1080,
+        height: int = 1920,
+        max_frames: int = 600,
+        capture: FrameCaptureAdapter | None = None,
+        encoder: VideoEncodeAdapter | None = None,
+    ) -> dict[str, Any]:
+        """Render one authored composition to a silent H.264 preview."""
+
+        import tempfile
+        from pathlib import Path as _Path
+
+        if fps < 1 or fps > 60:
+            raise IntegrityError("fps must be between 1 and 60")
+        artifact = (
+            self.repository.get_artifact(composition_artifact_id)
+            if composition_artifact_id
+            else self._latest_composition(project_id)
+        )
+        if not artifact:
+            raise NotFoundError("No composition has been authored for this project")
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Composition belongs to a different project")
+        html = self.read_artifact_text(artifact["id"])
+        report = validate_composition(html)
+        if not report["valid"]:
+            raise IntegrityError(
+                "Composition failed validation: " + ", ".join(report["problems"])
+            )
+        duration = composition_duration(html)
+        frame_count = int((duration * fps).to_integral_value(rounding="ROUND_CEILING"))
+        if frame_count < 1:
+            raise IntegrityError("Composition duration produces no frames")
+        if frame_count > max_frames:
+            raise IntegrityError(
+                f"Render would produce {frame_count} frames; limit is {max_frames}"
+            )
+        html_path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        capture = capture or ChromeFrameCapture()
+        encoder = encoder or FFmpegEncodeAdapter()
+        captured = capture.capture(
+            html_path=html_path,
+            frame_count=frame_count,
+            fps=fps,
+            width=width,
+            height=height,
+        )
+        with tempfile.TemporaryDirectory(prefix="pinaka-render-") as temp:
+            frames_dir = _Path(temp)
+            for frame in captured.frames:
+                (frames_dir / f"frame-{frame.index:04d}.png").write_bytes(frame.content)
+            encoded = encoder.encode(
+                frames_dir=frames_dir,
+                frame_count=frame_count,
+                fps=fps,
+                width=width,
+                height=height,
+            )
+        duration_text = format(duration.normalize(), "f")
+        digest = sha256_bytes(encoded.content)
+        video = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.RENDER,
+            relative_path=f"renders/composition-{digest[:12]}.mp4",
+            content=encoded.content,
+            operation={
+                "type": "composition_render",
+                "composition_artifact_id": artifact["id"],
+                "fps": fps,
+                "frames": frame_count,
+                "duration_seconds": duration_text,
+                "width": width,
+                "height": height,
+                "encoder": encoder.profile_key,
+                "command_hash": encoded.command_hash,
+                "encoder_version": encoded.encoder_version,
+            },
+            dependencies=(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=artifact["id"],
+                    entity_hash=artifact["content_hash"],
+                ),
+            ),
+        )
+        return {
+            "video": video,
+            "composition": artifact,
+            "fps": fps,
+            "frames": frame_count,
+            "duration_seconds": duration_text,
+            "metadata": encoded.metadata,
+            "command_hash": encoded.command_hash,
+        }
+
+    def _latest_composition(self, project_id: str) -> dict[str, Any] | None:
+        for artifact in reversed(self.repository.list_artifacts(project_id)):
+            if artifact["kind"] == ArtifactKind.DESIGN.value and artifact[
+                "relative_path"
+            ].startswith("scenes/composition-"):
+                return artifact
+        return None
 
     def studio_production(self, operation_id: str) -> dict[str, Any] | None:
         production = self.repository.get_studio_production(operation_id)

@@ -937,6 +937,16 @@ def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def cmd_render_composition(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).render_composition(
+        args.project_id,
+        composition_artifact_id=args.composition,
+        fps=args.fps,
+        width=args.width,
+        height=args.height,
+    )
+
+
 def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).author_composition(
         args.project_id,
@@ -2352,6 +2362,17 @@ def build_parser() -> argparse.ArgumentParser:
     composition_parser.add_argument("--height", type=int, default=1920)
     composition_parser.add_argument("--title")
     composition_parser.set_defaults(handler=cmd_author_composition)
+
+    render_parser = subparsers.add_parser(
+        "render-composition",
+        help="Render an authored composition to a silent H.264 preview",
+    )
+    render_parser.add_argument("project_id")
+    render_parser.add_argument("--composition")
+    render_parser.add_argument("--fps", type=int, default=24)
+    render_parser.add_argument("--width", type=int, default=1080)
+    render_parser.add_argument("--height", type=int, default=1920)
+    render_parser.set_defaults(handler=cmd_render_composition)
 
     vertex_profile_parser = subparsers.add_parser(
         "register-vertex-profile",

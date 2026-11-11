@@ -53,6 +53,28 @@ pinaka author-composition <project-id> --title "Counting rhyme v1"
 Re-running with the same inputs returns the same artifact (content-addressed path), so re-authoring
 is idempotent.
 
+## Render
+
+```powershell
+pinaka render-composition <project-id> --fps 24
+pinaka render-composition <project-id> --fps 10 --width 540 --height 960
+```
+
+```text
+authored composition
+  → validate + read declared duration
+  → frame_count = ceil(duration × fps)      (default limit 600)
+  → headless Chrome captures frame-N with ?t=<seconds>
+  → FFmpeg encodes H.264, yuv420p, faststart
+  → renders/composition-<hash>.mp4
+  → artifact depends on the composition artifact
+```
+
+- The composition freezes animation at `?t=` so every frame is deterministic.
+- Frame count is capped (`max_frames`, default 600) to prevent runaway renders.
+- A tampered or invalid composition is refused before capture.
+- Identical content renders to the same artifact path, so re-rendering is idempotent.
+
 ## What the plan still needs
 
 The generated source is a **scaffold**: timed scenes with beat, narrative and element labels. Real
@@ -64,8 +86,11 @@ invented here.
 Authored from the kids-rhyme plan: 3 shots, 10 seconds, valid, 3.2 KB, rendered through Chromium at
 540×960 with no clipping, correct 9:16 framing, beat label and element chip visible.
 
+Rendered end to end: 100 frames at 10 fps in 81 seconds → 10.0 s H.264 MP4, 540×960, 34 KB, no audio,
+hash verified. A frame extracted at t=4 s shows the second scene with correct timing.
+
 ## Not implemented
 
-- Rendering frames to PNG or video (Chromium capture + FFmpeg encode).
-- Layer placement for real assets.
+- Asset layers (character artwork, backgrounds, props) inside the composition.
 - Audio track and caption burn-in inside the composition.
+- Multi-pass render or partial re-render of a single shot.

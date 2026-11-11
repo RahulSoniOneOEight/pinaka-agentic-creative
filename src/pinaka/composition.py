@@ -158,6 +158,14 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
     stage.style.left = ((window.innerWidth - {width} * scale) / 2) + "px";
     stage.style.top = ((window.innerHeight - {height} * scale) / 2) + "px";
   }}
+  var params = new URLSearchParams(window.location.search);
+  var at = parseFloat(params.get("t") || "0");
+  if (!isNaN(at) && at > 0) {{
+    document.querySelectorAll(".scene").forEach(function (el) {{
+      el.style.animationDelay = "-" + at + "s";
+      el.style.animationPlayState = "paused";
+    }});
+  }}
   window.addEventListener("resize", fit);
   fit();
 }})();
@@ -195,6 +203,21 @@ def validate_composition(html: str) -> dict[str, Any]:
         "shots": shots,
         "bytes": len(html.encode("utf-8")),
     }
+
+
+DURATION_ATTR = re.compile(r'data-duration="([0-9.]+)"')
+
+
+def composition_duration(html: str) -> Decimal:
+    """Read the declared total duration from a composition."""
+
+    match = DURATION_ATTR.search(html)
+    if not match:
+        raise CompositionError("Composition has no data-duration marker")
+    value = Decimal(match.group(1))
+    if value <= 0:
+        raise CompositionError("Composition duration must be positive")
+    return value
 
 
 def composition_manifest(html: str) -> str:
