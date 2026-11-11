@@ -35,11 +35,13 @@ creative idea
 5. **Slight variance is expected.** Allowed variance per item is
    `max(estimate × tolerance_bps, tolerance_floor)`. Defaults: **50%** with a floor of 0.10 in the
    plan currency.
-6. **Material overrun stops.** An actual cost beyond tolerance is refused at settlement and requires
-   further approval rather than being charged silently.
-7. **Project budget still governs.** A tolerated overrun cannot push `spent` above the project
+6. **Material overrun asks for a decision.** When an actual cost lands beyond tolerance, the work is
+   held and an approval request is recorded. Nothing is charged until a person approves.
+7. **Approval resumes the work.** Approving settles at the reported actual cost and charges it.
+   Rejecting cancels the job, releases the reservation, and marks the item skipped.
+8. **Project budget still governs.** Even an approved variance cannot push `spent` above the project
    maximum.
-8. **Currency follows the project.** A plan, its items, and its approvals use the project budget
+9. **Currency follows the project.** A plan, its items, and its approvals use the project budget
    currency. Supported currencies are USD and INR. Mixed currencies inside one plan are rejected.
 
 ## Currency targets
@@ -66,11 +68,25 @@ Schema v11 adds:
 
 ```text
 planned → reserved → settled
-planned → skipped
+planned → reserved → skipped        (variance rejected)
 ```
 
 A settled item records the job, the actual cost, and the variance. The variance event is written to
 the event log, so overrun history survives project changes.
+
+## Overrun approval loop
+
+```text
+settle planned job with actual cost
+  ├ within tolerance → settle and charge
+  └ beyond tolerance → create pending variance request
+        ├ approve → settle at the reported actual, charge it
+        └ reject  → cancel the job, release the reservation, skip the item
+```
+
+The request records the estimate, the reported actual, the allowed ceiling, the overage, who asked,
+and the decision with its reason. Repeating the same settlement returns the same request rather than
+creating duplicates.
 
 ## Summary
 
@@ -79,8 +95,9 @@ the event log, so overrun history survives project changes.
 - plan status and target;
 - planned total and tolerance allowance;
 - reserved, settled, and outstanding required items;
-- settled estimate, settled actual, and variance;
+- settled estimate, settled actual, and variance (with `over` / `under` direction);
 - whether the variance is within tolerance;
+- pending variance requests awaiting a decision;
 - project budget, reserved, spent, and available; and
 - whether approval or further approval is required.
 
@@ -91,6 +108,13 @@ pinaka plan-budget <project-id> --file creative-budget-plan.json
 pinaka budget-plan <project-id>
 pinaka budget-summary <project-id>
 pinaka approve-budget-plan <project-id> --file budget-approval.json
+
+# Settle a planned provider job. If the actual cost is beyond tolerance this
+# returns status approval_required with a pending request id.
+pinaka settle-budget-item <project-id> <job-id> --amount 0.70 --currency USD
+
+pinaka pending-variances <project-id>
+pinaka approve-variance <project-id> --file variance-decision.json
 ```
 
 ## Relationship to the Studio run cap

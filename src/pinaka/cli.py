@@ -89,6 +89,7 @@ from .models import (
     StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
+    VarianceDecisionCreate,
     WorkableBriefCreate,
 )
 from .openverse import OpenverseClient, default_context
@@ -868,6 +869,25 @@ def cmd_approve_budget_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_budget_summary(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).budget_summary(args.project_id)
+
+
+def cmd_settle_budget_item(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).settle_budget_item(
+        args.project_id,
+        args.job_id,
+        actual_cost=Money(amount=Decimal(args.amount), currency=args.currency),
+        requested_by=args.requested_by,
+        reason=args.reason,
+    )
+
+
+def cmd_approve_variance(args: argparse.Namespace) -> dict[str, Any]:
+    request = VarianceDecisionCreate.model_validate(_load_json(args.file))
+    return _controller(args).decide_variance(args.project_id, request)
+
+
+def cmd_pending_variances(args: argparse.Namespace) -> dict[str, Any]:
+    return {"requests": _controller(args).variance_requests(args.project_id)}
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -2058,6 +2078,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     budget_summary_parser.add_argument("project_id")
     budget_summary_parser.set_defaults(handler=cmd_budget_summary)
+
+    settle_item_parser = subparsers.add_parser(
+        "settle-budget-item",
+        help="Settle one planned job and raise approval if it exceeds tolerance",
+    )
+    settle_item_parser.add_argument("project_id")
+    settle_item_parser.add_argument("job_id")
+    settle_item_parser.add_argument("--amount", required=True)
+    settle_item_parser.add_argument("--currency", required=True)
+    settle_item_parser.add_argument("--requested-by")
+    settle_item_parser.add_argument("--reason")
+    settle_item_parser.set_defaults(handler=cmd_settle_budget_item)
+
+    variance_approve_parser = subparsers.add_parser(
+        "approve-variance",
+        help="Approve or reject a pending budget variance request",
+    )
+    variance_approve_parser.add_argument("project_id")
+    variance_approve_parser.add_argument("--file", required=True)
+    variance_approve_parser.set_defaults(handler=cmd_approve_variance)
+
+    variance_list_parser = subparsers.add_parser(
+        "pending-variances", help="List variance requests awaiting a decision"
+    )
+    variance_list_parser.add_argument("project_id")
+    variance_list_parser.set_defaults(handler=cmd_pending_variances)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"

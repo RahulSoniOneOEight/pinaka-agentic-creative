@@ -55,6 +55,7 @@ from .errors import (
     NotFoundError,
     QuotaExceededError,
     RightsEligibilityError,
+    VarianceApprovalRequiredError,
 )
 from .evidence import capture_document
 from .judge import OpenAICompatibleJudge
@@ -91,6 +92,7 @@ from .models import (
     StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
+    VarianceDecisionCreate,
     WorkableBriefCreate,
 )
 from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
@@ -1865,6 +1867,9 @@ class CreativeController:
             return {
                 **base,
                 "plan": None,
+                "pending_variances": self.repository.pending_variance_requests(
+                    project_id
+                ),
                 "requires_approval": False,
                 "requires_further_approval": False,
             }
@@ -1926,8 +1931,11 @@ class CreativeController:
                 "settled_actual": Money.from_minor(
                     settled_actual, plan["currency"]
                 ).model_dump(mode="json"),
-                "variance": Money.from_minor(variance, plan["currency"]).model_dump(
-                    mode="json"
+                "variance": Money.from_minor(
+                    abs(variance), plan["currency"]
+                ).model_dump(mode="json"),
+                "variance_direction": (
+                    "over" if variance > 0 else "under" if variance < 0 else "even"
                 ),
                 "variance_minor": variance,
                 "within_tolerance": variance <= allowance,
@@ -1936,9 +1944,13 @@ class CreativeController:
                     plan["currency"],
                 ).model_dump(mode="json"),
             },
+            "pending_variances": self.repository.pending_variance_requests(project_id),
             "requires_approval": plan["status"]
             == BudgetPlanStatus.APPROVAL_REQUIRED.value,
-            "requires_further_approval": variance > allowance,
+            "requires_further_approval": bool(
+                self.repository.pending_variance_requests(project_id)
+            ),
+            "plan_exceeded_tolerance": variance > allowance,
         }
 
     def reserve_budget_item(
@@ -4229,6 +4241,115 @@ class CreativeController:
             response=response,
             error=error,
         )
+
+    def settle_budget_item(
+        self,
+        project_id: str,
+        job_id: str,
+        *,
+        actual_cost: Money,
+        requested_by: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Settle a planned job, raising an approval request when over tolerance."""
+
+        job = self.repository.get_job(job_id)
+        if job.project_id != project_id:
+            raise ConflictError("Job belongs to a different project")
+        try:
+            settled = self.settle_job(
+                job_id, target=JobStatus.SUCCEEDED, actual_cost=actual_cost
+            )
+        except VarianceApprovalRequiredError as error:
+            request = self.repository.record_variance_request(
+                project_id,
+                plan_id=error.plan_id,
+                item_id=error.item_id,
+                job_id=error.job_id,
+                estimated_minor=error.estimated_minor,
+                actual_minor=error.actual_minor,
+                allowed_minor=error.allowed_minor,
+                currency=error.currency,
+                requested_by=requested_by,
+                reason=reason,
+            )
+            return {
+                "status": "approval_required",
+                "message": (
+                    "Actual cost is beyond the plan tolerance. Approve or reject "
+                    f"request {request['id']} to proceed."
+                ),
+                "request": request,
+                "summary": self.budget_summary(project_id),
+            }
+        return {
+            "status": "settled",
+            "job": settled.model_dump(mode="json"),
+            "summary": self.budget_summary(project_id),
+        }
+
+    def variance_requests(self, project_id: str) -> list[dict[str, Any]]:
+        return self.repository.pending_variance_requests(project_id)
+
+    def decide_variance(
+        self, project_id: str, request: VarianceDecisionCreate
+    ) -> dict[str, Any]:
+        """Apply a human decision to a pending budget variance request."""
+
+        variance = self.repository.get_variance_request(request.request_id)
+        if variance["project_id"] != project_id:
+            raise ConflictError("Variance request belongs to a different project")
+        if variance["status"] != "pending":
+            raise ConflictError(f"Variance request is already {variance['status']}")
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "variance_decision"
+        )
+        job = self.repository.get_job(variance["job_id"])
+        if job.status in {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }:
+            raise ConflictError(f"Job is already terminal: {job.status.value}")
+        actual = Money.from_minor(variance["actual_minor"], variance["currency"])
+        if request.decision == "approve":
+            settled = self.repository.settle_job(
+                variance["job_id"],
+                target=JobStatus.SUCCEEDED,
+                actual_cost=actual,
+                approved_variance_minor=variance["actual_minor"],
+            )
+            decision = self.repository.decide_variance_request(
+                variance["id"],
+                decision="approved",
+                decided_by=request.decided_by,
+                decision_reason=request.reason,
+            )
+            return {
+                "decision": decision,
+                "job": settled.model_dump(mode="json"),
+                "summary": self.budget_summary(project_id),
+            }
+        self.repository.skip_budget_item(
+            variance["item_id"], reason=f"Variance rejected: {request.reason}"
+        )
+        cancelled = self.repository.settle_job(
+            variance["job_id"],
+            target=JobStatus.CANCELLED,
+            actual_cost=Money(amount=0, currency=variance["currency"]),
+        )
+        decision = self.repository.decide_variance_request(
+            variance["id"],
+            decision="rejected",
+            decided_by=request.decided_by,
+            decision_reason=request.reason,
+        )
+        return {
+            "decision": decision,
+            "job": cancelled.model_dump(mode="json"),
+            "reported_actual": variance["actual"],
+            "summary": self.budget_summary(project_id),
+        }
 
     def run_adapter_once(
         self,

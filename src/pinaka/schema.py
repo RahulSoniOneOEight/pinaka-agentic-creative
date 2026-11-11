@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -706,6 +706,32 @@ CREATE INDEX IF NOT EXISTS idx_studio_spend_approvals_project
 """
 
 
+SCHEMA_V13 = r"""
+CREATE TABLE IF NOT EXISTS budget_variance_requests (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL REFERENCES budget_plans(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL REFERENCES budget_plan_items(id) ON DELETE CASCADE,
+    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    estimated_minor INTEGER NOT NULL CHECK (estimated_minor >= 0),
+    actual_minor INTEGER NOT NULL CHECK (actual_minor >= 0),
+    allowed_minor INTEGER NOT NULL CHECK (allowed_minor >= 0),
+    overage_minor INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    requested_by TEXT,
+    reason TEXT,
+    decided_by TEXT,
+    decision_reason TEXT,
+    decided_at TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(job_id, actual_minor, currency)
+);
+CREATE INDEX IF NOT EXISTS idx_budget_variance_pending
+    ON budget_variance_requests(project_id, status);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -719,4 +745,5 @@ MIGRATIONS = {
     10: SCHEMA_V10,
     11: SCHEMA_V11,
     12: SCHEMA_V12,
+    13: SCHEMA_V13,
 }

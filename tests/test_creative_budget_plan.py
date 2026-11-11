@@ -26,6 +26,7 @@ from pinaka.models import (
     JobRequest,
     Money,
     ProjectCreate,
+    VarianceDecisionCreate,
 )
 from pinaka.schema import MIGRATIONS, SCHEMA_VERSION
 
@@ -275,6 +276,161 @@ def test_budget_plan_supports_inr_projects(controller):
                 ),
             ),
         )
+
+
+def test_overrun_creates_a_pending_approval_request(controller):
+    project = create_project(controller, budget="10.00")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    job_id = reserved["job"]["id"]
+
+    result = controller.settle_budget_item(
+        project.id,
+        job_id,
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+        requested_by="planner",
+        reason="Provider charged for a higher resolution",
+    )
+    assert result["status"] == "approval_required"
+    request = result["request"]
+    assert request["status"] == "pending"
+    assert request["estimated_minor"] == 40
+    assert request["actual_minor"] == 70
+    assert request["allowed_minor"] == 60
+    assert request["overage_minor"] == 10
+
+    assert controller.repository.get_project(project.id).reserved.minor == 40
+    assert controller.repository.get_project(project.id).spent.minor == 0
+    assert controller.repository.get_job(job_id).status == JobStatus.BUDGET_RESERVED
+
+    summary = controller.budget_summary(project.id)
+    assert summary["requires_further_approval"] is True
+    assert len(summary["pending_variances"]) == 1
+
+    repeated = controller.settle_budget_item(
+        project.id, job_id, actual_cost=Money(amount=Decimal("0.70"), currency="USD")
+    )
+    assert repeated["request"]["id"] == request["id"]
+    assert len(controller.variance_requests(project.id)) == 1
+
+
+def test_approved_variance_settles_at_the_actual_cost(controller):
+    project = create_project(controller, budget="10.00")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    pending = controller.settle_budget_item(
+        project.id,
+        reserved["job"]["id"],
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+    )["request"]
+
+    approved = controller.decide_variance(
+        project.id,
+        VarianceDecisionCreate(
+            request_id=pending["id"],
+            decision="approve",
+            decided_by="producer",
+            reason="Higher resolution was worth the extra spend",
+        ),
+    )
+    assert approved["decision"]["status"] == "approved"
+    assert approved["job"]["status"] == JobStatus.SUCCEEDED.value
+    assert _amount(approved["job"]["actual_cost"]) == Decimal("0.70")
+
+    settled_project = controller.repository.get_project(project.id)
+    assert settled_project.reserved.minor == 0
+    assert settled_project.spent.minor == 70
+    item = next(
+        entry
+        for entry in controller.budget_plan(project.id)["items"]
+        if entry["stable_key"] == "hero-image"
+    )
+    assert item["status"] == BudgetItemStatus.SETTLED.value
+    assert item["variance_minor"] == 30
+
+    summary = controller.budget_summary(project.id)
+    assert summary["pending_variances"] == []
+    assert summary["execution"]["variance_minor"] == 30
+
+    with pytest.raises(ConflictError, match="already approved"):
+        controller.decide_variance(
+            project.id,
+            VarianceDecisionCreate(
+                request_id=pending["id"],
+                decision="approve",
+                decided_by="producer",
+                reason="Duplicate",
+            ),
+        )
+
+
+def test_rejected_variance_releases_the_reservation_without_a_charge(controller):
+    project = create_project(controller, budget="10.00")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    pending = controller.settle_budget_item(
+        project.id,
+        reserved["job"]["id"],
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+    )["request"]
+
+    rejected = controller.decide_variance(
+        project.id,
+        VarianceDecisionCreate(
+            request_id=pending["id"],
+            decision="reject",
+            decided_by="producer",
+            reason="Over budget for this creative",
+        ),
+    )
+    assert rejected["decision"]["status"] == "rejected"
+    assert rejected["job"]["status"] == JobStatus.CANCELLED.value
+    assert _amount(rejected["reported_actual"]) == Decimal("0.70")
+
+    settled_project = controller.repository.get_project(project.id)
+    assert settled_project.reserved.minor == 0
+    assert settled_project.spent.minor == 0
+    item = next(
+        entry
+        for entry in controller.budget_plan(project.id)["items"]
+        if entry["stable_key"] == "hero-image"
+    )
+    assert item["status"] == BudgetItemStatus.SKIPPED.value
+    assert controller.budget_summary(project.id)["requires_further_approval"] is False
+
+
+def test_approving_a_variance_cannot_exceed_the_project_budget(controller):
+    project = create_project(controller, budget="0.45")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    reserved = controller.reserve_budget_item(
+        project.id, plan["id"], "hero-image", _job()
+    )
+    pending = controller.settle_budget_item(
+        project.id,
+        reserved["job"]["id"],
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+    )["request"]
+
+    with pytest.raises(BudgetExceededError, match="project budget"):
+        controller.decide_variance(
+            project.id,
+            VarianceDecisionCreate(
+                request_id=pending["id"],
+                decision="approve",
+                decided_by="producer",
+                reason="Approve anyway",
+            ),
+        )
+    assert (
+        controller.repository.get_variance_request(pending["id"])["status"] == "pending"
+    )
+    assert controller.repository.get_project(project.id).reserved.minor == 40
 
 
 def test_budget_plan_migration_adds_tables(tmp_path):

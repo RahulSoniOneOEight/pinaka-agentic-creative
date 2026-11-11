@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -525,6 +525,13 @@ class BudgetPlanCreate(StrictModel):
 class BudgetPlanApprovalCreate(StrictModel):
     plan_id: str = Field(min_length=1, max_length=120)
     approved_by: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class VarianceDecisionCreate(StrictModel):
+    request_id: str = Field(min_length=1, max_length=120)
+    decision: Literal["approve", "reject"]
+    decided_by: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=1, max_length=2000)
 
 

@@ -1,0 +1,6 @@
+{
+  "request_id": "variance_REPLACE_WITH_REQUEST_ID",
+  "decision": "approve",
+  "decided_by": "producer",
+  "reason": "The higher-resolution frame was required for the storyboard review"
+}

@@ -25,6 +25,7 @@ from .errors import (
     ConflictError,
     IntegrityError,
     NotFoundError,
+    VarianceApprovalRequiredError,
 )
 from .models import (
     ApprovalRequest,
@@ -4173,6 +4174,7 @@ class Repository:
         actual_cost: Money,
         response: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
+        approved_variance_minor: int | None = None,
     ) -> JobRecord:
         if target not in {JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED}:
             raise IntegrityError(f"Invalid terminal status: {target.value}")
@@ -4191,7 +4193,8 @@ class Repository:
                 )
             budget_item = connection.execute(
                 """
-                SELECT i.estimated_minor, p.tolerance_bps, p.tolerance_floor_minor
+                SELECT i.id, i.plan_id, i.project_id, i.estimated_minor,
+                       p.tolerance_bps, p.tolerance_floor_minor, p.currency
                 FROM budget_plan_items i
                 JOIN budget_plans p ON p.id = i.plan_id
                 WHERE i.job_id = ?
@@ -4210,10 +4213,22 @@ class Repository:
                     // 10000,
                     budget_item["tolerance_floor_minor"],
                 )
-                if actual_cost.minor > budget_item["estimated_minor"] + allowance:
-                    raise BudgetExceededError(
+                allowed_minor = budget_item["estimated_minor"] + allowance
+                variance_approved = (
+                    approved_variance_minor is not None
+                    and approved_variance_minor == actual_cost.minor
+                )
+                if actual_cost.minor > allowed_minor and not variance_approved:
+                    raise VarianceApprovalRequiredError(
                         "Actual cost exceeds the plan's variance tolerance; "
-                        "further approval is required"
+                        "approval is required",
+                        job_id=job_id,
+                        plan_id=budget_item["plan_id"],
+                        item_id=budget_item["id"],
+                        estimated_minor=budget_item["estimated_minor"],
+                        actual_minor=actual_cost.minor,
+                        allowed_minor=allowed_minor,
+                        currency=budget_item["currency"],
                     )
                 project_row = self._require_project(connection, job["project_id"])
                 if (
@@ -4637,7 +4652,10 @@ class Repository:
         item = connection.execute(
             "SELECT * FROM budget_plan_items WHERE job_id = ?", (job_id,)
         ).fetchone()
-        if not item or item["status"] == BudgetItemStatus.SETTLED.value:
+        if not item or item["status"] in {
+            BudgetItemStatus.SETTLED.value,
+            BudgetItemStatus.SKIPPED.value,
+        }:
             return
         variance = actual_minor - item["estimated_minor"]
         connection.execute(
@@ -4667,6 +4685,206 @@ class Repository:
                 "variance_minor": variance,
             },
         )
+
+    @staticmethod
+    def _variance_request_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "plan_id": row["plan_id"],
+            "item_id": row["item_id"],
+            "job_id": row["job_id"],
+            "estimated": Money.from_minor(
+                row["estimated_minor"], row["currency"]
+            ).model_dump(mode="json"),
+            "actual": Money.from_minor(row["actual_minor"], row["currency"]).model_dump(
+                mode="json"
+            ),
+            "allowed": Money.from_minor(
+                row["allowed_minor"], row["currency"]
+            ).model_dump(mode="json"),
+            "overage": Money.from_minor(
+                row["overage_minor"], row["currency"]
+            ).model_dump(mode="json"),
+            "estimated_minor": row["estimated_minor"],
+            "actual_minor": row["actual_minor"],
+            "allowed_minor": row["allowed_minor"],
+            "overage_minor": row["overage_minor"],
+            "currency": row["currency"],
+            "status": row["status"],
+            "requested_by": row["requested_by"],
+            "reason": row["reason"],
+            "decided_by": row["decided_by"],
+            "decision_reason": row["decision_reason"],
+            "decided_at": row["decided_at"],
+            "created_at": row["created_at"],
+        }
+
+    def record_variance_request(
+        self,
+        project_id: str,
+        *,
+        plan_id: str,
+        item_id: str,
+        job_id: str,
+        estimated_minor: int,
+        actual_minor: int,
+        allowed_minor: int,
+        currency: str,
+        requested_by: str | None,
+        reason: str | None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            existing = connection.execute(
+                """
+                SELECT * FROM budget_variance_requests
+                WHERE job_id = ? AND actual_minor = ? AND currency = ?
+                """,
+                (job_id, actual_minor, currency),
+            ).fetchone()
+            if existing:
+                return self._variance_request_dict(existing)
+            request_id = new_id("variance")
+            connection.execute(
+                """
+                INSERT INTO budget_variance_requests(
+                    id, project_id, plan_id, item_id, job_id, estimated_minor,
+                    actual_minor, allowed_minor, overage_minor, currency, status,
+                    requested_by, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request_id,
+                    project_id,
+                    plan_id,
+                    item_id,
+                    job_id,
+                    estimated_minor,
+                    actual_minor,
+                    allowed_minor,
+                    actual_minor - allowed_minor,
+                    currency,
+                    "pending",
+                    requested_by,
+                    reason,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="budget_variance_request",
+                entity_id=request_id,
+                event_type="budget_variance.requested",
+                payload={
+                    "job_id": job_id,
+                    "plan_id": plan_id,
+                    "estimated_minor": estimated_minor,
+                    "actual_minor": actual_minor,
+                    "allowed_minor": allowed_minor,
+                    "currency": currency,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM budget_variance_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            return self._variance_request_dict(row)
+
+    def get_variance_request(self, request_id: str) -> dict[str, Any]:
+        with self.database.read() as connection:
+            row = connection.execute(
+                "SELECT * FROM budget_variance_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Variance request not found: {request_id}")
+            return self._variance_request_dict(row)
+
+    def pending_variance_requests(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                """
+                SELECT * FROM budget_variance_requests
+                WHERE project_id = ? AND status = 'pending' ORDER BY created_at
+                """,
+                (project_id,),
+            ).fetchall()
+            return [self._variance_request_dict(row) for row in rows]
+
+    def decide_variance_request(
+        self,
+        request_id: str,
+        *,
+        decision: str,
+        decided_by: str,
+        decision_reason: str,
+    ) -> dict[str, Any]:
+        if decision not in {"approved", "rejected"}:
+            raise IntegrityError(f"Unsupported variance decision: {decision}")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT * FROM budget_variance_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            if not row:
+                raise NotFoundError(f"Variance request not found: {request_id}")
+            if row["status"] != "pending":
+                raise ConflictError(f"Variance request is already {row['status']}")
+            connection.execute(
+                """
+                UPDATE budget_variance_requests
+                SET status = ?, decided_by = ?, decision_reason = ?, decided_at = ?
+                WHERE id = ?
+                """,
+                (decision, decided_by, decision_reason, now, request_id),
+            )
+            self._event(
+                connection,
+                project_id=row["project_id"],
+                entity_type="budget_variance_request",
+                entity_id=request_id,
+                event_type=f"budget_variance.{decision}",
+                payload={
+                    "job_id": row["job_id"],
+                    "actual_minor": row["actual_minor"],
+                    "allowed_minor": row["allowed_minor"],
+                    "decided_by": decided_by,
+                },
+            )
+            updated = connection.execute(
+                "SELECT * FROM budget_variance_requests WHERE id = ?",
+                (request_id,),
+            ).fetchone()
+            return self._variance_request_dict(updated)
+
+    def skip_budget_item(self, item_id: str, *, reason: str) -> None:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            item = connection.execute(
+                "SELECT * FROM budget_plan_items WHERE id = ?", (item_id,)
+            ).fetchone()
+            if not item or item["status"] != BudgetItemStatus.RESERVED.value:
+                return
+            connection.execute(
+                """
+                UPDATE budget_plan_items
+                SET status = ?, updated_at = ? WHERE id = ?
+                """,
+                (BudgetItemStatus.SKIPPED.value, now, item_id),
+            )
+            self._event(
+                connection,
+                project_id=item["project_id"],
+                entity_type="budget_plan_item",
+                entity_id=item_id,
+                event_type="budget_item.skipped",
+                payload={"reason": reason, "job_id": item["job_id"]},
+            )
 
     def recoverable_jobs(self, project_id: str | None = None) -> list[JobRecord]:
         statuses = (
