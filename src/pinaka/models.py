@@ -386,15 +386,19 @@ class StudioScope(StrictModel):
     shot_ids: tuple[str, ...] = ()
     element_ids: tuple[str, ...] = ()
     constraints: dict[str, Any] = Field(default_factory=dict)
-    allow_paid_generation: bool = False
+    allow_paid_generation: bool = True
     max_credits: int = Field(default=0, ge=0)
-    max_usd: Decimal = Field(default=Decimal(0), ge=0, decimal_places=2)
+    max_usd: Decimal = Field(default=Decimal(1), ge=0, decimal_places=2)
     allow_publication: bool = False
 
     @model_validator(mode="after")
-    def enforce_zero_spend_and_no_publication(self) -> StudioScope:
-        if self.allow_paid_generation or self.max_credits or self.max_usd:
-            raise ValueError("Studio work packets are zero-spend in this integration")
+    def enforce_spend_shape_and_no_publication(self) -> StudioScope:
+        if self.max_credits:
+            raise ValueError("Studio work packets use a USD reservation, not credits")
+        if bool(self.max_usd) != self.allow_paid_generation:
+            raise ValueError(
+                "Paid generation must be enabled exactly when max_usd is positive"
+            )
         if self.allow_publication:
             raise ValueError("Studio publication authority is not permitted")
         if len(self.phases) != len(set(self.phases)):
@@ -410,6 +414,21 @@ class StudioWorkPacketRequest(StrictModel):
     input_artifact_ids: tuple[str, ...] = ()
     output_declaration: dict[str, Any] = Field(min_length=1)
     required_approval_stage: ApprovalStage | None = None
+    spend_approval_id: str | None = Field(default=None, max_length=120)
+
+
+class StudioSpendApprovalCreate(StrictModel):
+    work_packet: StudioWorkPacketRequest
+    approved_by: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def approval_is_only_for_exception_spend(self) -> StudioSpendApprovalCreate:
+        if self.work_packet.scope.max_usd <= Decimal(1):
+            raise ValueError("Human spend approval is only needed above USD 1.00")
+        if self.work_packet.spend_approval_id:
+            raise ValueError("Approval requests cannot reference an existing approval")
+        return self
 
 
 class StudioResultOutputImport(StrictModel):
@@ -427,7 +446,9 @@ class StudioResultPacketImport(StrictModel):
     elapsed_ms: int = Field(ge=0)
     outputs: tuple[StudioResultOutputImport, ...] = ()
     response_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
-    actual_cost: Money | None = None
+    actual_cost: Money = Field(
+        default_factory=lambda: Money(amount=Decimal(0), currency="USD")
+    )
     details: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -444,8 +465,6 @@ class StudioResultPacketImport(StrictModel):
             raise ValueError("A successful Studio result must declare output artifacts")
         if self.status != ToolOperationStatus.SUCCEEDED and self.outputs:
             raise ValueError("Only successful Studio results may declare outputs")
-        if self.actual_cost and self.actual_cost.minor > 0:
-            raise ValueError("Studio result packets must report zero cost")
         return self
 
 

@@ -5,7 +5,6 @@ import sqlite3
 from decimal import Decimal
 
 import pytest
-from pydantic import ValidationError
 
 from pinaka.cli import main
 from pinaka.controller import CreativeController
@@ -13,6 +12,7 @@ from pinaka.database import Database
 from pinaka.enums import (
     ArtifactKind,
     CapabilityStatus,
+    ContentMode,
     CreativeElementKind,
     DecisionProvenance,
     DecisionRisk,
@@ -20,17 +20,23 @@ from pinaka.enums import (
     ToolIntegrationMode,
     ToolOperationStatus,
 )
-from pinaka.errors import ApprovalRequiredError
+from pinaka.errors import (
+    ApprovalRequiredError,
+    BudgetExceededError,
+    IntegrityError,
+)
 from pinaka.models import (
     BriefDecisionCreate,
     CreativeElementCreate,
     Money,
+    ProjectCreate,
     ShotCreate,
     ShotElementBindingCreate,
     SlotCreate,
     StudioResultOutputImport,
     StudioResultPacketImport,
     StudioScope,
+    StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
     ToolProfileCreate,
     WorkableBriefCreate,
@@ -119,8 +125,8 @@ def _studio_profile(controller):
     )
 
 
-def _planned_project(controller, tmp_path):
-    project = create_project(controller, name="Kids rhyme", budget="0.00")
+def _planned_project(controller, tmp_path, *, budget="10.00"):
+    project = create_project(controller, name="Kids rhyme", budget=budget)
     source = _source_artifact(controller, project.id, tmp_path)
     brief = controller.record_workable_brief(project.id, _brief_request(source))
     shot = controller.add_shot(
@@ -233,14 +239,17 @@ def test_studio_packet_partial_blocking_idempotency_and_fake_return(
     assert repeated["handoff"]["id"] == prepared["handoff"]["id"]
     assert prepared["operation"]["limits"] == {
         "allow_publication": False,
-        "max_cost_minor": 0,
+        "currency": "USD",
+        "max_cost_minor": 100,
         "max_credits": 0,
-        "paid": False,
+        "paid": True,
     }
-    assert prepared["packet"]["controller_authority"]["max_usd"] == "0"
+    assert prepared["packet"]["controller_authority"]["max_usd"] == "1"
     assert prepared["packet"]["slots"][0]["stable_key"] == "shot-01.characters"
     assert prepared["packet"]["slot_asset_assignments"] == []
     assert prepared["packet"]["audio_beds"] == []
+    assert Decimal(prepared["budget_job"]["reserved_cost"]["amount"]) == Decimal("1.00")
+    assert controller.repository.get_project(project.id).reserved.minor == 100
 
     with pytest.raises(ApprovalRequiredError, match="voice.identity"):
         controller.prepare_studio_work_packet(
@@ -248,7 +257,11 @@ def test_studio_packet_partial_blocking_idempotency_and_fake_return(
             storyboard_request.model_copy(
                 update={
                     "idempotency_key": "kids-rhyme-narration-v1",
-                    "scope": StudioScope(phases=(StudioWorkPhase.NARRATION,)),
+                    "scope": StudioScope(
+                        phases=(StudioWorkPhase.NARRATION,),
+                        max_usd=Decimal(0),
+                        allow_paid_generation=False,
+                    ),
                 }
             ),
         )
@@ -260,6 +273,9 @@ def test_studio_packet_partial_blocking_idempotency_and_fake_return(
     assert result["receipt"]["actual_cost_minor"] == 0
     assert len(result["artifacts"]) == 1
     assert controller.verify_artifact(result["artifacts"][0]["id"])
+    settled_project = controller.repository.get_project(project.id)
+    assert settled_project.reserved.minor == 0
+    assert settled_project.spent.minor == 0
     repeated_result = controller.run_studio_work_packet(
         prepared["operation"]["id"], DeterministicStudioAdapter()
     )
@@ -296,10 +312,15 @@ def test_external_studio_result_import_validates_hash_lineage_and_zero_cost(
             tool_profile_id=profile["id"],
             idempotency_key="kids-rhyme-board-import-v1",
             instructions="Return one storyboard manifest.",
-            scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+            scope=StudioScope(
+                phases=(StudioWorkPhase.STORYBOARD,),
+                max_usd=Decimal(0),
+                allow_paid_generation=False,
+            ),
             output_declaration={"roles": ["storyboard_manifest"]},
         ),
     )
+    assert prepared["budget_job"] is None
     output = tmp_path / "studio-result.json"
     output.write_bytes(b'{"storyboard":"complete","simulated":true}')
     packet = StudioResultPacketImport(
@@ -328,16 +349,184 @@ def test_external_studio_result_import_validates_hash_lineage_and_zero_cost(
     repeated = controller.import_studio_result(packet)
     assert repeated["receipt"]["id"] == imported["receipt"]["id"]
 
-    with pytest.raises(ValidationError, match="zero cost"):
+
+def test_studio_run_costs_settle_within_reserved_budget(controller, tmp_path):
+    project, *_ = _planned_project(controller, tmp_path, budget="5.00")
+    profile = _studio_profile(controller)
+    prepared = controller.prepare_studio_work_packet(
+        project.id,
+        StudioWorkPacketRequest(
+            tool_profile_id=profile["id"],
+            idempotency_key="kids-rhyme-paid-import-v1",
+            instructions="Return one storyboard manifest.",
+            scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+            output_declaration={"roles": ["storyboard_manifest"]},
+        ),
+    )
+    output = tmp_path / "paid-result.json"
+    output.write_bytes(b'{"storyboard":"complete"}')
+    imported = controller.import_studio_result(
         StudioResultPacketImport(
-            operation_id="op_paid",
-            status=ToolOperationStatus.FAILED,
-            elapsed_ms=1,
-            actual_cost=Money(amount=Decimal("0.01"), currency="USD"),
+            operation_id=prepared["operation"]["id"],
+            status=ToolOperationStatus.SUCCEEDED,
+            elapsed_ms=40,
+            outputs=(
+                StudioResultOutputImport(
+                    source_path=str(output),
+                    relative_path="artifacts/openmontage/results/paid-storyboard.json",
+                    kind=ArtifactKind.DERIVATIVE,
+                    content_hash=sha256_bytes(output.read_bytes()),
+                    role="storyboard_manifest",
+                ),
+            ),
+            actual_cost=Money(amount=Decimal("0.25"), currency="USD"),
+        )
+    )
+    assert imported["receipt"]["actual_cost_minor"] == 25
+    settled = controller.repository.get_project(project.id)
+    assert settled.reserved.minor == 0
+    assert settled.spent.minor == 25
+
+    over_request = controller.prepare_studio_work_packet(
+        project.id,
+        StudioWorkPacketRequest(
+            tool_profile_id=profile["id"],
+            idempotency_key="kids-rhyme-overrun-v1",
+            instructions="Return one more storyboard manifest.",
+            scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+            output_declaration={"roles": ["storyboard_manifest"]},
+        ),
+    )
+    with pytest.raises(BudgetExceededError, match="exceeds the controller reservation"):
+        controller.import_studio_result(
+            StudioResultPacketImport(
+                operation_id=over_request["operation"]["id"],
+                status=ToolOperationStatus.SUCCEEDED,
+                elapsed_ms=40,
+                outputs=(
+                    StudioResultOutputImport(
+                        source_path=str(output),
+                        relative_path=(
+                            "artifacts/openmontage/results/overrun-storyboard.json"
+                        ),
+                        kind=ArtifactKind.DERIVATIVE,
+                        content_hash=sha256_bytes(output.read_bytes()),
+                        role="storyboard_manifest",
+                    ),
+                ),
+                actual_cost=Money(amount=Decimal("2.00"), currency="USD"),
+            )
         )
 
 
-def test_schema_v8_migrates_to_v9_without_losing_project(tmp_path):
+def test_studio_spend_above_one_dollar_requires_matching_approval(controller, tmp_path):
+    project, *_ = _planned_project(controller, tmp_path, budget="10.00")
+    profile = _studio_profile(controller)
+    request = StudioWorkPacketRequest(
+        tool_profile_id=profile["id"],
+        idempotency_key="kids-rhyme-premium-v1",
+        instructions="Return one premium storyboard manifest.",
+        scope=StudioScope(
+            phases=(StudioWorkPhase.STORYBOARD,),
+            max_usd=Decimal("2.50"),
+        ),
+        output_declaration={"roles": ["storyboard_manifest"]},
+    )
+    with pytest.raises(ApprovalRequiredError, match="above USD 1.00"):
+        controller.prepare_studio_work_packet(project.id, request)
+
+    approval = controller.approve_studio_spend(
+        project.id,
+        StudioSpendApprovalCreate(
+            work_packet=request,
+            approved_by="producer",
+            reason="Approved storyboard generation for the premium run",
+        ),
+    )
+    assert approval["max_cost_minor"] == 250
+
+    with pytest.raises(ApprovalRequiredError, match="does not match"):
+        controller.prepare_studio_work_packet(
+            project.id,
+            request.model_copy(
+                update={
+                    "idempotency_key": "kids-rhyme-premium-v2",
+                    "instructions": "A different request entirely",
+                    "spend_approval_id": approval["id"],
+                }
+            ),
+        )
+
+    prepared = controller.prepare_studio_work_packet(
+        project.id,
+        request.model_copy(update={"spend_approval_id": approval["id"]}),
+    )
+    assert Decimal(prepared["budget_job"]["reserved_cost"]["amount"]) == Decimal("2.50")
+    assert prepared["handoff"]["spend_approval_id"] == approval["id"]
+    assert (
+        controller.repository.get_studio_spend_approval(approval["id"])[
+            "consumed_operation_id"
+        ]
+        == prepared["operation"]["id"]
+    )
+    repeated = controller.prepare_studio_work_packet(
+        project.id,
+        request.model_copy(update={"spend_approval_id": approval["id"]}),
+    )
+    assert repeated["operation"]["id"] == prepared["operation"]["id"]
+
+    another = StudioWorkPacketRequest(
+        tool_profile_id=profile["id"],
+        idempotency_key="kids-rhyme-premium-v3",
+        instructions="Another premium request.",
+        scope=StudioScope(
+            phases=(StudioWorkPhase.STORYBOARD,),
+            max_usd=Decimal("2.50"),
+        ),
+        output_declaration={"roles": ["storyboard_manifest"]},
+    )
+    with pytest.raises(ApprovalRequiredError, match="does not match"):
+        controller.prepare_studio_work_packet(
+            project.id,
+            another.model_copy(update={"spend_approval_id": approval["id"]}),
+        )
+
+
+def test_studio_spend_requires_usd_budget_and_available_funds(controller, tmp_path):
+    rupees = controller.create_project(
+        ProjectCreate(
+            name="Rupee project",
+            objective="Create one governed reel",
+            mode=ContentMode.PRODUCT,
+            audience="Reviewers",
+            output_format="9:16",
+            language="en",
+            duration_seconds=Decimal(10),
+            max_budget=Money(amount=Decimal("500.00"), currency="INR"),
+        )
+    )
+    profile = _studio_profile(controller)
+    payload = {
+        "tool_profile_id": profile["id"],
+        "instructions": "Storyboard only.",
+        "scope": StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+        "output_declaration": {"roles": ["storyboard_manifest"]},
+    }
+    with pytest.raises(IntegrityError, match="denominated in USD"):
+        controller.prepare_studio_work_packet(
+            rupees.id,
+            StudioWorkPacketRequest(idempotency_key="rupee-v1", **payload),
+        )
+
+    small, *_ = _planned_project(controller, tmp_path, budget="0.50")
+    with pytest.raises(BudgetExceededError, match="Insufficient budget"):
+        controller.prepare_studio_work_packet(
+            small.id,
+            StudioWorkPacketRequest(idempotency_key="small-v1", **payload),
+        )
+
+
+def test_schema_v8_migrates_to_v10_without_losing_project(tmp_path):
     path = tmp_path / "v8.sqlite"
     with sqlite3.connect(path) as connection:
         for version in range(1, 9):
@@ -392,6 +581,7 @@ def test_schema_v8_migrates_to_v9_without_losing_project(tmp_path):
             "brief_decisions",
             "creative_elements",
             "shot_element_bindings",
+            "studio_spend_approvals",
         } <= tables
         handoff_columns = {
             row[1]
@@ -401,6 +591,8 @@ def test_schema_v8_migrates_to_v9_without_losing_project(tmp_path):
             "operation_id",
             "work_packet_artifact_id",
             "result_packet_hash",
+            "budget_job_id",
+            "spend_approval_id",
         } <= handoff_columns
 
 

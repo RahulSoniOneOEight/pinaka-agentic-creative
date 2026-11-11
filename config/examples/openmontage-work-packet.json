@@ -11,9 +11,9 @@
       "preserve_character_count": 3,
       "prefer_hyperframes": true
     },
-    "allow_paid_generation": false,
+    "allow_paid_generation": true,
     "max_credits": 0,
-    "max_usd": "0",
+    "max_usd": "1.00",
     "allow_publication": false
   },
   "input_artifact_ids": [],
@@ -21,5 +21,6 @@
     "roles": ["storyboard_manifest", "editable_composition"],
     "required_roots": ["artifacts"]
   },
-  "required_approval_stage": null
+  "required_approval_stage": null,
+  "spend_approval_id": null
 }

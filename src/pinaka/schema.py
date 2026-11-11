@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -537,6 +537,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_specialist_handoffs_operation
 """
 
 
+SCHEMA_V10 = r"""
+CREATE TABLE IF NOT EXISTS studio_spend_approvals (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    scope_hash TEXT NOT NULL,
+    max_cost_minor INTEGER NOT NULL CHECK (max_cost_minor > 100),
+    currency TEXT NOT NULL CHECK (currency = 'USD'),
+    approved_by TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    consumed_operation_id TEXT REFERENCES tool_operations(id),
+    created_at TEXT NOT NULL,
+    consumed_at TEXT,
+    UNIQUE(project_id, scope_hash, max_cost_minor, currency)
+);
+CREATE INDEX IF NOT EXISTS idx_studio_spend_approvals_project
+    ON studio_spend_approvals(project_id, consumed_operation_id);
+
+ALTER TABLE specialist_handoffs
+    ADD COLUMN budget_job_id TEXT REFERENCES jobs(id);
+ALTER TABLE specialist_handoffs
+    ADD COLUMN spend_approval_id TEXT REFERENCES studio_spend_approvals(id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_specialist_handoffs_budget_job
+    ON specialist_handoffs(budget_job_id) WHERE budget_job_id IS NOT NULL;
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -547,4 +573,5 @@ MIGRATIONS = {
     7: SCHEMA_V7,
     8: SCHEMA_V8,
     9: SCHEMA_V9,
+    10: SCHEMA_V10,
 }

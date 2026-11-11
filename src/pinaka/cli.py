@@ -83,6 +83,7 @@ from .models import (
     SegmentCreate,
     ShotElementBindingCreate,
     StudioResultPacketImport,
+    StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
@@ -839,7 +840,14 @@ def cmd_bind_creative_element(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_prepare_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
     request = StudioWorkPacketRequest.model_validate(_load_json(args.file))
+    if args.spend_approval:
+        request = request.model_copy(update={"spend_approval_id": args.spend_approval})
     return _controller(args).prepare_studio_work_packet(args.project_id, request)
+
+
+def cmd_approve_studio_spend(args: argparse.Namespace) -> dict[str, Any]:
+    request = StudioSpendApprovalCreate.model_validate(_load_json(args.file))
+    return _controller(args).approve_studio_spend(args.project_id, request)
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -1984,11 +1992,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     studio_prepare_parser = subparsers.add_parser(
         "prepare-studio-work-packet",
-        help="Authorize a zero-spend OpenMontage work packet",
+        help="Authorize a governed OpenMontage work packet",
     )
     studio_prepare_parser.add_argument("project_id")
     studio_prepare_parser.add_argument("--file", required=True)
+    studio_prepare_parser.add_argument(
+        "--spend-approval",
+        help="Human spend approval ID required above USD 1.00",
+    )
     studio_prepare_parser.set_defaults(handler=cmd_prepare_studio_work_packet)
+
+    studio_spend_parser = subparsers.add_parser(
+        "approve-studio-spend",
+        help="Approve one Studio work request above the USD 1.00 automatic limit",
+    )
+    studio_spend_parser.add_argument("project_id")
+    studio_spend_parser.add_argument("--file", required=True)
+    studio_spend_parser.set_defaults(handler=cmd_approve_studio_spend)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"
@@ -1998,7 +2018,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     studio_import_parser = subparsers.add_parser(
         "import-studio-result",
-        help="Import a zero-cost OpenMontage result and terminal receipt",
+        help="Import a governed OpenMontage result and terminal receipt",
     )
     studio_import_parser.add_argument("--file", required=True)
     studio_import_parser.set_defaults(handler=cmd_import_studio_result)

@@ -12,7 +12,7 @@ provider authority, or budget authority.
 preserved source artifact
   -> versioned workable brief + decision provenance
   -> reusable creative elements + shot bindings
-  -> exact-hash zero-spend work packet
+  -> exact-hash governed work packet
   -> existing tool operation + specialist handoff
   -> Studio or deterministic fixture
   -> project-owned artifacts + terminal execution receipt
@@ -46,18 +46,41 @@ shot identifier, `all`, or a qualified value such as `storyboard:shot-01`.
 Packet preparation rejects only a scope affected by a blocker. For example, a missing voice identity
 with `blocked_work: ["narration"]` does not prevent a storyboard-only packet.
 
-## Zero-spend enforcement
+## Per-run spending policy
 
-Every `StudioScope` is validated with:
+Each Studio run reserves an explicit USD cap before authorization:
 
-- `allow_paid_generation: false`;
-- `max_credits: 0`;
-- `max_usd: 0`; and
-- `allow_publication: false`.
+- **At or below USD 1.00** — the controller authorizes automatically, provided the project has
+  enough unreserved budget.
+- **Above USD 1.00** — a human must first approve that exact work request. The approval is bound to
+  the request hash and can be consumed once.
+- `max_credits` must remain `0`; Studio runs use a USD reservation, not credits.
+- `allow_publication` must remain `false`.
+- The project budget must be denominated in USD. No implicit currency conversion is performed, so a
+  project budgeted in another currency cannot authorize USD Studio spending.
 
-The resulting tool operation repeats those constraints in its limits. Existing receipt validation
-also rejects any positive external cost. A paid Studio adapter must not be added to this path; paid
-provider work requires the controller's separately budgeted provider-job flow.
+The reservation is a real controller budget hold:
+
+```text
+project.max_budget
+  - project.spent
+  - project.reserved
+  >= this run's cap
+```
+
+The reservation, tool operation, and specialist handoff are created in one transaction. Settlement
+releases the hold and charges the reported actual cost:
+
+```text
+import result (actual_cost)
+  -> actual_cost <= reserved cap
+  -> release reservation
+  -> charge actual cost
+```
+
+A reported cost above the reserved cap is refused and requires manual reconciliation. An unknown
+outcome keeps the reservation held and moves the budget job to `submission_unknown` instead of
+charging it.
 
 ## CLI workflow
 
@@ -73,12 +96,16 @@ pinaka record-creative-element <project-id> --file element.json
 pinaka list-creative-elements <project-id>
 pinaka bind-creative-element <project-id> --file binding.json
 
-# Authorize work without invoking Studio.
+# Authorize work without invoking Studio. A run above USD 1.00 needs a
+# human spend approval first; the resulting ID is passed to the packet.
 pinaka prepare-studio-work-packet <project-id> --file studio-request.json
+pinaka approve-studio-spend <project-id> --file spend-approval.json
+pinaka prepare-studio-work-packet <project-id> --file studio-request.json \
+  --spend-approval <approval-id>
 pinaka studio-work-packet <operation-id>
 
 # After an external operator returns files, validate hashes, copy derivatives into
-# the project artifact store, record lineage, and settle a zero-cost receipt.
+# the project artifact store, record lineage, and settle the run receipt.
 pinaka import-studio-result --file studio-result.json
 ```
 
@@ -95,8 +122,9 @@ The canonical JSON artifact contains:
 - selected shots, current elements and bindings, governed slots, treatment decisions, primary/backup
   assignments, and audio beds;
 - every input artifact path and exact hash;
+- the project budget snapshot and this run's cap;
 - allowed phases and output declaration; and
-- explicit controller authority, zero-spend, no-publication, and exact-hash approval statements.
+- explicit controller authority, spending limit, no-publication, and exact-hash approval statements.
 
 Storyboard, composition, render, and review scopes require a current scene plan. Idempotency is
 enforced by the existing `(project, tool profile, idempotency key)` operation constraint and by the
@@ -110,7 +138,8 @@ Each returned file must:
 2. use a role allowed by the work packet when roles were declared;
 3. be written to a new path under `artifacts/`;
 4. become a project-owned artifact with dependencies on the work packet and operation; and
-5. appear in one terminal zero-cost execution receipt and the linked specialist handoff.
+5. appear in one terminal execution receipt and the linked specialist handoff, settled against the
+   run's budget reservation.
 
 Repeated imports return the original receipt only when the complete result packet hash is identical.
 An uncertain or different return is rejected rather than silently replacing governed output.

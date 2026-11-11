@@ -82,6 +82,7 @@ from .models import (
     ShotElementBindingCreate,
     SlotCreate,
     StudioResultPacketImport,
+    StudioSpendApprovalCreate,
     StudioWorkPacketRequest,
     ToolOperationRequest,
     ToolProfileCreate,
@@ -177,6 +178,8 @@ SENSITIVE_KEY_PARTS = (
     "authorization",
     "access_token",
 )
+
+STUDIO_AUTO_SPEND_MINOR = 100
 
 
 class CreativeController:
@@ -1685,6 +1688,38 @@ class CreativeController:
         return self.repository.record_execution_receipt(operation_id, request)
 
     @staticmethod
+    def _studio_spend_scope_hash(
+        project_id: str, request: StudioWorkPacketRequest
+    ) -> str:
+        payload = request.model_dump(mode="json")
+        payload["spend_approval_id"] = None
+        return sha256_json({"project_id": project_id, "work_packet": payload})
+
+    def approve_studio_spend(
+        self, project_id: str, request: StudioSpendApprovalCreate
+    ) -> dict[str, Any]:
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot approve Studio spend for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "studio_spend_approval"
+        )
+        maximum = Money(amount=request.work_packet.scope.max_usd, currency="USD")
+        if project.max_budget.currency != "USD":
+            raise IntegrityError(
+                "Studio USD spending requires a project budget denominated in USD"
+            )
+        return self.repository.record_studio_spend_approval(
+            project_id,
+            scope_hash=self._studio_spend_scope_hash(project_id, request.work_packet),
+            max_cost=maximum,
+            approved_by=request.approved_by,
+            reason=request.reason,
+        )
+
+    @staticmethod
     def _blocked_studio_decisions(
         brief: dict[str, Any],
         request: StudioWorkPacketRequest,
@@ -1730,6 +1765,93 @@ class CreativeController:
             raise IntegrityError(
                 f"Tool profile {profile['stable_key']} does not support {operation_name}"
             )
+        if request.required_approval_stage:
+            approval = self.repository.active_approval(
+                project_id, request.required_approval_stage.value
+            )
+            if not approval:
+                raise ApprovalRequiredError(
+                    f"Active {request.required_approval_stage.value} approval is required"
+                )
+        maximum_cost = Money(amount=request.scope.max_usd, currency="USD")
+        approval_scope_hash = self._studio_spend_scope_hash(project_id, request)
+        existing_for_request = self.repository.tool_operation_by_idempotency(
+            project_id, request.tool_profile_id, request.idempotency_key
+        )
+        if maximum_cost.minor:
+            if project.max_budget.currency != "USD":
+                raise IntegrityError(
+                    "Studio USD spending requires a project budget denominated in USD"
+                )
+            available_minor = (
+                project.max_budget.minor - project.spent.minor - project.reserved.minor
+            )
+            if not existing_for_request and maximum_cost.minor > available_minor:
+                raise BudgetExceededError(
+                    f"Insufficient budget: requested {maximum_cost.minor} minor units, "
+                    f"available {available_minor}"
+                )
+            if maximum_cost.minor > STUDIO_AUTO_SPEND_MINOR:
+                if not request.spend_approval_id:
+                    raise ApprovalRequiredError(
+                        "Studio runs above USD 1.00 require human spend approval"
+                    )
+                spend_approval = self.repository.get_studio_spend_approval(
+                    request.spend_approval_id
+                )
+                if (
+                    spend_approval["project_id"] != project_id
+                    or spend_approval["scope_hash"] != approval_scope_hash
+                    or spend_approval["max_cost_minor"] != maximum_cost.minor
+                    or spend_approval["currency"] != "USD"
+                ):
+                    raise ApprovalRequiredError(
+                        "Studio spend approval does not match this exact work request"
+                    )
+                if spend_approval["consumed_operation_id"] and (
+                    not existing_for_request
+                    or existing_for_request["id"]
+                    != spend_approval["consumed_operation_id"]
+                ):
+                    raise ConflictError(
+                        "Studio spend approval has already been consumed"
+                    )
+            elif request.spend_approval_id:
+                raise IntegrityError(
+                    "Studio runs at or below USD 1.00 do not use a spend approval"
+                )
+        elif request.spend_approval_id:
+            raise IntegrityError("Zero-cost Studio runs do not use a spend approval")
+        if existing_for_request:
+            existing_scope_hash = existing_for_request["request"]["parameters"].get(
+                "approval_scope_hash"
+            )
+            if existing_scope_hash != approval_scope_hash:
+                raise ConflictError(
+                    "Studio idempotency key was used for a different work request"
+                )
+            handoff = self.repository.specialist_handoff_for_operation(
+                existing_for_request["id"]
+            )
+            packet_artifact = self.repository.get_artifact(
+                handoff["work_packet_artifact_id"]
+            )
+            packet = json.loads(self.read_artifact_text(packet_artifact["id"]))
+            budget_job = (
+                self.repository.get_job(handoff["budget_job_id"])
+                if handoff["budget_job_id"]
+                else None
+            )
+            return {
+                "handoff": handoff,
+                "operation": existing_for_request,
+                "work_packet_artifact": packet_artifact,
+                "work_packet_hash": handoff["work_packet_hash"],
+                "packet": packet,
+                "budget_job": (
+                    budget_job.model_dump(mode="json") if budget_job else None
+                ),
+            }
         brief = self.repository.latest_workable_brief(project_id)
         if not brief:
             raise IntegrityError("A current workable brief is required for Studio work")
@@ -1834,6 +1956,12 @@ class CreativeController:
                 "output_format": project.output_format,
                 "language": project.language,
                 "duration_seconds": str(project.duration_seconds),
+                "budget": {
+                    "maximum": project.max_budget.model_dump(mode="json"),
+                    "reserved": project.reserved.model_dump(mode="json"),
+                    "spent": project.spent.model_dump(mode="json"),
+                    "this_run_cap": maximum_cost.model_dump(mode="json"),
+                },
             },
             "brief": brief,
             "scene_plan": scene_plan,
@@ -1853,47 +1981,15 @@ class CreativeController:
                 "studio_review_is_advisory": True,
                 "exact_hash_approval_required": True,
                 "publication_authorized": False,
-                "paid_generation_authorized": False,
+                "paid_generation_authorized": bool(maximum_cost.minor),
                 "max_credits": 0,
-                "max_usd": "0",
+                "max_usd": str(maximum_cost.amount),
+                "automatic_spend_limit_usd": "1.00",
+                "spend_approval_id": request.spend_approval_id,
             },
         }
         packet_bytes = canonical_json(packet).encode("utf-8")
         packet_hash = sha256_bytes(packet_bytes)
-        existing_operation = self.repository.tool_operation_by_idempotency(
-            project_id, request.tool_profile_id, request.idempotency_key
-        )
-        if existing_operation:
-            existing_hash = existing_operation["request"]["parameters"].get(
-                "work_packet_hash"
-            )
-            if existing_hash != packet_hash:
-                raise ConflictError(
-                    "Studio idempotency key was used for a different work packet"
-                )
-            packet_artifact = self.repository.get_artifact(
-                existing_operation["request"]["parameters"]["work_packet_artifact_id"]
-            )
-            try:
-                handoff = self.repository.specialist_handoff_for_operation(
-                    existing_operation["id"]
-                )
-            except NotFoundError:
-                handoff = self.repository.record_specialist_handoff(
-                    project_id,
-                    tool_profile_id=request.tool_profile_id,
-                    operation_id=existing_operation["id"],
-                    work_packet_artifact_id=packet_artifact["id"],
-                    work_packet_hash=packet_hash,
-                    input_artifact_ids=tuple(input_ids),
-                )
-            return {
-                "handoff": handoff,
-                "operation": existing_operation,
-                "work_packet_artifact": packet_artifact,
-                "work_packet_hash": packet_hash,
-                "packet": packet,
-            }
         dependencies = [
             DependencyRef(entity_type="workable_brief", entity_id=brief["id"]),
             *(
@@ -1935,32 +2031,67 @@ class CreativeController:
                 "work_packet_artifact_id": packet_artifact["id"],
                 "work_packet_hash": packet_hash,
                 "scope": request.scope.model_dump(mode="json"),
+                "approval_scope_hash": approval_scope_hash,
+                "spend_approval_id": request.spend_approval_id,
             },
             input_artifact_ids=(packet_artifact["id"], *input_ids),
             output_declaration=request.output_declaration,
             limits={
-                "paid": False,
-                "max_cost_minor": 0,
+                "paid": bool(maximum_cost.minor),
+                "max_cost_minor": maximum_cost.minor,
+                "currency": "USD",
                 "max_credits": 0,
                 "allow_publication": False,
             },
             required_approval_stage=request.required_approval_stage,
         )
-        operation = self.reserve_tool_operation(project_id, operation_request)
-        handoff = self.repository.record_specialist_handoff(
-            project_id,
-            tool_profile_id=request.tool_profile_id,
-            operation_id=operation["id"],
-            work_packet_artifact_id=packet_artifact["id"],
-            work_packet_hash=packet_hash,
-            input_artifact_ids=tuple(input_ids),
-        )
+        budget_job = None
+        if maximum_cost.minor:
+            budget_request = JobRequest(
+                provider="openmontage",
+                endpoint="studio:production",
+                operation=operation_name,
+                idempotency_key=f"studio:{request.idempotency_key}",
+                estimated_cost=maximum_cost,
+                parameters={
+                    "work_packet_artifact_id": packet_artifact["id"],
+                    "work_packet_hash": packet_hash,
+                    "approval_scope_hash": approval_scope_hash,
+                    "spend_approval_id": request.spend_approval_id,
+                },
+                input_refs=(packet_artifact["id"], *input_ids),
+            )
+            operation_payload = operation_request.model_dump(mode="json")
+            budget_payload = budget_request.model_dump(mode="json")
+            operation, handoff, budget_job = self.repository.reserve_studio_work(
+                project_id,
+                tool_request=operation_request,
+                tool_request_hash=sha256_json(operation_payload),
+                budget_request=budget_request,
+                budget_request_hash=sha256_json(budget_payload),
+                work_packet_artifact_id=packet_artifact["id"],
+                work_packet_hash=packet_hash,
+                input_artifact_ids=tuple(input_ids),
+                spend_approval_id=request.spend_approval_id,
+                approval_scope_hash=approval_scope_hash,
+            )
+        else:
+            operation = self.reserve_tool_operation(project_id, operation_request)
+            handoff = self.repository.record_specialist_handoff(
+                project_id,
+                tool_profile_id=request.tool_profile_id,
+                operation_id=operation["id"],
+                work_packet_artifact_id=packet_artifact["id"],
+                work_packet_hash=packet_hash,
+                input_artifact_ids=tuple(input_ids),
+            )
         return {
             "handoff": handoff,
             "operation": operation,
             "work_packet_artifact": packet_artifact,
             "work_packet_hash": packet_hash,
             "packet": packet,
+            "budget_job": (budget_job.model_dump(mode="json") if budget_job else None),
         }
 
     def studio_work_packet(self, operation_id: str) -> dict[str, Any]:
