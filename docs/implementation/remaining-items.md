@@ -53,6 +53,30 @@ An approximate price is not a spending ceiling; a blocked live test is not a pas
 - Do not work around this with default credits, a direct script, a different profile or new keys.
   Studio must support the user's zero-credit BYOK budget before these live acceptance tests resume.
 
+### Local fal credential check (free, no submission)
+
+The second route — Pinaka calling fal directly with the key file at
+`%USERPROFILE%/.config/opencode/secrets/fal-api-key` — was tested without submitting a job:
+
+| Request | Result |
+|---|---|
+| real app, **no** auth header | 401 |
+| real app, garbage key `0000:0000` | 401 |
+| real app, stored key | 401 |
+| fake app, **no** auth header | 404 |
+| fake app, stored key | 404 |
+
+401 is therefore the unauthenticated response, and the stored value produces exactly the same
+result as sending nothing. The 404 on an unknown app happens without authentication and is not
+evidence of a valid key. The stored value is a bare `fal_...` with no colon, while fal parses
+`Authorization: Key <key_id>:<key_secret>`; a malformed value is treated as no auth.
+
+Conclusion: **the local fal credential is not accepted by the model API.** This is independent of
+the Studio `credits: 0` blocker: P1/P2 are blocked on both routes until either a valid
+`key_id:key_secret` key with the `API` preset is installed, or Studio admits a zero-credit budget.
+No job was created and no charge was incurred. Studio's own stored credential is separate and was
+not read or copied.
+
 ### Audio closure corrections
 
 The prior audio release was broader than its wiring: `mux-narration` omitted registered layers,

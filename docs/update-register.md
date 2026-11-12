@@ -12,7 +12,7 @@
 | U6 repository split | Closed | `store/`; original transaction/event boundary preserved |
 | U7 contract split | Closed | `contracts/`; legacy imports preserved |
 | U8 test lanes | Closed | Declared/pinned xdist, slow integration marker, scripts tested outside repository |
-| P1 live fal image | **Blocked, not closed** | Studio refuses `credits: 0` at production creation |
+| P1 live fal image | **Blocked, not closed** | Studio refuses `credits: 0` at production creation; direct fal is unauthenticated (401 identical to no-auth, see below) |
 | P2 live Studio image-to-video/import/assembly | **Blocked, not closed** | Same admission refusal; no accepted paid job exists |
 | B2 paid music generation | Closed / excluded | User chose open-licensed/owned sources only |
 
