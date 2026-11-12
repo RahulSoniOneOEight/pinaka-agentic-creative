@@ -1,18 +1,39 @@
 # Reference Roles
 
-**Status:** Implemented (binding, packet, provider mapping). No live video generation executed.
+**Status:** Implemented. Generated motion is **not** part of the standard flow.
 
-## Why
+## Where references belong
 
-Text prompts cannot hold identity. A reference makes the same character, place or look survive
-across shots, and it is the input that reference-driven models actually use.
+The standard flow is:
 
 ```text
-element or approved image
-  → bound to a shot with a role
-  → carried in the work packet with an exact hash
-  → mapped to the provider's own field names
+text → brief → shots → elements (owned artwork) → composition → render
 ```
+
+References serve that flow by keeping **element artwork consistent across shots** — the same duck,
+the same pond, the same palette. They are recorded per shot and role, carried in the work packet with
+an exact hash, and reused as composition layers.
+
+## Generated motion is an exception
+
+Veo and Runway are **not** in this flow. They are only used when a person explicitly asks for
+generated motion, and the request must say why:
+
+```json
+{
+  "request_generated_motion": true,
+  "generated_motion_reason": "Client asked for live-action water motion in shot 1"
+}
+```
+
+Until that flag is set:
+
+- `provider_reference_hints` is empty;
+- `generated_motion.requested` is `false`;
+- `controller_authority.generated_motion_authorized` is `false`;
+- composition layers come from owned artwork only.
+
+A request that sets the flag without a reason is rejected.
 
 ## Roles
 
@@ -53,11 +74,12 @@ Each packet carries:
 
 - `references` — role, shot, and the resolved artifact path and hash;
 - `reference_summary` — count, roles and shots;
-- `provider_reference_hints` — the same references mapped per provider.
+- `generated_motion` — whether it was explicitly requested, and why;
+- `provider_reference_hints` — only populated when generated motion was requested.
 
 Reference artifacts are also added to the packet inputs, so their hashes are part of the packet hash.
 
-## Provider mapping
+## Provider mapping (exception path only)
 
 | Role | Veo field | Runway field |
 |---|---|---|
@@ -71,6 +93,7 @@ consume it without guessing.
 
 ## Not implemented
 
-- Live Veo or Runway generation. Both are paid per second and remain behind the budget plan.
+- Live Veo or Runway generation. Both are paid per second, are **outside the standard flow**, and
+  are only considered when a person explicitly requests generated motion.
 - Automatic reference selection from the storyboard.
 - Reference-derived variants (A/B) per shot.

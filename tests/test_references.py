@@ -148,12 +148,67 @@ def test_packet_carries_references_and_provider_hints(controller):
     packet = prepared["packet"]
     assert packet["reference_summary"]["count"] == 1
     assert packet["reference_summary"]["roles"] == ["character"]
-    veo = packet["provider_reference_hints"]["veo"]
-    assert veo["reference_images"][0]["sha256"] == art["content_hash"]
-    runway = packet["provider_reference_hints"]["runway"]
-    assert runway["reference_images"][0]["path"] == art["relative_path"]
+    # Generated motion is an exception: no provider hints unless explicitly requested.
+    assert packet["provider_reference_hints"] == {}
+    assert packet["generated_motion"]["requested"] is False
     input_ids = {item["id"] for item in packet["input_artifacts"]}
     assert art["id"] in input_ids
+
+
+def test_provider_hints_appear_only_when_generated_motion_is_requested(controller):
+    project, shots = _project(controller)
+    art = _art(controller, project.id)
+    controller.bind_shot_reference(
+        project.id,
+        ShotReferenceCreate(
+            shot_id=shots[0]["id"], role="character", artifact_id=art["id"]
+        ),
+    )
+    profile = controller.register_tool_profile(
+        ToolProfileCreate(
+            stable_key="openmontage-deterministic",
+            name="Studio fixture",
+            integration_mode=ToolIntegrationMode.SPECIALIST_HANDOFF,
+            executable_or_endpoint="controller:studio",
+            supported_operations=("openmontage.execute_work_packet",),
+            capability_status=CapabilityStatus.WORKING,
+        )
+    )
+    prepared = controller.prepare_studio_work_packet(
+        project.id,
+        StudioWorkPacketRequest(
+            tool_profile_id=profile["id"],
+            idempotency_key="gen-packet",
+            instructions="One shot needs photoreal motion.",
+            scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+            output_declaration={"roles": ["storyboard_manifest"]},
+            request_generated_motion=True,
+            generated_motion_reason="Client asked for live-action water motion in shot 1",
+        ),
+    )
+    packet = prepared["packet"]
+    assert packet["generated_motion"]["requested"] is True
+    assert packet["generated_motion"]["providers"] == ["veo", "runway"]
+    assert (
+        packet["provider_reference_hints"]["veo"]["reference_images"][0]["sha256"]
+        == art["content_hash"]
+    )
+    assert packet["controller_authority"]["generated_motion_authorized"] is True
+
+
+def test_generated_motion_requires_a_stated_reason():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError, match="requires a stated reason"):
+        StudioWorkPacketRequest(
+            tool_profile_id="tool_x",
+            idempotency_key="x",
+            instructions="x",
+            scope=StudioScope(phases=(StudioWorkPhase.STORYBOARD,)),
+            output_declaration={"roles": ["a"]},
+            request_generated_motion=True,
+        )
 
 
 def test_reference_from_an_element_uses_its_artwork(controller):

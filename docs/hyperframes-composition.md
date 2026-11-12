@@ -86,6 +86,9 @@ invented here.
 Assigned slot assets are embedded into the composition as image layers, so the animatic shows the
 actual artwork rather than text placeholders.
 
+Motion is **deterministic**: layers move with the built-in actions or a custom path. Generated video
+(Veo/Runway) is not part of this flow and only enters when a person explicitly asks for it.
+
 ```text
 slot asset assignment (primary/backup)
   → image read from the project artifact store

@@ -2716,10 +2716,23 @@ class CreativeController:
             "shot_element_bindings": bindings,
             "references": references,
             "reference_summary": reference_summary(references),
-            "provider_reference_hints": {
-                provider: provider_reference_payload(references, provider)
-                for provider in SUPPORTED_PROVIDERS
+            "generated_motion": {
+                "requested": request.request_generated_motion,
+                "reason": request.generated_motion_reason,
+                "providers": (
+                    list(SUPPORTED_PROVIDERS)
+                    if request.request_generated_motion
+                    else []
+                ),
             },
+            "provider_reference_hints": (
+                {
+                    provider: provider_reference_payload(references, provider)
+                    for provider in SUPPORTED_PROVIDERS
+                }
+                if request.request_generated_motion
+                else {}
+            ),
             "slots": slots,
             "slot_asset_assignments": slot_assets,
             "treatment_decisions": treatment_decisions,
@@ -2734,6 +2747,7 @@ class CreativeController:
                 "exact_hash_approval_required": True,
                 "publication_authorized": False,
                 "paid_generation_authorized": bool(maximum_cost.minor),
+                "generated_motion_authorized": request.request_generated_motion,
                 "max_credits": 0,
                 "max_amount": str(maximum_cost.amount),
                 "max_currency": maximum_cost.currency,

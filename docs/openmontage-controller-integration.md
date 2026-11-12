@@ -154,6 +154,7 @@ The canonical JSON artifact contains:
   assignments, and audio beds;
 - every input artifact path and exact hash;
 - the project budget snapshot and this run's cap;
+- shot references, and provider hints only when generated motion was requested;
 - allowed phases and output declaration; and
 - explicit controller authority, spending limit, no-publication, and exact-hash approval statements.
 

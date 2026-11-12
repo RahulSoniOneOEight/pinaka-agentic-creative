@@ -449,6 +449,16 @@ class StudioWorkPacketRequest(StrictModel):
     output_declaration: dict[str, Any] = Field(min_length=1)
     required_approval_stage: ApprovalStage | None = None
     spend_approval_id: str | None = Field(default=None, max_length=120)
+    request_generated_motion: bool = False
+    generated_motion_reason: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def generated_motion_is_explicit(self) -> StudioWorkPacketRequest:
+        if self.request_generated_motion and not self.generated_motion_reason:
+            raise ValueError(
+                "Generated motion is an exception and requires a stated reason"
+            )
+        return self
 
 
 class StudioSpendApprovalCreate(StrictModel):
