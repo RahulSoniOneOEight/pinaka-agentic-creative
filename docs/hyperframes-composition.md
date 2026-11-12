@@ -213,6 +213,7 @@ composition layers (three duck subjects per scene plus one background each).
 
 ```powershell
 pinaka qa-render <project-id> <artifact-id> --duration 10 --width 540 --height 960 --fps 10
+# add --captions <srt-artifact> to verify cue coverage and timing
 ```
 
 QA records one result per check against the exact artifact:
@@ -225,6 +226,10 @@ QA records one result per check against the exact artifact:
 | `technical.resolution` | exact width and height |
 | `technical.frame_rate` | within 0.5 fps |
 | `technical.audio` | audio present when required |
+| `audio.loudness` | −24 to −9 LUFS pass; −27 to −6 warn |
+| `audio.true_peak` | ≤ −1 dBTP pass; ≤ 0 warn |
+| `captions.coverage` | ≥ 90% pass; ≥ 70% warn |
+| `captions.timing` | no cue past the runtime |
 
 A JSON report is stored as a `qa` artifact with the render as its dependency. Final approval then
 requires a current artifact whose hash matches `output_hash` **and** recorded QA with no failure, so

@@ -82,6 +82,11 @@ class FFmpegMuxAdapter:
             raise RuntimeError("FFmpeg loudness measurement returned no JSON")
         return json.loads(match.group(0))
 
+    def loudness(self, path: Path) -> dict[str, Any]:
+        """Public loudness measurement used by QA."""
+
+        return self._loudness(Path(path))
+
     def _probe(self, path: Path) -> dict[str, Any]:
         completed = subprocess.run(
             [self.executable, "-hide_banner", "-i", str(path)],

@@ -69,10 +69,16 @@ sourced artifact (never a protected original)
 
 ```powershell
 pinaka enhance-still-vertex <project-id> --file vertex-still-enhance.json
+# add --plan <plan-id> --item <key> to reserve the estimated cost first
 ```
 
 It requires an active sourcing approval, refuses originals and hash-mismatched sources, and records
 the estimate as the operation ceiling.
+
+With `--plan` and `--item` the same call reserves the planned cost against the project budget before
+the provider request, settles the real cost afterwards, and writes a per-asset cost row against the
+plan item's slot. A failed request cancels the reservation at zero. This puts Vertex image spending
+under the same $1 creative rule as narration and fal.
 
 ## fal cost model
 

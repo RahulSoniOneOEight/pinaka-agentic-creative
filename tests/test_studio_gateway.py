@@ -186,6 +186,75 @@ def test_gateway_polls_until_terminal(controller, tmp_path):
     assert transport.submit_calls == 1
 
 
+def test_spool_transport_completes_a_full_round_trip(controller, tmp_path):
+    import json
+
+    project, prepared, _ = _prepared_run(controller, tmp_path)
+    spool = tmp_path / "spool"
+    transport = SpoolStudioTransport(spool)
+
+    def respond(step, payload):
+        requests = sorted(spool.glob(f"*.{step}.request.json"))
+        assert requests, f"no request written for {step}"
+        request = requests[-1]
+        request.with_name(
+            request.name.replace(".request.json", ".response.json")
+        ).write_text(json.dumps(payload), encoding="utf-8")
+
+    first = controller.run_studio_production(
+        project.id, prepared["operation"]["id"], transport
+    )
+    assert first["step"] == "open"
+    respond("open", {"production_id": "spool-prod-1", "status": "opened"})
+
+    second = controller.run_studio_production(
+        project.id, prepared["operation"]["id"], transport
+    )
+    assert second["step"] == "submit"
+    respond("submit", {"job_id": "spool-job-1", "status": "accepted"})
+
+    third = controller.run_studio_production(
+        project.id, prepared["operation"]["id"], transport
+    )
+    assert third["step"] == "poll-spool-job-1"
+    respond("poll-spool-job-1", {"status": "completed"})
+
+    fourth = controller.run_studio_production(
+        project.id, prepared["operation"]["id"], transport
+    )
+    assert fourth["step"] == "collect-spool-job-1"
+    output = tmp_path / "spool-result.json"
+    output.write_bytes(b'{"storyboard":"ready"}')
+    from pinaka.utils import sha256_bytes
+
+    respond(
+        "collect-spool-job-1",
+        {
+            "outputs": [
+                {
+                    "source_path": str(output),
+                    "relative_path": "artifacts/openmontage/results/spool.json",
+                    "kind": "derivative",
+                    "role": "deterministic_result",
+                    "content_hash": sha256_bytes(output.read_bytes()),
+                }
+            ],
+            "actual_cost_minor": 25,
+        },
+    )
+
+    final = controller.run_studio_production(
+        project.id, prepared["operation"]["id"], transport
+    )
+    assert final["status"] == "completed"
+    assert final["production"]["status"] == "completed"
+    assert final["receipt"]["actual_cost_minor"] == 25
+    settled = controller.repository.get_project(project.id)
+    assert settled.spent.minor == 25
+    assert settled.reserved.minor == 0
+    assert final["artifacts"][0]["operation"]["type"] == "openmontage_result"
+
+
 def test_gateway_refuses_a_production_without_a_budget_job(controller, tmp_path):
     record_studio_ready(controller)
     project = create_project(controller, budget="10.00")

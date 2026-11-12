@@ -1046,6 +1046,8 @@ def cmd_enhance_still_vertex(args: argparse.Namespace) -> dict[str, Any]:
         model=payload.get("model", "gemini-3.1-flash-image"),
         image_size=payload.get("image_size", "1K"),
         aspect_ratio=payload.get("aspect_ratio", "16:9"),
+        plan_id=payload.get("plan_id") or args.plan,
+        item_key=payload.get("item_key") or args.item,
     )
 
 
@@ -2554,6 +2556,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     vertex_edit_parser.add_argument("project_id")
     vertex_edit_parser.add_argument("--file", required=True)
+    vertex_edit_parser.add_argument("--plan")
+    vertex_edit_parser.add_argument("--item")
     vertex_edit_parser.set_defaults(handler=cmd_enhance_still_vertex)
 
     studio_show_parser = subparsers.add_parser(

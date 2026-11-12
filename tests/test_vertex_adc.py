@@ -172,7 +172,7 @@ class _FakeVertexAdapter:
         payload = b"\x89PNG\r\n\x1a\n" + b"edited"
         return ToolExecutionResult(
             output_bytes=payload,
-            details={"stub": True},
+            details={"stub": True, "actual_cost_minor": 7},
             response_hash=sha256_bytes(payload),
         )
 
@@ -212,6 +212,92 @@ def test_enhance_still_uses_the_vertex_adapter(controller):
         and dependency["entity_id"] == source["id"]
         for dependency in artifact["dependencies"]
     )
+
+
+def test_enhance_still_reserves_from_the_budget_plan(controller):
+    from pinaka.enums import BudgetCategory, SlotAssetRole
+    from pinaka.models import (
+        BudgetPlanCreate,
+        BudgetPlanItemCreate,
+        Money,
+        ShotCreate,
+        SlotCreate,
+    )
+
+    project, _, _ = advance_to_sourcing(controller)
+    shot = controller.add_shot(
+        project.id,
+        ShotCreate(
+            stable_key="shot-01",
+            ordinal=1,
+            beat="hero",
+            duration_seconds=Decimal(5),
+            narrative="n",
+        ),
+    )
+    slot = controller.add_slot(
+        project.id,
+        SlotCreate(
+            shot_id=shot["id"],
+            stable_key="s1.hero",
+            role="subject",
+            identity_requirement="i",
+            fact_requirement="f",
+            transformation_permission="t",
+            approved_sources=("owned", "generated"),
+        ),
+    )
+    plan = controller.plan_creative_budget(
+        project.id,
+        BudgetPlanCreate(
+            creative_summary="hero",
+            items=(
+                BudgetPlanItemCreate(
+                    stable_key="hero-edit",
+                    ordinal=1,
+                    category=BudgetCategory.ASSET_GENERATION,
+                    provider="google-vertex",
+                    operation="image.edit",
+                    estimated_cost=Money(amount=Decimal("0.08"), currency="USD"),
+                    slot_id=slot["id"],
+                ),
+            ),
+        ),
+    )["plan"]
+    source = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.DERIVATIVE,
+        relative_path="assets/source.png",
+        content=b"\x89PNG\r\n\x1a\nsource",
+        operation={"type": "sourced_import"},
+    )
+    profile = controller.register_tool_profile(
+        ToolProfileCreate(
+            stable_key="google-vertex-nano-banana",
+            name="Vertex image adapter",
+            integration_mode=ToolIntegrationMode.NATIVE,
+            executable_or_endpoint="python:vertex",
+            supported_operations=("image.edit",),
+        )
+    )
+    result = controller.enhance_still_with_vertex(
+        project.id,
+        tool_profile_id=profile["id"],
+        source_artifact_id=source["id"],
+        prompt="clean the background",
+        adapter=_FakeVertexAdapter(),
+        plan_id=plan["id"],
+        item_key="hero-edit",
+    )
+    assert result["settlement"]["status"] == "settled"
+    settled = controller.repository.get_project(project.id)
+    assert settled.reserved.minor == 0
+    assert settled.spent.minor == 7
+    costs = controller.asset_costs(project.id)
+    assert costs["count"] == 1
+    assert costs["assets"][0]["actual_minor"] == 7
+    assert costs["assets"][0]["slot_key"] == "s1.hero"
+    assert SlotAssetRole.PRIMARY  # imported enum stays used
 
 
 def test_enhance_still_refuses_an_original(controller):

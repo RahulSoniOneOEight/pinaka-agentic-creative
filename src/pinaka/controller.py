@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -274,6 +276,38 @@ def _slot_accepts_element(slot_role: str, element_kind: str) -> bool:
     if kind in {"location", "world"}:
         return any(hint in role for hint in BACKGROUND_ROLE_HINTS)
     return False
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(str(value))
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(number) else number
+
+
+CAPTION_TIME = re.compile(
+    r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"
+)
+
+
+def _caption_coverage(srt_text: str, duration: float) -> tuple[float, int, bool]:
+    """Seconds covered by cues, cue count, and whether a cue overruns."""
+
+    covered = 0.0
+    cues = 0
+    overrun = False
+    for match in CAPTION_TIME.finditer(srt_text):
+        groups = [int(value) for value in match.groups()]
+        start = groups[0] * 3600 + groups[1] * 60 + groups[2] + groups[3] / 1000
+        end = groups[4] * 3600 + groups[5] * 60 + groups[6] + groups[7] / 1000
+        cues += 1
+        if duration > 0 and end > duration + 0.05:
+            overrun = True
+        covered += max(0.0, min(end, duration) - min(start, duration))
+    return min(covered, duration), cues, overrun
 
 
 class CreativeController:
@@ -3599,7 +3633,9 @@ class CreativeController:
         expected_height: int | None = None,
         expected_fps: float | None = None,
         expect_audio: bool = True,
+        captions_artifact_id: str | None = None,
         probe: Any | None = None,
+        measure_loudness: Any | None = None,
     ) -> dict[str, Any]:
         """Technical QA on a rendered deliverable, recorded per check."""
 
@@ -3697,6 +3733,73 @@ class CreativeController:
             f"audio stream {'present' if has_audio else 'absent'}",
             {"has_audio": has_audio, "expected": expect_audio},
         )
+        if has_audio and expect_audio:
+            try:
+                loudness = (measure_loudness or FFmpegMuxAdapter().loudness)(path)
+            except (OSError, RuntimeError, ValueError):
+                record(
+                    "audio.loudness",
+                    "warn",
+                    "loudness could not be measured",
+                    {},
+                )
+            else:
+                integrated = _as_float(loudness.get("input_i"))
+                peak = _as_float(loudness.get("input_tp"))
+                if integrated is None:
+                    loudness_status = "warn"
+                elif -24.0 <= integrated <= -9.0:
+                    loudness_status = "pass"
+                elif -27.0 <= integrated <= -6.0:
+                    loudness_status = "warn"
+                else:
+                    loudness_status = "fail"
+                record(
+                    "audio.loudness",
+                    loudness_status,
+                    f"integrated {integrated if integrated is not None else 'n/a'} LUFS",
+                    {"integrated_lufs": integrated},
+                )
+                if peak is not None:
+                    peak_status = (
+                        "pass" if peak <= -1.0 else "warn" if peak <= 0.0 else "fail"
+                    )
+                    record(
+                        "audio.true_peak",
+                        peak_status,
+                        f"true peak {peak:.1f} dBTP",
+                        {"true_peak_dbtp": peak},
+                    )
+        if captions_artifact_id:
+            captions = self.repository.get_artifact(captions_artifact_id)
+            if captions["project_id"] != project_id:
+                raise ConflictError("Caption artifact belongs to a different project")
+            srt_path = self.artifact_store.resolve(
+                project_id, captions["relative_path"]
+            )
+            covered, cues, overrun = _caption_coverage(
+                srt_path.read_text(encoding="utf-8"), duration
+            )
+            ratio = covered / duration if duration > 0 else 0.0
+            coverage_status = (
+                "pass" if ratio >= 0.9 else "warn" if ratio >= 0.7 else "fail"
+            )
+            record(
+                "captions.coverage",
+                coverage_status,
+                f"{cues} cues covering {ratio * 100:.0f}% of the runtime",
+                {
+                    "cues": cues,
+                    "covered_seconds": round(covered, 3),
+                    "ratio": round(ratio, 3),
+                },
+            )
+            record(
+                "captions.timing",
+                "fail" if overrun else "pass",
+                "cue extends past the runtime" if overrun else "all cues fit",
+                {"overrun": overrun},
+            )
 
         statuses = {check["status"] for check in checks}
         overall = (
@@ -4046,6 +4149,8 @@ class CreativeController:
         image_size: str = "1K",
         aspect_ratio: str = "16:9",
         adapter: Any | None = None,
+        plan_id: str | None = None,
+        item_key: str | None = None,
     ) -> dict[str, Any]:
         """Enhance a sourced still through the Vertex image adapter."""
 
@@ -4076,22 +4181,81 @@ class CreativeController:
             output_declaration={"media_type": "image", "model": model},
             required_approval_stage=ApprovalStage.SOURCING,
         )
-        operation, receipt, artifact = self.run_tool_once(
-            project_id,
-            request,
-            adapter or GoogleVertexImageAdapter(model=model),
-            artifact_path=f"artifacts/vertex-edit-{source['content_hash'][:12]}.png",
-            artifact_kind=ArtifactKind.DERIVATIVE,
-            parent_artifact_id=source_artifact_id,
-            dependencies=(
-                DependencyRef(
-                    entity_type="artifact",
-                    entity_id=source_artifact_id,
-                    entity_hash=source["content_hash"],
+        job_id = None
+        if plan_id and item_key:
+            plan = self.repository.get_budget_plan(plan_id)
+            item = next(
+                (entry for entry in plan["items"] if entry["stable_key"] == item_key),
+                None,
+            )
+            if not item:
+                raise NotFoundError(f"Budget item not found in plan: {item_key}")
+            reserved = self.reserve_budget_item(
+                project_id,
+                plan_id,
+                item_key,
+                JobRequest(
+                    provider="google-vertex",
+                    endpoint="vertex:image-edit",
+                    operation="image.edit",
+                    idempotency_key=request.idempotency_key,
+                    estimated_cost=Money.from_minor(
+                        item["estimated_minor"], plan["currency"]
+                    ),
+                    parameters={"prompt": prompt, "model": model},
                 ),
-            ),
-        )
-        return {"operation": operation, "receipt": receipt, "artifact": artifact}
+            )
+            job_id = reserved["job"]["id"]
+        try:
+            operation, receipt, artifact = self.run_tool_once(
+                project_id,
+                request,
+                adapter or GoogleVertexImageAdapter(model=model),
+                artifact_path=(
+                    f"artifacts/vertex-edit-{source['content_hash'][:12]}.png"
+                ),
+                artifact_kind=ArtifactKind.DERIVATIVE,
+                parent_artifact_id=source_artifact_id,
+                dependencies=(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=source_artifact_id,
+                        entity_hash=source["content_hash"],
+                    ),
+                ),
+            )
+        except Exception:
+            if job_id:
+                self.settle_job(
+                    job_id,
+                    target=JobStatus.CANCELLED,
+                    actual_cost=Money.from_minor(
+                        0, self.repository.get_job(job_id).estimated_cost.currency
+                    ),
+                )
+            raise
+        settlement = None
+        if job_id:
+            actual_minor = int(
+                (receipt or {}).get("details", {}).get("actual_cost_minor", ceiling)
+            )
+            settlement = self.settle_budget_item(
+                project_id,
+                job_id,
+                actual_cost=Money.from_minor(
+                    actual_minor,
+                    self.repository.get_job(job_id).estimated_cost.currency,
+                ),
+                requested_by="controller:vertex-image",
+                reason="Vertex image edit settled after execution",
+                asset_artifact_id=artifact["id"] if artifact else None,
+            )
+        return {
+            "operation": operation,
+            "receipt": receipt,
+            "artifact": artifact,
+            "settlement": settlement,
+        }
 
     def run_tool_once(
         self,
@@ -5761,6 +5925,7 @@ class CreativeController:
         actual_cost: Money,
         requested_by: str | None = None,
         reason: str | None = None,
+        asset_artifact_id: str | None = None,
     ) -> dict[str, Any]:
         """Settle a planned job, raising an approval request when over tolerance."""
 
@@ -5769,7 +5934,10 @@ class CreativeController:
             raise ConflictError("Job belongs to a different project")
         try:
             settled = self.settle_job(
-                job_id, target=JobStatus.SUCCEEDED, actual_cost=actual_cost
+                job_id,
+                target=JobStatus.SUCCEEDED,
+                actual_cost=actual_cost,
+                asset_artifact_id=asset_artifact_id,
             )
         except VarianceApprovalRequiredError as error:
             request = self.repository.record_variance_request(

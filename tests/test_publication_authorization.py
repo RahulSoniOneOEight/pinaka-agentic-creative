@@ -167,6 +167,53 @@ def test_publication_check_uses_the_stored_authorization(controller, monkeypatch
     assert plan.artifact_id == candidate["id"]
 
 
+def test_publication_package_writes_a_manual_upload_bundle(
+    controller, monkeypatch, tmp_path
+):
+    from pinaka.publication import build_dispatch_package
+
+    project, candidate = _finalised(controller)
+    controller.archive_project(project.id)
+    controller.authorize_publication(
+        project.id,
+        PublicationAuthorizationCreate(
+            channels=("instagram_reels",), authorized_by="producer"
+        ),
+    )
+
+    def fake_probe(_path):
+        return {
+            "duration_seconds": 10.0,
+            "width_px": 1080,
+            "height_px": 1920,
+            "has_subtitles": True,
+        }
+
+    monkeypatch.setattr("pinaka.publication.probe_ffprobe", fake_probe)
+    request = PublicationRequest(
+        channel="instagram_reels",
+        artifact_id=candidate["id"],
+        title="Counting rhyme",
+        description="Three little ducks count together.",
+        disclosures=("Made for kids",),
+    )
+    authorization = controller.stored_publication_authorization(
+        project.id, "instagram_reels"
+    )
+    output = tmp_path / "delivery"
+    package = build_dispatch_package(
+        controller, project.id, request, authorization, output
+    )
+    assert package.status == "ready_for_manual_upload"
+    assert package.publishing_performed is False
+    assert package.artifact_hash == candidate["content_hash"]
+    assert package.plan_hash
+    assert package.files
+    for item in package.files:
+        assert (output / item.filename).is_file()
+    assert any(item.role == "media" for item in package.files)
+
+
 def test_publication_check_without_authorization_is_blocked(controller, monkeypatch):
     project, candidate = _finalised(controller)
 
