@@ -116,14 +116,20 @@ def test_primary_and_backup_music_beds(controller):
         kind=ArtifactKind.AUDIO,
         relative_path="audio/bed-primary.mp3",
         content=b"primary",
-        operation={"type": "test_audio"},
+        operation={
+            "type": "test_audio",
+            "rights": audio_candidate().rights.model_dump(mode="json"),
+        },
     )
     backup = controller.write_artifact(
         project.id,
         kind=ArtifactKind.AUDIO,
         relative_path="audio/bed-backup.mp3",
         content=b"backup",
-        operation={"type": "test_audio"},
+        operation={
+            "type": "test_audio",
+            "rights": audio_candidate().rights.model_dump(mode="json"),
+        },
     )
 
     controller.assign_audio_bed(
@@ -156,7 +162,10 @@ def test_music_without_backup_is_incomplete(controller):
         kind=ArtifactKind.AUDIO,
         relative_path="audio/only.mp3",
         content=b"only",
-        operation={"type": "test_audio"},
+        operation={
+            "type": "test_audio",
+            "rights": audio_candidate().rights.model_dump(mode="json"),
+        },
     )
     controller.assign_audio_bed(
         project.id,

@@ -82,12 +82,17 @@ part of `command_hash`, so the same inputs always produce the same master.
 | Gate | Rule | Fails when |
 |---|---|---|
 | QA (`audio.layers`) | every bed and cue carries a verified hash | an unhashed layer reaches the mix |
-| QA (`audio.level`) | bed −30…−12 dB, cue −40…−6 dB | a layer is mixed too hot or too quiet |
+| QA (`audio.level`) | configured bed gain −30…−12 dB, cue gain −40…−6 dB | gain settings exceed policy (not a measured stem-to-voice ratio) |
 | QA (`audio.density`) | cues at least 2000 ms apart | sounds are stacked |
 | QA (`audio.credits`) | attribution present when the licence requires it | a CC-BY track ships uncredited |
 | Preflight (`R-AUDIO-001`) | licences clean and complete | NC/ND, missing attribution, backup without primary |
-| Publication (`P-MUSIC-001`) | `music_licence` disclosure recorded | layers exist without the disclosure |
+| Publication (`P-MUSIC-001`) | `music_licence` plus verified, current audio-credits artifact | disclosure or hashed credit coverage is missing |
 | Kids (`kids.audio_cues`) | ≤8 cues, ≤−12 dB, ≥2000 ms apart | a kids profile is exceeded |
+
+Both `mux-voiced` and `mux-narration` include registered layers. Preflight rechecks the artifact's
+rights record, not the treatment-decision summary. The YouTube Kids publication profile runs the cue
+limits and measures the actual final mix against the kids loudness/true-peak policy. Nominal gains
+do not certify perceived loudness or an independently measured voice-to-bed ratio.
 
 ## Delivery
 

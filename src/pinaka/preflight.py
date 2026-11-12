@@ -6,6 +6,8 @@ from typing import Any
 
 from .controller import CreativeController
 from .enums import ApprovalStage, ProjectStatus
+from .errors import IntegrityError
+from .policy.audio import require_audio_rights
 from .reconciliation import reconcile_project
 
 
@@ -322,7 +324,12 @@ def run_preflight(controller: CreativeController, project_id: str) -> dict[str, 
     cues = controller.repository.list_audio_cues(project_id)
     audio_problems: list[str] = []
     for bed in beds:
-        decision = json.loads(bed["decision_json"])
+        artifact = controller.repository.get_artifact(bed["artifact_id"])
+        decision = artifact["operation"].get("rights") or {}
+        try:
+            require_audio_rights(artifact)
+        except (IntegrityError, ValueError) as error:
+            audio_problems.append(f"bed {bed['role']}: {error}")
         if not decision.get("commercial_use_allowed"):
             audio_problems.append(f"bed {bed['role']}: commercial use not allowed")
         if not decision.get("modifications_allowed"):
@@ -332,6 +339,10 @@ def run_preflight(controller: CreativeController, project_id: str) -> dict[str, 
         ):
             audio_problems.append(f"bed {bed['role']}: attribution missing")
     for cue in cues:
+        try:
+            require_audio_rights(controller.repository.get_artifact(cue["artifact_id"]))
+        except (IntegrityError, ValueError) as error:
+            audio_problems.append(f"cue {cue['cue_key']}: {error}")
         decision = json.loads(cue["decision_json"])
         if not decision.get("commercial_use_allowed"):
             audio_problems.append(f"cue {cue['cue_key']}: commercial use not allowed")

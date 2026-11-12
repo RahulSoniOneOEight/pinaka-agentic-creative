@@ -333,6 +333,7 @@ def test_text_fragments_preserve_approved_punctuation():
     ]
 
 
+@pytest.mark.slow
 def test_capability_probe_reports_media_and_model_tooling():
     results = probe_all()
     names = {result.name for result in results}

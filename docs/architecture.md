@@ -1,64 +1,94 @@
-# Foundation architecture
+# Update-oriented modular monolith
+
+Pinaka is one Python process and one governed SQLite store. It is **not** split into services.
+The controller remains the enforcement boundary, with feature-local implementations behind a
+compatible facade. No queue, UI, vector database or plugin framework was added.
 
 ```text
-OpenCode / CLI / future UI
-          |
-          v
-validated proposal contracts
-          |
-          v
-CreativeController  <---- human approvals
-  |       |       |
-  |       |       +---- provider adapters (mock only in Phase 1)
-  |       +------------ sourcing registry + rights eligibility gate
-  |                         |-- official API candidates
-  |                         |-- governed manual imports
-  |                         +-- no scraping / bulk harvesting
-  |       +------------ ArtifactStore (originals + rights metadata + lineage)
-  +-------------------- Repository -> SQLite + event stream + budget ledger
+CLI / operator proposal
+  -> CreativeController (compatible facade)
+     -> use_cases/<feature>.py
+        -> policy/ (explicit reusable guards)
+        -> operations/ (route, cost-model, receipt, one-take declarations)
+        -> adapters/ (local tools / fal / Studio transport)
+        -> Repository (compatible facade)
+           -> store/<aggregate>.py
+              -> Database.transaction -> state + event in one commit
+
+contracts/<aggregate>.py -> strict requests and records
+models.py               -> legacy import compatibility
 ```
+
+## Core ownership and consistency (retained from the foundation)
+
+- SQLite is the single mutable owner of projects, approvals, reservations, jobs and audit events.
+  JSON holds immutable snapshots/manifests, not a competing editable state store.
+- ArtifactStore owns project files; SQLite records their hashes, dependency graph and lineage.
+  Versioned fact sets own source-bound values used by a production.
+- Every database mutation uses `BEGIN IMMEDIATE` and appends its event in the same transaction.
+  Budget exposure is `spent + reserved`; pending/unknown submissions retain reservations.
+- Dependency changes invalidate affected approvals/artifacts and roll advanced project state back;
+  unrelated originals remain current. Relocating source did not change this graph or the schema.
+- Owned media is preferred. External candidates carry creator, licence, attribution, terms date,
+  evidence hash and uncertainty. Rights eligibility precedes visual ranking and sourced import;
+  blocked/needs-review candidates cannot enter through that path.
+- Agents propose; only the Python controller commits. Provider adapters execute already-authorized
+  operations and do not approve spend. No scraping/bulk harvesting or automatic channel posting.
+- Provider sourcing distinctions (official API versus governed manual import) remain in
+  `asset-sourcing-policy.md`; this refactor does not expand a provider's rights or API access.
 
 ## Ownership
 
-- **SQLite** owns mutable execution state, approvals, reservations, jobs and audit events.
-- **Versioned fact sets** own source-bound values used by a production.
-- **ArtifactStore** owns project files; SQLite records their hashes and dependencies.
-- **CreativeController** owns transition, approval, budget and secret-handling policy.
-- **Adapters** translate an already-authorized operation to one provider. They do not approve spend.
-- **Provider profiles** define which media and acquisition methods are permitted. Mixkit and Videezy
-  are manual-only; Pexels API access requires an existing key.
-- **The rights evaluator** rejects incompatible uses and holds uncertain candidates for review before
-  they can enter the artifact store.
-- **Agents** will return validated proposals. They do not write state or call paid services directly.
+| Change | Primary home | Test |
+|---|---|---|
+| Motion planning, reservation, import, assembly | `use_cases/motion.py`, `motion.py` | `test_shot_motion.py` |
+| Funded still edits | `use_cases/images.py`, `adapters/fal_image.py` | `test_provider_catalog.py` |
+| Script proposals | `use_cases/planning.py`, `scripts.py` | `test_modular_architecture.py` |
+| Narration | `use_cases/narration.py` | `test_composition_media.py` |
+| Music/SFX registration and mixing | `use_cases/audio.py`, `adapters/mux.py` | `test_audio_layers.py` |
+| Studio packet policy | `use_cases/studio_packets.py` | `test_workable_brief_and_studio.py` |
+| Accepted Studio job lifecycle | `use_cases/studio_execution.py`, `studio_gateway.py` | `test_studio_gateway.py` |
+| QA and publication | `use_cases/qa.py`, `publication.py` | render/publication tests |
+| SQL for one aggregate | `store/<aggregate>.py` | feature integration tests |
+| Request shape | `contracts/<aggregate>.py` | contract/feature tests |
 
-## Consistency model
+## Editing discipline
 
-Every database mutation runs in a `BEGIN IMMEDIATE` transaction and records an event in that same
-transaction. Budget exposure is `spent + reserved`; pending and submission-unknown jobs retain their
-reservation. The provider job ID is persisted as soon as submission succeeds.
+1. Start in the feature file, not the facade. Keep one owner per method; the architecture test
+   rejects duplicate method names in facade bases.
+2. Add policy to `policy/` only when shared. Explicit calls are preferred over hidden decorator
+   side effects for budget reservations and transactions.
+3. Register an operation's route and funding policy in `operations/catalog.py`. Reuse the existing
+   price estimator instead of copying price constants. Catalog entries describe policy, **not**
+   live credential readiness, provider access or balances.
+4. Keep adapters small. Paid image calls must have a funded item; no optional `reserve=False`
+   escape hatch. A submitted-but-uncertain job remains for reconciliation, never an automatic retry.
+5. Use `Database.transaction()` and `Repository._event()` on the same connection. The relocation
+   preserves that existing unit-of-work boundary rather than introducing event sourcing.
+6. Run selected tests during editing; run the full serial and/or isolated-worker gate before release.
 
-SQLite is the single mutable owner. JSON is used for immutable input/output snapshots and manifests,
-not as a competing editable state store.
+## Provider consolidation
 
-## Invalidation
+- Hosted stills/edits: fal (`generate-asset`, `enhance-still`), or the existing Studio work-packet
+  path using `fal.image`. Direct fal uses its separately configured credential; it never reads
+  Studio's saved keys. Studio owns credentials used on the Studio path.
+- Generated motion: Studio `fal.video` only, per shot, first-frame preferred. No Veo/Runway.
+- Narration: local Kokoro via `synthesize-narration`; optional `--script-file` makes an unapproved
+  local preview. ASR remains local faster-whisper.
+- `draft-script --script-file`: records agent/operator-supplied copy as a proposal. An injected
+  `ScriptAdapter` can supply copy programmatically; there is no implicit hosted model call.
+- Vertex entry points and ADC-specific adapters are retired. Historic receipts and media are
+  untouched. The optional free-tier Gemini adapter is separate, explicitly selected, and still
+  available through the renamed `google-image` extra; it is not a Vertex fallback.
+- Music/SFX: sourced open-licensed or owned audio; no paid generation route in this catalog.
 
-Approvals and artifacts declare dependencies such as a fact-set version or prior approval. Replacing
-a fact set traverses this graph, invalidates dependent approvals, marks dependent artifacts stale,
-and rolls an advanced project back to `facts_locked`. Unrelated originals and artifacts remain
-current.
+## Compatibility and limits
 
-## Asset sourcing
+The public `CreativeController`, `Repository` and `pinaka.models` import paths remain. Feature
+classes are implementation details using shared controller context, not independent services.
+This is source modularization, not complete dependency inversion: cross-feature workflows still
+delegate through the facade. Large workflows can be decomposed later when a specific change needs it.
 
-Owned media is preferred. External candidates are normalized into source, creator, licence,
-attribution, terms-date, evidence-hash, provider-compliance, and rights-uncertainty fields. The
-controller evaluates those fields against the intended use before importing a content-addressed
-original. Rights eligibility precedes visual ranking; `blocked` and `needs_review` candidates cannot
-be imported through the sourced-original path.
-
-See `asset-sourcing-policy.md` for the provider matrix and complete flow.
-
-## Deliberately absent
-
-No FastAPI, UI, Redis, external queue, vector database, parallel agent processes, production
-publisher, or real paid adapter is included. Those require measured need and their own acceptance
-gate.
+The one-time `scripts/refactor_layout.py` codemod copied methods/decorators and checked exact
+method text before formatting. It refuses to run on the relocated layout. New features should edit
+the owned modules directly, not rerun the migration.

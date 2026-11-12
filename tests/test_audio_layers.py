@@ -297,6 +297,82 @@ def test_preflight_flags_an_unlicensed_cue(controller):
     assert "commercial use not allowed" in rule["detail"]
 
 
+def test_preflight_reads_bed_rights_not_treatment_metadata(controller):
+    project = create_project(controller)
+    bed = _audio_artifact(controller, project.id, "clean-bed")
+    controller.assign_audio_bed(
+        project.id,
+        artifact_id=bed["id"],
+        role=SlotAssetRole.PRIMARY,
+        criteria=AssetCriteria(),
+        decided_by="reviewer",
+    )
+    rule = next(
+        r
+        for r in run_preflight(controller, project.id)["rules"]
+        if r["rule_id"] == "R-AUDIO-001"
+    )
+    assert rule["status"] == "pass"
+
+
+def test_composition_mux_passes_registered_cues_to_the_adapter(controller):
+    from pinaka.adapters.mux import MuxedVideo
+    from pinaka.utils import sha256_bytes
+
+    project = create_project(controller)
+    video = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/silent.mp4",
+        content=b"video",
+        operation={"duration_seconds": 25},
+    )
+    narration = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.AUDIO,
+        relative_path="audio/voice.wav",
+        content=b"voice",
+        operation={},
+    )
+    cue = _audio_artifact(controller, project.id, "timed-pop")
+    controller.assign_audio_cue(project.id, _cue(cue["id"]))
+
+    class Mixer:
+        def mux(
+            self,
+            *,
+            video_path,
+            audio_path,
+            duration_seconds,
+            bed_path,
+            bed_gain_db,
+            cues,
+        ):
+            assert cues[0]["artifact_id"] == cue["id"]
+            assert cues[0]["start_ms"] == 1000
+            content = b"mixed-cue"
+            return MuxedVideo(
+                content=content,
+                content_hash=sha256_bytes(content),
+                metadata={},
+                loudness={},
+                command_hash="a" * 64,
+                encoder_version="fake",
+            )
+
+    result = controller.mux_narration(
+        project.id,
+        video_artifact_id=video["id"],
+        audio_artifact_id=narration["id"],
+        adapter=Mixer(),
+    )
+    assert (
+        result["video"]["operation"]["audio_layers"]["cues"][0]["content_hash"]
+        == cue["content_hash"]
+    )
+    assert cue["id"] in {d["entity_id"] for d in result["video"]["dependencies"]}
+
+
 def _publication_request(disclosures: tuple[str, ...]) -> PublicationRequest:
     return PublicationRequest(
         channel=next(iter(CHANNELS)),
@@ -315,7 +391,12 @@ def _authorization(request: PublicationRequest) -> PublicationAuthorization:
     )
 
 
-def _media_check(request: PublicationRequest, audio_layers: int):
+def _media_check(
+    request: PublicationRequest,
+    audio_layers: int,
+    *,
+    audio_credits_complete: bool = False,
+):
     plan = evaluate_publication(
         project_id="prj_test",
         project_status="archived",
@@ -329,6 +410,7 @@ def _media_check(request: PublicationRequest, audio_layers: int):
         has_embedded_captions=True,
         caption_hash="b" * 64,
         audio_layers=audio_layers,
+        audio_credits_complete=audio_credits_complete,
     )
     return next(check for check in plan.checks if check.rule_id == "P-MUSIC-001")
 
@@ -338,7 +420,11 @@ def test_publication_requires_a_music_licence_disclosure():
     assert _media_check(request, audio_layers=2).status == "fail"
 
     disclosed = _publication_request(("music_licence",))
-    assert _media_check(disclosed, audio_layers=2).status == "pass"
+    assert _media_check(disclosed, audio_layers=2).status == "fail"
+    assert (
+        _media_check(disclosed, audio_layers=2, audio_credits_complete=True).status
+        == "pass"
+    )
 
 
 def test_audio_credits_records_every_layer(controller):
@@ -387,6 +473,32 @@ def test_kids_cue_limits_reject_loud_or_dense_cues():
     assert "closer" in checks.detail
 
 
+@pytest.mark.parametrize("gain,expected", [(-18.0, "pass"), (-6.0, "fail")])
+def test_kids_publication_applies_cue_and_measured_loudness_checks(gain, expected):
+    request = PublicationRequest(
+        channel="youtube_kids", artifact_id="art_final", title="Pilot"
+    )
+    plan = evaluate_publication(
+        project_id="prj_test",
+        project_status="archived",
+        request=request,
+        authorization=_authorization(request),
+        artifact_hash="a" * 64,
+        final_approval_hash="a" * 64,
+        duration_seconds=10,
+        width_px=1080,
+        height_px=1920,
+        has_embedded_captions=True,
+        caption_hash="b" * 64,
+        audio_cues=({"cue_key": "pop", "start_ms": 1000, "gain_db": gain},),
+        audio_loudness={"integrated_lufs": -16.0, "true_peak_dbtp": -3.0},
+    )
+    checks = {c.rule_id: c for c in plan.checks}
+    assert checks["P-KIDS-AUDIO-CUES"].status == expected
+    assert checks["P-KIDS-LOUDNESS"].status == "pass"
+
+
+@pytest.mark.slow
 def test_ffmpeg_mix_carries_the_bed_and_a_cue(tmp_path):
     executable = FFmpegEncodeAdapter.find_executable()
 

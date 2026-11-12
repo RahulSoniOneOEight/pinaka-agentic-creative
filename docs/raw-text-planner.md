@@ -62,12 +62,12 @@ explicit routing decision.
 pinaka draft-script <project> [--duration 10] [--max-words 24]
 ```
 
-`draft-script` asks Vertex Gemini for a short script using the brief's objective, audience, duration
-and any supplied copy, then stores it as an artifact and reports `requires_approval: true`. The draft
-is a proposal: the controller records it as a design artifact, and a human still approves the brief
-that uses it.
+`draft-script --script-file copy.txt` records supplied agent/operator copy against the brief and
+reports `requires_approval: true`. Code callers can inject a `ScriptAdapter`. No hosted model is
+called implicitly. Empty or over-budget copy is rejected instead of truncated. A human still approves
+the brief that uses the proposal.
 
-Verified in tests with an injected adapter; the live call is untested.
+Verified with supplied copy and injected adapters; this default path requires no provider or spend.
 
 ## CLI
 

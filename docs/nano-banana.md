@@ -1,7 +1,8 @@
 # Nano Banana image generation
 
-**Status:** ADC Vertex route implemented and sampled; API-key free-tier route implemented but blocked
-without a key
+**Status: historical provider notes.** The Vertex/ADC commands below are retired. The optional
+API-key free-tier adapter remains separate; the current paid flow is fal with a controller-funded
+item. See `architecture.md`.
 
 **Last verified:** 10 November 2026
 **Models:** `gemini-3.1-flash-image`, `gemini-3.1-flash-image-preview`,

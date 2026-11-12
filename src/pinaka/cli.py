@@ -14,10 +14,6 @@ from pydantic import ValidationError
 from .adapters.captions import CaptionMuxAdapter
 from .adapters.comfyui import ComfyUIImageAdapter
 from .adapters.google_image import GeminiImageAdapter
-from .adapters.google_vertex_image import (
-    GoogleVertexImageAdapter,
-    estimate_cost_minor,
-)
 from .adapters.mock import MockGenerationAdapter
 from .adapters.transcribe import (
     WhisperTranscriber,
@@ -360,7 +356,13 @@ def cmd_encode_animatic(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_synthesize_narration(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).synthesize_narration(
-        args.project_id, voice=args.voice, speed=args.speed
+        args.project_id,
+        voice=args.voice,
+        speed=args.speed,
+        script=Path(args.script_file).read_text(encoding="utf-8")
+        if args.script_file
+        else None,
+        route=args.route,
     )
 
 
@@ -959,21 +961,6 @@ def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def cmd_synthesize_narration_vertex(args: argparse.Namespace) -> dict[str, Any]:
-    script = (
-        Path(args.script_file).read_text(encoding="utf-8")
-        if args.script_file
-        else (args.script or "")
-    )
-    return _controller(args).synthesize_narration_vertex(
-        args.project_id,
-        script=script,
-        voice=args.voice,
-        model=args.model,
-        reserve=args.reserve,
-    )
-
-
 def cmd_mux_narration(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).mux_narration(
         args.project_id,
@@ -1054,6 +1041,9 @@ def cmd_draft_script(args: argparse.Namespace) -> dict[str, Any]:
         duration_seconds=args.duration,
         max_words=args.max_words,
         model=args.model,
+        script=Path(args.script_file).read_text(encoding="utf-8")
+        if args.script_file
+        else None,
     )
 
 
@@ -1075,33 +1065,8 @@ def cmd_import_shot_motion(args: argparse.Namespace) -> dict[str, Any]:
         source_path=payload["source_path"],
         content_hash=payload["content_hash"],
         actual_cost_minor=payload.get("actual_cost_minor"),
-    )
-
-
-def cmd_vertex_check(args: argparse.Namespace) -> dict[str, Any]:
-    return _controller(args).verify_vertex_models(
-        project=args.project, location=args.location
-    )
-
-
-def cmd_register_vertex_profile(args: argparse.Namespace) -> dict[str, Any]:
-    return _controller(args).register_vertex_profile(
-        project=args.project, location=args.location
-    )
-
-
-def cmd_enhance_still_vertex(args: argparse.Namespace) -> dict[str, Any]:
-    payload = _load_json(args.file)
-    return _controller(args).enhance_still_with_vertex(
-        args.project_id,
-        tool_profile_id=payload["tool_profile_id"],
-        source_artifact_id=payload["artifact_id"],
-        prompt=payload["prompt"],
-        model=payload.get("model", "gemini-3.1-flash-image"),
-        image_size=payload.get("image_size", "1K"),
-        aspect_ratio=payload.get("aspect_ratio", "16:9"),
-        plan_id=payload.get("plan_id") or args.plan,
-        item_key=payload.get("item_key") or args.item,
+        output_relative_path=payload.get("output_relative_path"),
+        shot_id=payload.get("shot_id"),
     )
 
 
@@ -1123,6 +1088,7 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
     )
     from .adapters.mock import MockGenerationAdapter
     from .fal import FalClient
+    from .operations import operation
 
     controller = _controller(args)
     if args.dry_run:
@@ -1137,6 +1103,18 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
     )
     if not item:
         raise NotFoundError(f"Budget item not found in plan: {args.item}")
+    if args.adapter == "fal":
+        operation("image.generate").validate(
+            "fal.image", model=args.model or DEFAULT_IMAGE_MODEL
+        )
+        if (
+            item["provider"] != "fal"
+            or item["operation"] != "image.generate"
+            or plan["currency"] != "USD"
+        ):
+            raise ValueError(
+                "fal image generation requires a fal/image.generate USD budget item"
+            )
     cost = Money.from_minor(item["estimated_minor"], plan["currency"])
     request = JobRequest(
         provider=item["provider"],
@@ -1154,7 +1132,7 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
         adapter = MockGenerationAdapter()
     else:
         adapter = FalImageAdapter(
-            FalClient(api_key=args.api_key),
+            FalClient(),
             model=args.model or DEFAULT_IMAGE_MODEL,
         )
     suffix = "png" if args.adapter == "fal" else "json"
@@ -1170,6 +1148,17 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
         "artifact": artifact,
         "asset_costs": controller.asset_costs(args.project_id),
     }
+
+
+def cmd_enhance_still(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).enhance_still(args.project_id, **payload)
+
+
+def cmd_operations(args: argparse.Namespace) -> list[dict[str, Any]]:
+    from .operations import describe_operations
+
+    return describe_operations()
 
 
 def cmd_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
@@ -1627,117 +1616,6 @@ def cmd_generate_local_image(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
-def cmd_generate_vertex_image(args: argparse.Namespace) -> dict[str, Any]:
-    import shutil
-
-    from .utils import sha256_json
-
-    prompt = (args.prompt or "").strip()
-    if not prompt:
-        raise ValueError("--prompt is required")
-    adapter = GoogleVertexImageAdapter(
-        project=args.project,
-        location=args.location,
-        model=args.model,
-    )
-    adapter.ensure_configured()
-    estimated = estimate_cost_minor(args.model, args.image_size)
-    if args.max_cost_cents < estimated:
-        raise ValueError(
-            f"--max-cost-cents must be at least {estimated} for {args.model} "
-            f"at {args.image_size}"
-        )
-    digest = sha256_json(
-        {
-            "prompt": prompt,
-            "model": args.model,
-            "image_size": args.image_size,
-            "aspect_ratio": args.aspect_ratio,
-        }
-    )[:16]
-    controller = _controller(args)
-    profile = _resolve_tool_profile(controller, args.profile_id)
-    request = ToolOperationRequest(
-        tool_profile_id=profile["id"],
-        operation="image.generate",
-        idempotency_key=f"vertex-image-{digest}",
-        parameters={
-            "prompt": prompt,
-            "model": args.model,
-            "image_size": args.image_size,
-            "aspect_ratio": args.aspect_ratio,
-        },
-        limits={"max_cost_minor": args.max_cost_cents},
-        output_declaration={
-            "media_type": "image",
-            "model": args.model,
-            "project": adapter.project,
-            "billing": "gcp_trial_credit",
-        },
-        required_approval_stage=ApprovalStage.BRIEF,
-    )
-    operation, receipt, artifact = controller.run_tool_once(
-        args.project_id,
-        request,
-        adapter,
-        artifact_path=f"artifacts/vertex-image-{digest}.png",
-    )
-    result: dict[str, Any] = {
-        "operation_id": operation["id"],
-        "operation_status": operation["status"],
-        "receipt_status": receipt["status"],
-        "artifact_id": artifact["id"] if artifact else None,
-        "content_hash": artifact["content_hash"] if artifact else None,
-        "estimated_cost_minor": estimated,
-        "actual_cost_minor": receipt.get("details", {}).get("actual_cost_minor"),
-        "billing": "gcp_trial_credit",
-    }
-    if (
-        artifact
-        and receipt["status"] == "succeeded"
-        and receipt.get("details", {}).get("actual_cost_minor")
-    ):
-        spend_payload = {
-            "schema_version": "external-trial-credit/v1",
-            "provider": "google-vertex",
-            "project": adapter.project,
-            "location": adapter.location,
-            "model": args.model,
-            "operation_id": operation["id"],
-            "output_artifact_id": artifact["id"],
-            "output_content_hash": artifact["content_hash"],
-            "actual_cost_minor": receipt["details"]["actual_cost_minor"],
-            "currency": "USD",
-            "billing": "gcp_trial_credit",
-            "prompt_sha256": receipt["details"].get("prompt_sha256"),
-            "created_at": operation.get("created_at"),
-        }
-        spend_artifact = controller.write_artifact(
-            args.project_id,
-            kind=ArtifactKind.EXTERNAL_SPEND,
-            relative_path=f"artifacts/vertex-spend-{digest}.json",
-            content=json.dumps(spend_payload, indent=2, ensure_ascii=False).encode(
-                "utf-8"
-            ),
-            operation={
-                "type": "external_trial_credit",
-                "model": args.model,
-                "actual_cost_minor": receipt["details"]["actual_cost_minor"],
-            },
-        )
-        result["spend_artifact_id"] = spend_artifact["id"]
-        result["spend_content_hash"] = spend_artifact["content_hash"]
-    if artifact and args.copy_to:
-        source = controller.artifact_store.resolve(
-            args.project_id, artifact["relative_path"]
-        )
-        destination = Path(args.copy_to).expanduser().resolve()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-        result["copied_to"] = str(destination)
-    return result
-
-
 def cmd_external_qa(args: argparse.Namespace) -> dict[str, Any]:
     report = run_external_qa(
         args.video,
@@ -2025,6 +1903,10 @@ def build_parser() -> argparse.ArgumentParser:
     narration_parser.add_argument("project_id")
     narration_parser.add_argument("--voice", default="af_heart")
     narration_parser.add_argument("--speed", type=float, default=1.0)
+    narration_parser.add_argument(
+        "--script-file", help="Local TTS preview of supplied copy"
+    )
+    narration_parser.add_argument("--route", choices=("kokoro",), default="kokoro")
     narration_parser.set_defaults(handler=cmd_synthesize_narration)
 
     mux_parser = subparsers.add_parser(
@@ -2498,7 +2380,6 @@ def build_parser() -> argparse.ArgumentParser:
     generate_asset_parser.add_argument("--model")
     generate_asset_parser.add_argument("--endpoint")
     generate_asset_parser.add_argument("--key")
-    generate_asset_parser.add_argument("--api-key")
     generate_asset_parser.add_argument(
         "--adapter", choices=["mock", "fal"], default="mock"
     )
@@ -2519,14 +2400,6 @@ def build_parser() -> argparse.ArgumentParser:
     reconcile_overage_parser.add_argument("project_id")
     reconcile_overage_parser.add_argument("--file", required=True)
     reconcile_overage_parser.set_defaults(handler=cmd_reconcile_overage)
-
-    vertex_check_parser = subparsers.add_parser(
-        "vertex-check",
-        help="Free check that the Vertex models Pinaka uses are available",
-    )
-    vertex_check_parser.add_argument("--project")
-    vertex_check_parser.add_argument("--location")
-    vertex_check_parser.set_defaults(handler=cmd_vertex_check)
 
     motion_plan_parser = subparsers.add_parser(
         "plan-motion",
@@ -2579,13 +2452,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     script_parser = subparsers.add_parser(
         "draft-script",
-        help="Draft a short script from the brief with Vertex Gemini",
+        help="Record supplied/agent-authored script as an unapproved proposal (no hosted call)",
     )
     script_parser.add_argument("project_id")
     script_parser.add_argument("--duration", type=float)
     script_parser.add_argument("--max-words", type=int)
     script_parser.add_argument("--model")
+    script_parser.add_argument("--script-file")
     script_parser.set_defaults(handler=cmd_draft_script)
+
+    image_edit_parser = subparsers.add_parser(
+        "enhance-still", help="One funded fal image edit; provider-neutral command"
+    )
+    image_edit_parser.add_argument("project_id")
+    image_edit_parser.add_argument("--file", required=True)
+    image_edit_parser.set_defaults(handler=cmd_enhance_still)
+
+    operations_parser = subparsers.add_parser(
+        "operations", help="Describe supported operation policy (not live readiness)"
+    )
+    operations_parser.set_defaults(handler=cmd_operations)
 
     composition_parser = subparsers.add_parser(
         "author-composition",
@@ -2602,22 +2488,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Author the scaffold without embedding assigned image layers",
     )
     composition_parser.set_defaults(handler=cmd_author_composition, embed_layers=True)
-
-    narration_parser = subparsers.add_parser(
-        "synthesize-narration-vertex",
-        help="Synthesize narration with Vertex TTS (ADC)",
-    )
-    narration_parser.add_argument("project_id")
-    narration_parser.add_argument("--script")
-    narration_parser.add_argument("--script-file")
-    narration_parser.add_argument("--voice", default="Kore")
-    narration_parser.add_argument("--model")
-    narration_parser.add_argument(
-        "--reserve",
-        action="store_true",
-        help="Reserve the estimated TTS cost against the project budget",
-    )
-    narration_parser.set_defaults(handler=cmd_synthesize_narration_vertex)
 
     captions_export_parser = subparsers.add_parser(
         "export-captions", help="Write a deterministic SRT from the shot plan"
@@ -2668,24 +2538,6 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("--width", type=int, default=1080)
     render_parser.add_argument("--height", type=int, default=1920)
     render_parser.set_defaults(handler=cmd_render_composition)
-
-    vertex_profile_parser = subparsers.add_parser(
-        "register-vertex-profile",
-        help="Register the ADC-authenticated Vertex provider profile (disabled)",
-    )
-    vertex_profile_parser.add_argument("--project")
-    vertex_profile_parser.add_argument("--location")
-    vertex_profile_parser.set_defaults(handler=cmd_register_vertex_profile)
-
-    vertex_edit_parser = subparsers.add_parser(
-        "enhance-still-vertex",
-        help="Enhance a sourced still through the Vertex image adapter",
-    )
-    vertex_edit_parser.add_argument("project_id")
-    vertex_edit_parser.add_argument("--file", required=True)
-    vertex_edit_parser.add_argument("--plan")
-    vertex_edit_parser.add_argument("--item")
-    vertex_edit_parser.set_defaults(handler=cmd_enhance_still_vertex)
 
     studio_show_parser = subparsers.add_parser(
         "studio-work-packet", help="Show a governed OpenMontage work packet"
@@ -2987,26 +2839,6 @@ def build_parser() -> argparse.ArgumentParser:
     local_image_parser.add_argument("--seed", type=int, default=0)
     local_image_parser.add_argument("--copy-to")
     local_image_parser.set_defaults(handler=cmd_generate_local_image)
-
-    vertex_image_parser = subparsers.add_parser(
-        "generate-vertex-image",
-        help="Generate one ADC-authenticated Vertex Nano Banana image",
-    )
-    vertex_image_parser.add_argument("project_id")
-    vertex_image_parser.add_argument(
-        "--profile-id", default="google-vertex-nano-banana"
-    )
-    vertex_image_parser.add_argument("--prompt", required=True)
-    vertex_image_parser.add_argument("--project")
-    vertex_image_parser.add_argument("--location")
-    vertex_image_parser.add_argument("--model", default="gemini-3.1-flash-image")
-    vertex_image_parser.add_argument(
-        "--image-size", choices=["512", "1K", "2K", "4K"], default="1K"
-    )
-    vertex_image_parser.add_argument("--aspect-ratio", default="16:9")
-    vertex_image_parser.add_argument("--max-cost-cents", type=int, default=15)
-    vertex_image_parser.add_argument("--copy-to")
-    vertex_image_parser.set_defaults(handler=cmd_generate_vertex_image)
 
     event_parser = subparsers.add_parser(
         "events", help="Show the append-only audit event stream"

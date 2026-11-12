@@ -6,8 +6,10 @@ from typing import Any
 
 from ..adapters.base import PollResult, Submission
 from ..enums import JobStatus
-from ..fal import FalClient, _first_output_url
+from ..errors import IntegrityError
+from ..fal import FalClient, _data_uri, _first_output_url
 from ..models import JobRequest, Money
+from ..policy.guards import require_one_take
 from ..utils import canonical_json, sha256_bytes
 
 DEFAULT_IMAGE_MODEL = "fal-ai/flux/schnell"
@@ -25,12 +27,21 @@ class FalImageAdapter:
     client: FalClient
     model: str = DEFAULT_IMAGE_MODEL
     provider_name: str = "fal"
+    source_image: bytes | None = None
+    source_mime: str = "image/png"
 
     def __post_init__(self) -> None:
         self._results: dict[str, PollResult] = {}
 
     def submit(self, request: JobRequest) -> Submission:
+        require_one_take(request.parameters)
+        if request.estimated_cost.currency != "USD":
+            raise IntegrityError(
+                "fal estimates require USD; no implicit currency conversion"
+            )
         payload = {"prompt": request.parameters.get("prompt", "")}
+        if self.source_image is not None:
+            payload["image_urls"] = [_data_uri(self.source_image, self.source_mime)]
         for key in (
             "aspect_ratio",
             "image_size",
@@ -48,6 +59,10 @@ class FalImageAdapter:
         if cost is None:
             cost = request.estimated_cost
             cost_source = "planned_estimate"
+        if cost.currency != "USD":
+            raise IntegrityError(
+                "fal reported a non-USD cost; reconcile without relabeling currency"
+            )
         provider_job_id = f"fal_{sha256_bytes(content)[:24]}"
         self._results[provider_job_id] = PollResult(
             status=JobStatus.SUCCEEDED,

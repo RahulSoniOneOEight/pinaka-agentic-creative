@@ -1,6 +1,8 @@
 # Gemini on Vertex with ADC
 
-**Status:** Implemented; free model verification passed. No paid call executed yet.
+**Status: RETIRED.** Vertex adapters/verbs are removed. The content below is historical evidence,
+not current setup instructions. Use fal for hosted stills/edits and local Kokoro/whisper for speech.
+See `architecture.md`.
 
 ## Why ADC
 

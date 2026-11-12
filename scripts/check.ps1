@@ -1,32 +1,20 @@
-# Pre-commit gate. Run once per change bundle, not per edit.
-#
-#   .\scripts\check.ps1          # ruff (all), format check, full pytest
-#   .\scripts\check.ps1 -Fast    # same, but pytest -n auto if pytest-xdist is installed
-param(
-    [switch]$Fast,
-    [int]$Workers = 6
-)
-
+# Full release gate, once per bundle. -Fast includes ALL tests on isolated workers.
+param([switch]$Fast, [ValidateRange(1, 16)][int]$Workers = 4)
 $ErrorActionPreference = "Stop"
-$python = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
-$repo = Resolve-Path (Join-Path $PSScriptRoot "..")
-
-Write-Host "ruff check" -ForegroundColor Cyan
-& $python -m ruff check (Join-Path $repo "src") (Join-Path $repo "tests")
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "ruff format --check" -ForegroundColor Cyan
-& $python -m ruff format --check (Join-Path $repo "src") (Join-Path $repo "tests")
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-Write-Host "pytest" -ForegroundColor Cyan
-$pytestArgs = @("-m", "pytest", "-q")
-if ($Fast) {
-    $hasXdist = & $python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('xdist') else 1)"
-    if ($LASTEXITCODE -eq 0) {
-        $pytestArgs += @("-n", "$Workers")
-    } else {
-        Write-Host "pytest-xdist not installed; running serially" -ForegroundColor Yellow
+$repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$python = Join-Path $repo ".venv\Scripts\python.exe"
+Push-Location $repo
+try {
+    & $python -m ruff check src tests scripts
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $python -m ruff format --check src tests scripts
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $pytestArgs = @("-m", "pytest", "-q")
+    if ($Fast) {
+        & $python -c "import xdist"
+        if ($LASTEXITCODE -ne 0) { throw "Install the dev extra for parallel verification" }
+        $pytestArgs += @("-n", "$Workers", "--dist", "loadfile")
     }
-}
-& $python @pytestArgs
+    & $python @pytestArgs
+    exit $LASTEXITCODE
+} finally { Pop-Location }

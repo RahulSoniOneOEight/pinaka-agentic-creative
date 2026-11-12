@@ -11,7 +11,6 @@ from .frames import (
     frame_time,
 )
 from .google_image import GeminiImageAdapter
-from .google_vertex_image import GoogleVertexImageAdapter, estimate_cost_minor
 from .mock import MockGenerationAdapter
 from .mux import FFmpegMuxAdapter, MuxAdapter, MuxedVideo
 from .narration import (
@@ -43,7 +42,6 @@ __all__ = [
     "FrameCaptureResult",
     "GeminiImageAdapter",
     "GenerationAdapter",
-    "GoogleVertexImageAdapter",
     "KokoroNarrationAdapter",
     "MockGenerationAdapter",
     "MuxAdapter",
@@ -60,7 +58,6 @@ __all__ = [
     "WhisperTranscriber",
     "build_workflow",
     "compare_transcript",
-    "estimate_cost_minor",
     "frame_time",
     "transcription_payload",
     "validate_workflow",

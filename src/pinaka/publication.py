@@ -8,10 +8,13 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from .adapters.mux import FFmpegMuxAdapter
 from .enums import ApprovalStage, ProjectStatus
 from .errors import ConflictError, IntegrityError
+from .kids import check_cue_limits, check_kids_loudness
 from .media_probe import probe_ffprobe
 from .models import StrictModel
+from .policy.audio import require_audio_rights
 from .utils import sha256_file, sha256_json, utc_now
 
 ChannelKey = Literal[
@@ -279,6 +282,9 @@ def evaluate_publication(
     has_embedded_captions: bool,
     caption_hash: str | None,
     audio_layers: int = 0,
+    audio_cues: tuple[dict, ...] = (),
+    audio_loudness: dict | None = None,
+    audio_credits_complete: bool = False,
     now: datetime | None = None,
 ) -> PublicationPlan:
     """Evaluate a publication plan. This function never publishes anything."""
@@ -341,6 +347,20 @@ def evaluate_publication(
                 f"Channel profile {channel.platform} is known.",
             )
         )
+        if channel.made_for_kids:
+            safety_checks = (
+                check_cue_limits(audio_cues),
+                check_kids_loudness(audio_loudness or {}),
+            )
+            for safety in safety_checks:
+                checks.append(
+                    _check(
+                        "P-" + safety.check.upper().replace(".", "-").replace("_", "-"),
+                        "pass" if safety.status.value == "pass" else "fail",
+                        safety.detail,
+                        safety.evidence,
+                    )
+                )
         if duration_seconds is None:
             checks.append(
                 _check("P-DURATION-001", "fail", "The artifact duration is unknown.")
@@ -458,7 +478,7 @@ def evaluate_publication(
                 _check("P-DISCLOSURE-001", "pass", "Disclosures are recorded.")
             )
         if audio_layers:
-            if "music_licence" in request.disclosures:
+            if "music_licence" in request.disclosures and audio_credits_complete:
                 checks.append(
                     _check(
                         "P-MUSIC-001",
@@ -472,8 +492,7 @@ def evaluate_publication(
                     _check(
                         "P-MUSIC-001",
                         "fail",
-                        "The master carries music or sound layers but the "
-                        "music_licence disclosure is missing.",
+                        "Audio layers need the music_licence disclosure and a verified, current audio-credits artifact.",
                         {"audio_layers": audio_layers},
                     )
                 )
@@ -559,6 +578,45 @@ def check_publication(
     final = controller.repository.active_approval(project_id, ApprovalStage.FINAL.value)
     path = controller.artifact_store.resolve(project_id, artifact["relative_path"])
     probe = probe_ffprobe(Path(path))
+    beds = controller.repository.list_audio_beds(project_id)
+    cues = controller.repository.list_audio_cues(project_id)
+    required_audio = {b["artifact_id"] for b in beds if b["role"] == "primary"} | {
+        c["artifact_id"] for c in cues
+    }
+    audio_credits_complete = not required_audio
+    rights_ok = True
+    for identifier in required_audio:
+        try:
+            require_audio_rights(controller.repository.get_artifact(identifier))
+        except (IntegrityError, ValueError):
+            rights_ok = False
+    if required_audio and rights_ok:
+        for candidate in reversed(controller.repository.list_artifacts(project_id)):
+            if candidate["operation"].get(
+                "type"
+            ) != "audio_credits" or not controller.verify_artifact(candidate["id"]):
+                continue
+            import json
+
+            payload = json.loads(controller.read_artifact_text(candidate["id"]))
+            credited = {e["artifact_id"]: e for e in payload.get("credits", [])}
+            if required_audio <= credited.keys() and all(
+                credited[i].get("content_hash")
+                == controller.repository.get_artifact(i)["content_hash"]
+                and (
+                    not credited[i].get("attribution_required")
+                    or credited[i].get("attribution")
+                )
+                for i in required_audio
+            ):
+                audio_credits_complete = True
+                break
+    audio_loudness = None
+    if request.channel in CHANNELS and CHANNELS[request.channel].made_for_kids:
+        try:
+            audio_loudness = FFmpegMuxAdapter().loudness(Path(path))
+        except (OSError, RuntimeError, ValueError):
+            audio_loudness = {}
     caption_hash = None
     if request.caption_artifact_id:
         caption = controller.repository.get_artifact(request.caption_artifact_id)
@@ -577,6 +635,9 @@ def check_publication(
         caption_hash=caption_hash,
         audio_layers=len(controller.repository.list_audio_beds(project_id))
         + len(controller.repository.list_audio_cues(project_id)),
+        audio_cues=tuple(controller.repository.list_audio_cues(project_id)),
+        audio_loudness=audio_loudness,
+        audio_credits_complete=audio_credits_complete,
     )
 
 

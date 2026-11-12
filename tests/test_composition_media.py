@@ -121,9 +121,9 @@ def test_composition_can_skip_layers(controller):
     assert "data:image/" not in html
 
 
-def test_vertex_narration_registers_audio(controller):
+def test_local_script_narration_registers_audio(controller):
     project, _, _, _ = _project_with_slot(controller)
-    result = controller.synthesize_narration_vertex(
+    result = controller.synthesize_narration(
         project.id,
         script="One, two, three little ducks.",
         adapter=FakeNarration(),
@@ -136,31 +136,24 @@ def test_vertex_narration_registers_audio(controller):
     assert artifact["relative_path"].startswith("audio/narration-")
 
 
-def test_narration_can_reserve_budget(controller):
-    from pinaka.vertex import estimate_tts_cost_minor
-
+def test_local_narration_never_spends_budget(controller):
     project = create_project(controller, budget="10.00")
-    result = controller.synthesize_narration_vertex(
+    result = controller.synthesize_narration(
         project.id,
         script="One, two, three little ducks.",
         adapter=FakeNarration(),
-        reserve=True,
     )
-    assert result["reservation"] is not None
+    assert result["reservation"] is None
     settled = controller.repository.get_project(project.id)
     assert settled.reserved.minor == 0
-    assert settled.spent.minor == estimate_tts_cost_minor(
-        "One, two, three little ducks."
-    )
-    assert (
-        result["artifact"]["operation"]["budget_job_id"] == result["reservation"]["id"]
-    )
+    assert settled.spent.minor == 0
+    assert result["receipt"]["status"] == "succeeded"
 
 
 def test_narration_rejects_empty_script(controller):
     project = create_project(controller, budget="10.00")
     with pytest.raises(IntegrityError, match="empty"):
-        controller.synthesize_narration_vertex(
+        controller.synthesize_narration(
             project.id, script="   ", adapter=FakeNarration()
         )
 
@@ -174,7 +167,7 @@ def test_mux_records_lineage_and_loudness(controller):
         content=b"SILENT",
         operation={"type": "composition_render", "duration_seconds": "5"},
     )
-    narration = controller.synthesize_narration_vertex(
+    narration = controller.synthesize_narration(
         project.id, script="One, two, three.", adapter=FakeNarration()
     )["artifact"]
 

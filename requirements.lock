@@ -10,6 +10,8 @@ pydantic==2.14.3
 pydantic_core==2.50.4
 Pygments==2.21.0
 pytest==8.4.2
+pytest-xdist==3.8.0
+execnet==2.1.2
 ruff==0.17.4
 tomli==2.5.0
 typing-inspection==0.4.5

@@ -142,12 +142,18 @@ The governed-Studio foundation adds:
 - session-scoped Studio readiness checks; and
 - verified-hash final approval that requires passing QA.
 
-Gemini runs through **Vertex AI with Application Default Credentials** (no API keys): image
-generation, narration and transcription, with a free model-availability check. fal work is priced per
-model through `pinaka.pricing`, so a creative can be planned against a small dollar target before any
-paid call. Editable HyperFrames-style compositions are authored from the shot plan with no provider at all.
+Hosted stills and edits use **fal**, behind funded plan items; narration and transcription stay
+local (Kokoro / faster-whisper). Vertex/ADC entry points are retired. Script proposals can be supplied
+by an agent or operator without an implicit hosted call. `pinaka operations` describes the supported
+routes and funding policy; it does not claim live provider readiness or balances.
+Editable HyperFrames-style compositions are authored from the shot plan with no provider at all.
 Generated motion comes only from Studio's `fal.video` route, one shot at a time and keyframe-first;
 Veo and Runway are excluded and refused by the controller.
+
+Implementation is organized by feature in `use_cases/`, aggregate in `store/`, and request/record
+type in `contracts/`, with compatible controller/repository/model imports. See
+[architecture](docs/architecture.md), [audio layers](docs/audio-layers.md), and
+[the delivery ledger](docs/implementation/remaining-items.md).
 
 The archived 10-second pilot remains the verified production baseline.
 

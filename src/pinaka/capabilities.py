@@ -300,41 +300,6 @@ def probe_comfyui_local() -> CapabilityResult:
     )
 
 
-def probe_vertex_adc() -> CapabilityResult:
-    try:
-        available = importlib.util.find_spec("google.genai") is not None
-    except (ImportError, ValueError):
-        available = False
-    if not available:
-        return CapabilityResult(
-            name="vertex_adc",
-            status=CapabilityStatus.UNAVAILABLE,
-            detail="google-genai is not installed",
-            checked_at=utc_now(),
-        )
-    configured = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    adc = (
-        Path(configured).expanduser()
-        if configured
-        else Path(os.environ.get("APPDATA", ""))
-        / "gcloud"
-        / "application_default_credentials.json"
-    )
-    if not adc.is_file():
-        return CapabilityResult(
-            name="vertex_adc",
-            status=CapabilityStatus.UNAVAILABLE,
-            detail="Google ADC file is not present; run gcloud auth application-default login",
-            checked_at=utc_now(),
-        )
-    return CapabilityResult(
-        name="vertex_adc",
-        status=CapabilityStatus.CONFIGURED,
-        detail=f"ADC file present at {adc}; live model check is separate",
-        checked_at=utc_now(),
-    )
-
-
 def probe_all() -> list[CapabilityResult]:
     results = [
         probe_executable("python", (sys.executable, "--version")),
@@ -419,7 +384,6 @@ def probe_all() -> list[CapabilityResult]:
             ("GEMINI_API_KEY",),
             "%USERPROFILE%/.config/opencode/secrets/gemini-api-key",
         ),
-        probe_vertex_adc(),
         probe_secret(
             "freesound",
             ("FREESOUND_API_KEY",),

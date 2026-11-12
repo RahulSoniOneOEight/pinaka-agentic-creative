@@ -108,12 +108,12 @@ and reported in `layers_skipped`, never silently dropped.
 ## Narration and mux
 
 ```powershell
-pinaka synthesize-narration-vertex <project-id> --script "One, two, three…" --voice Kore
+pinaka synthesize-narration <project-id> --script-file script.txt --voice af_heart
 pinaka mux-narration <project-id> --video <render-artifact> --audio <audio-artifact>
 ```
 
-- Narration is Vertex TTS over ADC, registered as an `audio` artifact with model, voice, character
-  count, duration, text hash and an estimated cost.
+- Narration is local Kokoro, registered as an unapproved `audio` preview with model, voice,
+  character count, duration, text hash and a zero-spend local execution receipt.
 - Mux normalizes loudness (two-pass) and produces a new `render` artifact that depends on both the
   silent video and the narration.
 - Mux refuses a non-audio artifact or an unknown duration.
@@ -178,11 +178,11 @@ pinaka burn-captions <project-id> --video <mp4-artifact> --captions <srt-artifac
 ## Narration budget
 
 ```powershell
-pinaka synthesize-narration-vertex <project-id> --script-file script.txt --reserve
+pinaka synthesize-narration <project-id> --script-file script.txt
 ```
 
-With `--reserve`, the estimated TTS cost is reserved as a controller budget job before synthesis and
-settled afterwards; a failed synthesis cancels at zero. USD projects only.
+Narration stays local and costs zero provider credits. There is no optional reservation flag or
+implicit Vertex fallback. Hosted image/video work separately requires funded plan items.
 
 ## Element → slot binding
 

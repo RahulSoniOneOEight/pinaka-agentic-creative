@@ -1,48 +1,49 @@
-# Inner loop: check only what you changed, in seconds.
-#
-#   .\scripts\quick.ps1                                  # ruff on changed files, then last-failed tests
-#   .\scripts\quick.ps1 -Tests tests/test_shot_motion.py   # ruff + one file
-#   .\scripts\quick.ps1 -Keyword motion                    # ruff + tests matching a keyword
-#   .\scripts\quick.ps1 -Tests tests/a.py,tests/b.py -Keyword veo
-#
-# The full suite belongs in .\scripts\check.ps1, run once before a commit.
+# Targeted inner loop. No selection means cached failures only, never the full suite.
 param(
     [string[]]$Tests = @(),
     [string]$Keyword = "",
-    [switch]$Full  # run every test, not just the last failures
+    [switch]$Full,
+    [switch]$IncludeSlow
 )
-
 $ErrorActionPreference = "Stop"
-$python = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
-$repo = Resolve-Path (Join-Path $PSScriptRoot "..")
-
-# 1. Only the files touched since HEAD (+ untracked), so ruff never reflows the tree.
-$changed = @(& git -c core.autocrlf=false -C $repo diff --name-only --diff-filter=ACMR HEAD)
-$untracked = @(& git -c core.autocrlf=false -C $repo ls-files --others --exclude-standard)
-$pythonFiles = @(@($changed) + @($untracked)) |
-    Where-Object { $_ -match '\.py$' } |
-    ForEach-Object { Join-Path $repo $_ }
-
-if ($pythonFiles.Count -gt 0) {
-    Write-Host "ruff: $($pythonFiles.Count) changed file(s)" -ForegroundColor Cyan
-    & $python -m ruff check --fix $pythonFiles
-    & $python -m ruff format $pythonFiles
-    & $python -m ruff check $pythonFiles
-} else {
-    Write-Host "ruff: no changed Python files" -ForegroundColor DarkGray
-}
-
-# 2. Targeted tests only. Never the full suite here.
-$pytestArgs = @("-m", "pytest", "-q", "-x", "--no-header")
-if ($Tests.Count -gt 0) {
-    $pytestArgs += $Tests
-}
-if ($Keyword) {
-    $pytestArgs += @("-k", $Keyword)
-}
-if ($Tests.Count -eq 0 -and -not $Keyword -and -not $Full) {
-    $pytestArgs += "--lf"   # last failed, so a red loop stays red until it is green
-}
-
-Write-Host "pytest: $($pytestArgs -join ' ')" -ForegroundColor Cyan
-& $python @pytestArgs
+$repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$python = Join-Path $repo ".venv\Scripts\python.exe"
+Push-Location $repo
+try {
+    $changed = @(& git -c core.autocrlf=false diff --name-only --diff-filter=ACMR HEAD)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $untracked = @(& git ls-files --others --exclude-standard)
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $pythonFiles = @(@($changed) + @($untracked) | Where-Object { $_ -match '\.py$' -and (Test-Path $_) } | Sort-Object -Unique)
+    if ($pythonFiles.Count -gt 0) {
+        & $python -m ruff check --fix @pythonFiles
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $python -m ruff format @pythonFiles
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $python -m ruff check @pythonFiles
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    $pytestArgs = @("-m", "pytest", "-q", "-x", "--no-header")
+    if ($Tests.Count -gt 0) { $pytestArgs += $Tests }
+    if ($Keyword) { $pytestArgs += @("-k", $Keyword) }
+    if (-not $IncludeSlow -and -not $Full) { $pytestArgs += @("-m", "not slow") }
+    $lastFailedOnly = $Tests.Count -eq 0 -and -not $Keyword -and -not $Full
+    if ($lastFailedOnly) {
+        $selectionJson = & $python (Join-Path $PSScriptRoot "failed_tests.py") $repo
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Windows PowerShell 5 wraps [] as one nested array unless explicitly flattened.
+        $selectedIds = @($selectionJson | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object { $_ -is [string] -and $_.Length -gt 0 })
+        if ($selectedIds.Count -eq 0) {
+            Write-Host "No current cached failures. Name -Tests or -Keyword; no tests were run."
+            exit 0
+        }
+        $pytestArgs += $selectedIds
+    }
+    & $python @pytestArgs
+    $result = $LASTEXITCODE
+    if ($result -eq 5 -and $lastFailedOnly) {
+        Write-Host "No cached failures selected. Name -Tests or -Keyword; no passing-test claim was made."
+        exit 0
+    }
+    exit $result
+} finally { Pop-Location }
