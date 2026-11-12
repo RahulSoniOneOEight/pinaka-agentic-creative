@@ -17,7 +17,7 @@
 | F4 Studio spool hardening | Closed | Response validation, exclusive request write, staleness with `void-job` release; `tests/test_studio_spool.py`, `tests/test_job_void.py` |
 | F5 doc and skill drift | Closed | README current-state claims, agent skill, Vertex configs moved to `config/retired/` |
 | F6 typing and ledger atomicity | Closed | `python -m mypy` ratchet in CI and `check.ps1`; provider spend check+append in one transaction |
-| P1 live fal image | **Blocked, not closed** | Studio refuses `credits: 0` at production creation; the local credential is refused by fal's own auth probe (`pinaka fal-check` → 401 on a public endpoint that answers 200 without a key). The key is well formed; it is not mis-shaped |
+| P1 live fal image | **Open — credential unblocked** | `pinaka fal-check` → `authenticated: true`, 200, `id:secret`; no funded still has run yet |
 | P2 live Studio image-to-video/import/assembly | **Blocked, not closed** | Same admission refusal; no accepted paid job exists |
 
 `pinaka fal-check` is the zero-cost credential probe used by P1: a read-only model-catalog call that
@@ -27,9 +27,9 @@ table in `implementation/remaining-items.md`.
 
 The user explicitly authorized **USD 1 maximum total** for P1/P2, with zero OpenMontage credits,
 one still, one five-second H3 clip, no retry and no publication. That authorization is not the
-blocker: two independent admissions are — Studio's zero-credit budget validator, and fal refusing
-the local credential. No defaults or alternative credentials were used to bypass either. New real
-spend is **USD 0**.
+blocker: the local fal credential now verifies (200), and Studio's zero-credit budget validator
+still blocks the Studio admission that P2 needs. No defaults or alternative credentials were used
+to bypass either. New real spend is **USD 0**.
 
 Detailed contract, baseline, request ID, exact refusal, test evidence, rollback and remaining
 limitations: [implementation/remaining-items.md](implementation/remaining-items.md).

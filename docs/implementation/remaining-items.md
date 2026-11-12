@@ -23,7 +23,7 @@
 | U6 | Aggregate-local repositories | PASS: compatible facade; existing atomic state+event transaction boundary preserved |
 | U7 | Aggregate-local contracts | PASS: legacy imports alias the same strict classes; all feature/contract regressions retained |
 | U8 | Targeted/parallel test lanes | PASS: xdist declared/pinned, strict slow marker, full serial/parallel verification; scripts fail closed and resolve repository location |
-| P1 | Live fal image verification | BLOCKED: the local credential is refused by fal (`pinaka fal-check` → 401) and Studio rejects the explicitly authorized zero-credit production budget before any job exists |
+| P1 | Live fal image verification | OPEN: credential unblocked (`pinaka fal-check` → 200, `id:secret`); no controller-funded still has run yet |
 | P2 | Live Studio still/clip/import/assembly | BLOCKED: same admission failure; no paid generation, no import/assembly of a live clip claimed |
 
 ## Invariants
@@ -73,10 +73,13 @@ no `id:secret`" explanation was **wrong** — the credential itself is refused (
 never issued), not mis-shaped. Route-level probes cannot decide this: `GET fal.run/fal-ai/flux/schnell`
 returns 401 with *and* without a key, and an unknown model returns 404 with *and* without one.
 
-Consequence: P1/P2 are blocked on the credential, not on formatting. Remediation: create a key with
-the `API` preset at fal.ai/dashboard/keys, save the single line, and require
-`pinaka fal-check` → `authenticated: true` before any funded call. No job was created and no charge
-was incurred. Studio's own stored credential is separate and was not read or copied.
+Consequence: the credential blocker is now closed. A replacement key in `id:secret` form was
+supplied on 2026-11-13 and installed at `~/.config/opencode/secrets/fal-api-key` (mirrored to
+`D:\pinaka-credentials\secrets\fal-api-key`, ACL restricted to the user). `pinaka fal-check` reports
+`authenticated: true`, `http_status: 200`, `key_shape: id:secret`. The previous `fal_sk_...` value
+was a different credential and is still refused; the account was never the problem. What remains for
+P1 is one controller-funded still inside the standing USD 1 authorization; P2 additionally needs the
+Studio `credits: 0` admission or the direct-video path.
 
 ### Audio closure corrections
 
@@ -97,8 +100,8 @@ ratio. Actual final-mix loudness and true peak remain measured QA; a listening r
 - `ruff check` and `ruff format --check` pass across 207 files.
 - `python -m mypy` passes for 41 modules (the ratchet list in `pyproject.toml`).
 - CLI `--help`, `operations` and `fal-check` exercised; retired Vertex verbs are absent.
-- `fal-check` against the installed credential: `authenticated: false`, `http_status: 401`,
-  `detail: "Invalid API key or malformed Authorization header"` — a reported result, not a gate.
+- `fal-check` against the installed credential: the dead `fal_sk_...` value returned 401; the
+  replacement `id:secret` key returns `authenticated: true`, `http_status: 200`.
 - Focused modular-architecture tests: 9 passed in 0.44 s (pytest time, excluding shell/Ruff).
 - Quick script smoke: external working directory, explicit test selection, missing-test exit 4
   propagated, and stale/empty failure cache exits without invoking the suite.
