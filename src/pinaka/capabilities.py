@@ -370,7 +370,7 @@ def probe_all() -> list[CapabilityResult]:
         probe_python_module("opencv", "cv2"),
         probe_python_module("numpy", "numpy"),
         probe_python_module("playwright", "playwright"),
-        probe_python_module("kokoro", "kokoro"),
+        probe_python_module("kokoro", "kokoro_onnx"),
         probe_python_module("piper", "piper"),
         probe_python_module("whisper", "whisper"),
         probe_python_module("faster_whisper", "faster_whisper"),
