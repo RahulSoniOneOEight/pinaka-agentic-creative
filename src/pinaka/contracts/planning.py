@@ -129,3 +129,4 @@ class TextBriefRequest(StrictModel):
     duration_seconds: Decimal | None = Field(default=None, gt=0, le=300)
     create_plan: bool = True
     persist_elements: bool = False
+    persist_slots: bool = False

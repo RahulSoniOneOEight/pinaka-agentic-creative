@@ -32,6 +32,7 @@ from ..policy.guards import (
     require_active_project,
 )
 from ._shared import (
+    CREATIVE_GENERATION_OPERATIONS,
     DEFAULT_CREATIVE_TARGET_MINOR,
     DEFAULT_RUN_CAP_MINOR,
     GENERATED_SOURCES,
@@ -406,7 +407,16 @@ class BudgetUseCases:
             raise IntegrityError(
                 "Job provider and operation must match the approved budget plan item"
             )
-        if item["slot_id"]:
+        if item["operation"] in CREATIVE_GENERATION_OPERATIONS:
+            if not item["slot_id"]:
+                raise IntegrityError(
+                    "Paid creative generation requires a slot_id on the budget "
+                    "item. Add the shot and slot first, then record the sourcing "
+                    "decision before reserving spend."
+                )
+            self._enforce_generation_routing(project_id, item["slot_id"])
+            self.require_generated_decision(project_id, item["slot_id"])
+        elif item["slot_id"]:
             self._enforce_generation_routing(project_id, item["slot_id"])
         job = self.reserve_job(project_id, request)
         linked = self.repository.link_budget_item_job(

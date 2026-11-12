@@ -75,6 +75,7 @@ from .models import (
     DeliverableCreate,
     ExecutionReceiptCreate,
     FactSetCreate,
+    FlowStepCreate,
     GroundingBundleCreate,
     JobRequest,
     Money,
@@ -87,6 +88,8 @@ from .models import (
     ShotElementBindingCreate,
     ShotMotionRequest,
     ShotReferenceCreate,
+    SlotCreate,
+    SourcingDecisionCreate,
     StudioReadinessReport,
     StudioResultPacketImport,
     StudioSpendApprovalCreate,
@@ -950,6 +953,8 @@ def cmd_asset_costs(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_plan_from_text(args: argparse.Namespace) -> dict[str, Any]:
     request = TextBriefRequest.model_validate(_load_json(args.file))
+    if getattr(args, "persist_slots", False):
+        request = request.model_copy(update={"persist_slots": True})
     return _controller(args).plan_from_text(args.project_id, request)
 
 
@@ -1403,6 +1408,40 @@ def cmd_promote_backup(args: argparse.Namespace) -> dict[str, Any]:
         decided_by=args.decided_by,
         reason=args.reason,
     )
+
+
+def cmd_add_slot(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).add_slot(
+        args.project_id, SlotCreate.model_validate(payload)
+    )
+
+
+def cmd_record_sourcing_decision(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_sourcing_decision(
+        args.project_id, SourcingDecisionCreate.model_validate(payload)
+    )
+
+
+def cmd_sourcing_decisions(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "decisions": _controller(args).sourcing_decisions(args.project_id, args.slot_id)
+    }
+
+
+def cmd_record_flow_step(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_flow_step(
+        args.project_id, FlowStepCreate.model_validate(payload)
+    )
+
+
+def cmd_flow_log(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "completeness": _controller(args).flow_completeness(args.project_id),
+        "steps": _controller(args).flow_log(args.project_id, args.step),
+    }
 
 
 def cmd_set_use_context(args: argparse.Namespace) -> dict[str, Any]:
@@ -2480,6 +2519,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     text_plan_parser.add_argument("project_id")
     text_plan_parser.add_argument("--file", required=True)
+    text_plan_parser.add_argument(
+        "--persist-slots",
+        action="store_true",
+        help="Create shots and slots now so sourcing can precede spend",
+    )
     text_plan_parser.set_defaults(handler=cmd_plan_from_text)
 
     studio_status_parser = subparsers.add_parser(
@@ -2808,6 +2852,46 @@ def build_parser() -> argparse.ArgumentParser:
     upscale_parser.add_argument("--file", required=True)
     upscale_parser.add_argument("--output")
     upscale_parser.set_defaults(handler=cmd_upscale_asset)
+
+    add_slot_parser = subparsers.add_parser(
+        "add-slot",
+        help="Create a slot before sourcing, generation or spend",
+    )
+    add_slot_parser.add_argument("project_id")
+    add_slot_parser.add_argument("--file", required=True)
+    add_slot_parser.set_defaults(handler=cmd_add_slot)
+
+    sourcing_parser = subparsers.add_parser(
+        "record-sourcing-decision",
+        help="Record owned/stock/manual/deterministic/generated per slot",
+    )
+    sourcing_parser.add_argument("project_id")
+    sourcing_parser.add_argument("--file", required=True)
+    sourcing_parser.set_defaults(handler=cmd_record_sourcing_decision)
+
+    sourcing_list_parser = subparsers.add_parser(
+        "sourcing-decisions",
+        help="List the sourcing decisions recorded for a project",
+    )
+    sourcing_list_parser.add_argument("project_id")
+    sourcing_list_parser.add_argument("--slot")
+    sourcing_list_parser.set_defaults(handler=cmd_sourcing_decisions)
+
+    flow_parser = subparsers.add_parser(
+        "record-flow-step",
+        help="Append one G0-G7 step record with status and evidence",
+    )
+    flow_parser.add_argument("project_id")
+    flow_parser.add_argument("--file", required=True)
+    flow_parser.set_defaults(handler=cmd_record_flow_step)
+
+    flow_log_parser = subparsers.add_parser(
+        "flow-log",
+        help="Show the flow ledger and its completeness",
+    )
+    flow_log_parser.add_argument("project_id")
+    flow_log_parser.add_argument("--step")
+    flow_log_parser.set_defaults(handler=cmd_flow_log)
 
     assign_parser = subparsers.add_parser(
         "assign-slot-asset",

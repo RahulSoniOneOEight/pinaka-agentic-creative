@@ -14,6 +14,7 @@ from ..models import (
     CreativeElementCreate,
     DependencyRef,
     ShotCreate,
+    SlotCreate,
     TextBriefRequest,
     WorkableBriefCreate,
 )
@@ -133,10 +134,20 @@ class PlanningUseCases:
                 "identity_requirement": "Original, non-protected subject",
                 "fact_requirement": "Matches the planned shot requirement",
                 "transformation_permission": "Composition and gentle animation",
-                "approved_sources": ["owned", "stock"],
+                "approved_sources": [
+                    "owned",
+                    "official_api",
+                    "manual_import",
+                    "deterministic",
+                    "generated",
+                ],
             }
             for shot in shots
         ]
+        recorded_slots: list[dict[str, Any]] = []
+        if request.persist_slots:
+            for spec in proposed_slots:
+                recorded_slots.append(self.add_slot(project_id, SlotCreate(**spec)))
         proposed_elements = propose_elements(request.text)
         recorded_elements: list[dict[str, Any]] = []
         if request.persist_elements:
@@ -158,6 +169,7 @@ class PlanningUseCases:
             "plan_created": scene_plan is not None,
             "plan_skipped_reason": skipped_reason,
             "proposed_slots": proposed_slots,
+            "slots": recorded_slots,
             "proposed_elements": proposed_elements,
             "recorded_elements": recorded_elements,
         }

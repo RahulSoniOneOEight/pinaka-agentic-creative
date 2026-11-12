@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from pinaka.contracts.flow import SourcingDecisionCreate
 from pinaka.enums import ArtifactKind, BudgetCategory
 from pinaka.errors import IntegrityError, NotFoundError
 from pinaka.models import (
@@ -69,6 +70,18 @@ def _setup(controller, *, budget="10.00", estimate=30):
             fact_requirement="f",
             transformation_permission="t",
             approved_sources=("owned", "generated"),
+        ),
+    )
+    controller.record_sourcing_decision(
+        project.id,
+        SourcingDecisionCreate(
+            slot_id=slot["id"],
+            decision="generated",
+            reason="No owned or stock clip matched the shot",
+            providers=("pexels",),
+            candidates_considered=8,
+            rejection_reason="Stock clips were photographic, not illustration",
+            approved_by="producer",
         ),
     )
     frame = controller.write_artifact(

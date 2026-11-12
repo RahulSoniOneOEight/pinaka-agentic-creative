@@ -103,6 +103,10 @@ GENERATED_SOURCES = frozenset(
     {"generated", "paid_generation", "ai_generated", "ai", "synthesis"}
 )
 
+CREATIVE_GENERATION_OPERATIONS = frozenset(
+    {"image.generate", "avatar.generate", "video.generate"}
+)
+
 STUDIO_CAPABILITY_NAME = "openmontage.studio"
 
 STUDIO_READINESS_TTL_SECONDS = 12 * 60 * 60

@@ -73,7 +73,13 @@ def test_plan_from_text_derives_a_governed_brief(controller):
 
     element_keys = {item["stable_key"] for item in result["proposed_elements"]}
     assert "character.duck" in element_keys
-    assert result["proposed_slots"][0]["approved_sources"] == ["owned", "stock"]
+    assert result["proposed_slots"][0]["approved_sources"] == [
+        "owned",
+        "official_api",
+        "manual_import",
+        "deterministic",
+        "generated",
+    ]
 
 
 def test_persist_elements_records_proposed_elements(controller):

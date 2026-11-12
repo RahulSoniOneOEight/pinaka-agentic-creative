@@ -21,6 +21,7 @@ from .store.audio import AudioStore
 from .store.budget import BudgetStore
 from .store.costs import CostsStore
 from .store.elements import ElementsStore
+from .store.flow import FlowStore
 from .store.grounding import GroundingStore
 from .store.jobs import JobsStore
 from .store.planning import PlanningStore
@@ -41,6 +42,7 @@ class Repository(
     GroundingStore,
     ShotsStore,
     ElementsStore,
+    FlowStore,
     ApprovalsStore,
     ArtifactsStore,
     AssetsStore,

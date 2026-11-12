@@ -523,6 +523,17 @@ def derive_slots(
             )
         )
 
+    # Generation-last cascade: owned, stock/archive, manual import and
+    # deterministic composition are searched before paid generation is even
+    # eligible. "generated" is last and still needs an exhaustion record.
+    visual_cascade = ["owned", "official_api", "manual_import", "deterministic"]
+    if profile.product_role == "none" and ceiling in {
+        "ai_enhance",
+        "composite",
+        "ai_created",
+    }:
+        visual_cascade.append("generated")
+
     slots.append(
         _slot(
             "primary_visual",
@@ -533,11 +544,7 @@ def derive_slots(
                 for item in ("claim_evidence", "source_context")
                 if item in grounding
             ),
-            sources=(
-                ("owned", "official_api", "manual_import", "deterministic")
-                if profile.source_material in {"stock_or_archive", "third_party_clips"}
-                else ("owned", "deterministic")
-            ),
+            sources=tuple(visual_cascade),
             prohibited=("unsourced_claim", "editorial_in_commercial"),
             disclosures=tuple(sorted(disclosures)),
             fallback="Deterministic composition from owned assets.",

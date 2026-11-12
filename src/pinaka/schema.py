@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -891,6 +891,43 @@ CREATE INDEX IF NOT EXISTS idx_audio_cues_project ON audio_cues(project_id);
 """
 
 
+SCHEMA_V20 = r"""
+CREATE TABLE IF NOT EXISTS sourcing_decisions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    decision TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    providers_json TEXT NOT NULL,
+    candidates_considered INTEGER NOT NULL CHECK (candidates_considered >= 0),
+    rejection_reason TEXT,
+    evidence_json TEXT NOT NULL,
+    approved_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_decisions_slot
+    ON sourcing_decisions(project_id, slot_id, created_at);
+CREATE TABLE IF NOT EXISTS flow_steps (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    step TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reason TEXT,
+    actor TEXT NOT NULL,
+    tool TEXT,
+    tool_version TEXT,
+    evidence_json TEXT NOT NULL,
+    approval_id TEXT,
+    approved_by TEXT,
+    next_action TEXT,
+    trade_off TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_flow_steps_project
+    ON flow_steps(project_id, created_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -911,4 +948,5 @@ MIGRATIONS = {
     17: SCHEMA_V17,
     18: SCHEMA_V18,
     19: SCHEMA_V19,
+    20: SCHEMA_V20,
 }

@@ -43,6 +43,7 @@ from .use_cases.budget import BudgetUseCases
 from .use_cases.captions import CaptionsUseCases
 from .use_cases.composition import CompositionUseCases
 from .use_cases.elements import ElementsUseCases
+from .use_cases.flow import FlowUseCases
 from .use_cases.frames import FramesUseCases
 from .use_cases.images import ImagesUseCases
 from .use_cases.jobs import JobsUseCases
@@ -63,6 +64,7 @@ class CreativeController(
     ProjectsUseCases,
     PlanningUseCases,
     ElementsUseCases,
+    FlowUseCases,
     SourcingUseCases,
     AssetsUseCases,
     AudioUseCases,

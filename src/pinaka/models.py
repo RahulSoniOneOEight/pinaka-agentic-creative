@@ -23,6 +23,7 @@ from .contracts import DeliverableRecord as DeliverableRecord
 from .contracts import DependencyRef as DependencyRef
 from .contracts import ExecutionReceiptCreate as ExecutionReceiptCreate
 from .contracts import FactSetCreate as FactSetCreate
+from .contracts import FlowStepCreate as FlowStepCreate
 from .contracts import GroundingBundleCreate as GroundingBundleCreate
 from .contracts import JobRecord as JobRecord
 from .contracts import JobRequest as JobRequest
@@ -48,6 +49,7 @@ from .contracts import ShotElementBindingCreate as ShotElementBindingCreate
 from .contracts import ShotMotionRequest as ShotMotionRequest
 from .contracts import ShotReferenceCreate as ShotReferenceCreate
 from .contracts import SlotCreate as SlotCreate
+from .contracts import SourcingDecisionCreate as SourcingDecisionCreate
 from .contracts import StrictModel as StrictModel
 from .contracts import StudioReadinessReport as StudioReadinessReport
 from .contracts import StudioResultOutputImport as StudioResultOutputImport
