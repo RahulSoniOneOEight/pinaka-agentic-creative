@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import sqlite3
 from decimal import Decimal
 
 import pytest
@@ -37,9 +39,27 @@ def record_studio_ready(controller: CreativeController) -> dict:
     )
 
 
+@pytest.fixture(scope="session")
+def migrated_runtime(tmp_path_factory):
+    """One fully migrated runtime, copied per test.
+
+    Every controller used to replay all 18 schema migrations on open (~77 ms).
+    Building the schema once per session and copying it costs ~2 ms per test.
+    """
+
+    root = tmp_path_factory.mktemp("runtime-template") / "runtime"
+    CreativeController.open(root)
+    database = root / "state" / "pinaka.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return root
+
+
 @pytest.fixture
-def controller(tmp_path):
-    return CreativeController.open(tmp_path / "runtime")
+def controller(tmp_path, migrated_runtime):
+    root = tmp_path / "runtime"
+    shutil.copytree(migrated_runtime, root)
+    return CreativeController.open(root)
 
 
 def create_project(
