@@ -17,6 +17,14 @@
 | F4 Studio spool hardening | Closed | Response validation, exclusive request write, staleness with `void-job` release; `tests/test_studio_spool.py`, `tests/test_job_void.py` |
 | F5 doc and skill drift | Closed | README current-state claims, agent skill, Vertex configs moved to `config/retired/` |
 | F6 typing and ledger atomicity | Closed | `python -m mypy` ratchet in CI and `check.ps1`; provider spend check+append in one transaction |
+| C1 caption legibility | Closed | `build_srt` wraps/splits to locale `line_chars`/`lines`, reports `cps` violations, optional strict mode; `tests/test_caption_legibility.py` |
+| C2 ASR captions and drift | Closed (local code) | `word_timestamps`, `build_srt_from_words`, `transcribe-audio --srt`, `caption-drift`; `tests/test_asr_captions.py` |
+| C3 stock selection | Closed | Pexels duration window/preference, provider-id dedupe, deterministic in-point, assembly `start`; `tests/test_stock_selection.py` |
+| C4 metadata drafting | Closed | Deterministic title/description/hashtags within channel limits; `draft-metadata`; `tests/test_metadata_draft.py` |
+| C5 finishing grade/key/speed | Closed | `grade-asset`, `key-asset`, `change-speed` adapters with hashed receipts; `tests/test_finishing.py` |
+| C6 reference-conditioned stills | Closed (code) | Existing image-edit path now accepts ordered reference images (`image_urls`); live consistency unproven; `tests/test_image_references.py` |
+| C7 beat planning | Partial | Pure `snap_to_beats` and `plan_song_fit`; no beat extraction and not wired into assembly yet |
+| C8 avatar / lip sync | Blocked | No verified provider contract for an avatar route; do not declare one until a live endpoint is tested |
 | P1 live fal image | **Open — credential unblocked** | `pinaka fal-check` → `authenticated: true`, 200, `id:secret`; no funded still has run yet |
 | P2 live Studio image-to-video/import/assembly | **Blocked, not closed** | Same admission refusal; no accepted paid job exists |
 

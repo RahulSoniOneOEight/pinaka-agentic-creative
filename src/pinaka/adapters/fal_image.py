@@ -29,6 +29,8 @@ class FalImageAdapter:
     provider_name: str = "fal"
     source_image: bytes | None = None
     source_mime: str = "image/png"
+    reference_images: tuple[bytes, ...] = ()
+    reference_mimes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self._results: dict[str, PollResult] = {}
@@ -40,8 +42,20 @@ class FalImageAdapter:
                 "fal estimates require USD; no implicit currency conversion"
             )
         payload = {"prompt": request.parameters.get("prompt", "")}
+        image_urls: list[str] = []
         if self.source_image is not None:
-            payload["image_urls"] = [_data_uri(self.source_image, self.source_mime)]
+            image_urls.append(_data_uri(self.source_image, self.source_mime))
+        image_urls.extend(
+            _data_uri(
+                reference,
+                self.reference_mimes[index]
+                if index < len(self.reference_mimes)
+                else self.source_mime,
+            )
+            for index, reference in enumerate(self.reference_images)
+        )
+        if image_urls:
+            payload["image_urls"] = image_urls
         for key in (
             "aspect_ratio",
             "image_size",

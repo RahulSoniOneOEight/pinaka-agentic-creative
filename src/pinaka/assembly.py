@@ -9,6 +9,7 @@ class Segment:
     index: int
     path: str
     duration: Decimal
+    start: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,12 @@ def build_plan(
 
     parts: list[str] = []
     for position, segment in enumerate(segments):
+        if segment.duration <= 0:
+            raise ValueError("Assembly segments need a positive duration")
+        if segment.start < 0:
+            raise ValueError("Assembly in-points cannot be negative")
         parts.append(
-            f"[{position}:v]trim=duration={segment.duration},"
+            f"[{position}:v]trim=start={segment.start}:duration={segment.duration},"
             f"setpts=PTS-STARTPTS,"
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,"

@@ -23,6 +23,7 @@ class ImagesUseCases:
         model: str,
         plan_id: str,
         item_key: str,
+        reference_artifact_ids: tuple[str, ...] = (),
         route: str = "fal.image",
         adapter: GenerationAdapter | None = None,
     ) -> dict[str, Any]:
@@ -43,6 +44,27 @@ class ImagesUseCases:
             raise IntegrityError("An explicit image-edit model and prompt are required")
         if not self.verify_artifact(source["id"]):
             raise IntegrityError("Source artifact failed hash verification")
+        references = []
+        for reference_id in reference_artifact_ids:
+            if reference_id == source_artifact_id:
+                raise IntegrityError(
+                    "The source is already the first image; pass additional references only"
+                )
+            reference = self.repository.get_artifact(reference_id)
+            if reference["project_id"] != project_id:
+                raise IntegrityError(
+                    "Reference artifact belongs to a different project"
+                )
+            if (
+                reference["kind"] == ArtifactKind.ORIGINAL.value
+                or reference["immutable"]
+            ):
+                raise IntegrityError(
+                    "Reference a working copy, not a protected original"
+                )
+            if not self.verify_artifact(reference["id"]):
+                raise IntegrityError("Reference artifact failed hash verification")
+            references.append(reference)
         plan = self.repository.get_budget_plan(plan_id)
         item = next(
             (entry for entry in plan["items"] if entry["stable_key"] == item_key), None
@@ -73,6 +95,8 @@ class ImagesUseCases:
                 "model": model,
                 "source_artifact_id": source["id"],
                 "source_hash": source["content_hash"],
+                "reference_artifact_ids": [item["id"] for item in references],
+                "reference_hashes": [item["content_hash"] for item in references],
                 "num_images": 1,
             },
         )
@@ -107,6 +131,18 @@ class ImagesUseCases:
             source_mime="image/jpeg"
             if path.suffix.lower() in {".jpg", ".jpeg"}
             else "image/png",
+            reference_images=tuple(
+                self.artifact_store.resolve(
+                    project_id, item["relative_path"]
+                ).read_bytes()
+                for item in references
+            ),
+            reference_mimes=tuple(
+                "image/jpeg"
+                if item["relative_path"].lower().endswith((".jpg", ".jpeg"))
+                else "image/png"
+                for item in references
+            ),
         )
         job, artifact = self.run_adapter_once(
             project_id,
@@ -120,6 +156,14 @@ class ImagesUseCases:
                     entity_type="artifact",
                     entity_id=source["id"],
                     entity_hash=source["content_hash"],
+                ),
+                *(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=item["id"],
+                        entity_hash=item["content_hash"],
+                    )
+                    for item in references
                 ),
             ),
         )

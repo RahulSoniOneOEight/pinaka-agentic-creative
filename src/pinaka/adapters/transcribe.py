@@ -12,10 +12,18 @@ from ..utils import sha256_file, sha256_json
 
 
 @dataclass(frozen=True)
+class TranscriptWord:
+    start_seconds: float
+    end_seconds: float
+    text: str
+
+
+@dataclass(frozen=True)
 class TranscriptSegment:
     start_seconds: float
     end_seconds: float
     text: str
+    words: tuple[TranscriptWord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -64,12 +72,14 @@ class WhisperTranscriber:
         device: str = "cpu",
         compute_type: str = "int8",
         beam_size: int = 5,
+        word_timestamps: bool = False,
     ):
         self.model_size = model_size
         self.download_root = download_root
         self.device = device
         self.compute_type = compute_type
         self.beam_size = beam_size
+        self.word_timestamps = word_timestamps
         self._model: Any = None
 
     def _engine(self) -> Any:
@@ -107,12 +117,22 @@ class WhisperTranscriber:
             beam_size=self.beam_size,
             language="en",
             vad_filter=True,
+            word_timestamps=self.word_timestamps,
         )
         collected = tuple(
             TranscriptSegment(
                 start_seconds=round(float(segment.start), 3),
                 end_seconds=round(float(segment.end), 3),
                 text=segment.text.strip(),
+                words=tuple(
+                    TranscriptWord(
+                        start_seconds=round(float(word.start), 3),
+                        end_seconds=round(float(word.end), 3),
+                        text=str(word.word).strip(),
+                    )
+                    for word in (getattr(segment, "words", None) or ())
+                    if str(getattr(word, "word", "")).strip()
+                ),
             )
             for segment in segments
         )
@@ -127,6 +147,7 @@ class WhisperTranscriber:
                 "beam_size": self.beam_size,
                 "language": "en",
                 "vad_filter": True,
+                "word_timestamps": self.word_timestamps,
                 "audio_sha256": audio_hash,
             }
         )
@@ -159,6 +180,14 @@ def transcription_payload(
                 "start_seconds": segment.start_seconds,
                 "end_seconds": segment.end_seconds,
                 "text": segment.text,
+                "words": [
+                    {
+                        "start_seconds": word.start_seconds,
+                        "end_seconds": word.end_seconds,
+                        "text": word.text,
+                    }
+                    for word in segment.words
+                ],
             }
             for segment in result.segments
         ],

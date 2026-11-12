@@ -92,13 +92,31 @@ Three legacy bed fixtures now explicitly supply CC0 rights rather than exercisin
 Audio gain checks validate configured attenuation, not a perceptually measured per-stem voice/bed
 ratio. Actual final-mix loudness and true peak remain measured QA; a listening review is still human.
 
+### Caption, stock and finishing bundle
+
+- `build_srt` now wraps and splits by the locale `line_chars`/`lines` and reports `cps`
+  violations; `strict=True` refuses to emit an over-limit cue. `export-captions` records the
+  verdict and violation list.
+- `transcribe-audio --srt` requests word timestamps, builds speech-timed cues with
+  `build_srt_from_words`, and `caption-drift` compares them with plan captions (text overlap and
+  start offset). No model call happens in the test suite; fakes cover the grouping and drift rules.
+- Pexels search accepts a duration window and preference, dedupes provider ids and exposes a
+  deterministic in-point helper; assembly segments carry an optional `start`.
+- `draft-metadata` writes deterministic channel-sized copy; it does not invent claims.
+- `grade-asset`, `key-asset` and `change-speed` are FFmpeg finishing adapters with hashed outputs;
+  filter builders are unit-tested, execution is not run in the suite.
+- Image edits can carry ordered reference images in `image_urls`. The provider-side consistency
+  claim remains **unproven live**.
+- Beat snapping and song-fit planning exist as pure functions; beat extraction and assembly wiring
+  are not implemented. Avatar/lip-sync is **blocked** until a provider contract is verified.
+
 ### Final local verification
 
-- Serial: `python -m pytest -q` — **577 passed in 50.62 s**.
-- Parallel full gate: `python -m pytest -q -n 4 --dist loadfile` — **577 passed in 33.16 s**.
+- Serial: `python -m pytest -q` — **617 passed in 50.53 s**.
+- Parallel full gate: `python -m pytest -q -n 4 --dist loadfile` — **617 passed in 19.21 s**.
   No slow tests omitted on this Windows host.
-- `ruff check` and `ruff format --check` pass across 207 files.
-- `python -m mypy` passes for 41 modules (the ratchet list in `pyproject.toml`).
+- `ruff check` and `ruff format --check` pass across 217 files.
+- `python -m mypy` passes for 46 modules (the ratchet list in `pyproject.toml`).
 - CLI `--help`, `operations` and `fal-check` exercised; retired Vertex verbs are absent.
 - `fal-check` against the installed credential: the dead `fal_sk_...` value returned 401; the
   replacement `id:secret` key returns `authenticated: true`, `http_status: 200`.

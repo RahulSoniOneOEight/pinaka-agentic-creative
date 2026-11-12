@@ -87,7 +87,8 @@ models.py               -> legacy import compatibility
 ## Static checks
 
 `python -m mypy` is a release gate over the modules that are already clean: `policy/`,
-`operations/`, `contracts/`, `adapters/`, `fal.py`, `studio_gateway.py`, `artifacts.py`,
+`operations/`, `contracts/`, `adapters/`, `fal.py`, `captions.py`, `metadata.py`,
+`finishing.py`, `beats.py`, `assembly.py`, `studio_gateway.py`, `artifacts.py`,
 `database.py`, `errors.py`, `utils.py`, `enums.py`, `budget.py`. The feature mixins are the
 remaining surface; add a module to `[tool.mypy].files` only when it passes, so coverage grows
 monotonically. `scripts/check.ps1` and CI run the same command.

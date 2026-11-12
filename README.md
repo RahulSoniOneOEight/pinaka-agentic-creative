@@ -54,6 +54,10 @@ Useful commands:
 .\.venv\Scripts\python -m pinaka --home .\workspace fal-check
 .\.venv\Scripts\python -m pinaka --home .\workspace list-projects
 .\.venv\Scripts\python -m pinaka --home .\workspace operations
+.\.venv\Scripts\python -m pinaka --home .\workspace draft-metadata <project-id> --channel youtube_shorts --output .\workspace\metadata.json
+.\.venv\Scripts\python -m pinaka --home .\workspace grade-asset <project-id> <artifact-id> --lut .\assets\look.cube
+.\.venv\Scripts\python -m pinaka --home .\workspace key-asset <project-id> --background <id> --foreground <id>
+.\.venv\Scripts\python -m pinaka --home .\workspace change-speed <project-id> <artifact-id> --speed 0.5
 .\.venv\Scripts\python -m pinaka --home .\workspace events
 .\.venv\Scripts\python -m pinaka --home .\workspace evaluate-profile --file .\config\pilots\pinaka-virtual-cfo-profile.json
 .\.venv\Scripts\python -m pinaka --home .\workspace creative-plan --file .\config\pilots\pinaka-virtual-cfo-profile.json
@@ -139,6 +143,9 @@ Hosted stills and edits use **fal**, behind funded plan items; narration and tra
 local (Kokoro / faster-whisper). Vertex/ADC entry points are retired. Script proposals can be supplied
 by an agent or operator without an implicit hosted call. `pinaka operations` describes the supported
 routes and funding policy; it does not claim live provider readiness or balances.
+Captions are plan-timed by default; `transcribe-audio --srt` builds speech-timed cues from local ASR,
+and both paths apply the locale line/character rules with a `caption-drift` comparison. Finishing
+includes LUT/EQ grade, green-screen key/composite and pitch-correct speed change.
 Editable HyperFrames-style compositions are authored from the shot plan with no provider at all.
 Generated motion comes only from Studio's `fal.video` route, one shot at a time and keyframe-first;
 Veo and Runway are excluded and refused by the controller.

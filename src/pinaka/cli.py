@@ -106,6 +106,7 @@ from .preference import (
 )
 from .preflight import run_preflight
 from .publication import (
+    CHANNELS,
     PublicationAuthorization,
     PublicationRequest,
     build_dispatch_package,
@@ -421,12 +422,18 @@ def cmd_caption_video(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_transcribe_audio(args: argparse.Namespace) -> dict[str, Any]:
+    from .captions import build_srt_from_words
+
     download_root = (
         Path(args.download_root).expanduser().resolve()
         if args.download_root
         else Path.cwd() / "workspace" / "tools" / "whisper"
     )
-    transcriber = WhisperTranscriber(model_size=args.model, download_root=download_root)
+    transcriber = WhisperTranscriber(
+        model_size=args.model,
+        download_root=download_root,
+        word_timestamps=bool(args.srt),
+    )
     result = transcriber.transcribe(args.audio)
     expected_text = (
         Path(args.expected_file).read_text(encoding="utf-8").strip()
@@ -435,6 +442,22 @@ def cmd_transcribe_audio(args: argparse.Namespace) -> dict[str, Any]:
     )
     payload = transcription_payload(result, expected_text=expected_text)
     write_transcript(payload, args.output)
+    if args.srt:
+        words = [
+            word for segment in payload["segments"] for word in segment.get("words", ())
+        ]
+        if not words:
+            raise ValueError(
+                "No word timings were produced; captions need word_timestamps"
+            )
+        srt = build_srt_from_words(words, locale=args.locale or result.language)
+        srt_path = Path(args.srt).expanduser().resolve()
+        srt_path.parent.mkdir(parents=True, exist_ok=True)
+        srt_path.write_text(srt, encoding="utf-8")
+        payload["srt"] = {
+            "path": str(srt_path),
+            "cues": len([block for block in srt.split("\n\n") if block.strip()]),
+        }
     return payload
 
 
@@ -955,6 +978,42 @@ def cmd_studio_run(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def cmd_caption_drift(args: argparse.Namespace) -> dict[str, Any]:
+    from .captions import caption_drift, parse_srt
+
+    plan = parse_srt(Path(args.plan).expanduser().read_text(encoding="utf-8"))
+    spoken = parse_srt(Path(args.spoken).expanduser().read_text(encoding="utf-8"))
+    if not plan or not spoken:
+        raise ValueError("Both SRT files need at least one cue")
+    return caption_drift(plan, spoken, tolerance_seconds=args.tolerance) | {
+        "plan_cues": len(plan),
+        "spoken_cues": len(spoken),
+    }
+
+
+def cmd_draft_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    from .metadata import draft_metadata
+
+    project = _controller(args).repository.get_project(args.project_id)
+    draft = draft_metadata(
+        name=project.name,
+        objective=project.objective,
+        channel=args.channel,
+        claims=tuple(args.claim or ()),
+        cta=args.cta,
+        hashtags=tuple(args.hashtag or ()),
+        locale=project.language,
+    )
+    if args.output:
+        path = Path(args.output).expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(draft, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        draft = {**draft, "output": str(path)}
+    return draft
+
+
 def cmd_void_job(args: argparse.Namespace) -> dict[str, Any]:
     job = _controller(args).void_job(args.job_id, reason=args.reason)
     return {"job": job.model_dump(mode="json")}
@@ -1320,6 +1379,35 @@ def cmd_analyze_asset(args: argparse.Namespace) -> dict[str, Any]:
             required_height=args.height,
             required_duration_seconds=args.duration,
         ),
+    )
+
+
+def cmd_grade_asset(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).grade_asset(
+        args.project_id,
+        args.artifact_id,
+        lut_path=args.lut,
+        brightness=args.brightness,
+        saturation=args.saturation,
+        contrast=args.contrast,
+        gamma=args.gamma,
+    )
+
+
+def cmd_key_asset(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).key_asset(
+        args.project_id,
+        background_artifact_id=args.background,
+        foreground_artifact_id=args.foreground,
+        key_color=args.key_color,
+        similarity=args.similarity,
+        blend=args.blend,
+    )
+
+
+def cmd_change_speed(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).change_asset_speed(
+        args.project_id, args.artifact_id, speed=args.speed
     )
 
 
@@ -1969,6 +2057,12 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_parser.add_argument(
         "--expected-file", help="Optional approved script for comparison"
     )
+    transcribe_parser.add_argument(
+        "--srt", help="Also write speech-timed SRT captions to this path"
+    )
+    transcribe_parser.add_argument(
+        "--locale", help="Locale profile for caption wrapping (defaults to detected)"
+    )
     transcribe_parser.set_defaults(handler=cmd_transcribe_audio)
 
     formats_parser = subparsers.add_parser(
@@ -2381,6 +2475,27 @@ def build_parser() -> argparse.ArgumentParser:
     void_job_parser.add_argument("--reason", required=True)
     void_job_parser.set_defaults(handler=cmd_void_job)
 
+    metadata_parser = subparsers.add_parser(
+        "draft-metadata",
+        help="Draft channel-sized title/description from approved project facts",
+    )
+    metadata_parser.add_argument("project_id")
+    metadata_parser.add_argument("--channel", required=True, choices=sorted(CHANNELS))
+    metadata_parser.add_argument("--claim", action="append", default=[])
+    metadata_parser.add_argument("--hashtag", action="append", default=[])
+    metadata_parser.add_argument("--cta")
+    metadata_parser.add_argument("--output")
+    metadata_parser.set_defaults(handler=cmd_draft_metadata)
+
+    drift_parser = subparsers.add_parser(
+        "caption-drift",
+        help="Compare plan-timed captions with speech-timed captions",
+    )
+    drift_parser.add_argument("--plan", required=True)
+    drift_parser.add_argument("--spoken", required=True)
+    drift_parser.add_argument("--tolerance", type=float, default=0.75)
+    drift_parser.set_defaults(handler=cmd_caption_drift)
+
     studio_production_parser = subparsers.add_parser(
         "studio-production", help="Show a Studio production and its jobs"
     )
@@ -2690,6 +2805,40 @@ def build_parser() -> argparse.ArgumentParser:
     correct_parser.add_argument("--file", required=True)
     correct_parser.add_argument("--output")
     correct_parser.set_defaults(handler=cmd_correct_asset)
+
+    grade_parser = subparsers.add_parser(
+        "grade-asset",
+        help="Apply a .cube LUT and/or EQ grade to a finished clip",
+    )
+    grade_parser.add_argument("project_id")
+    grade_parser.add_argument("artifact_id")
+    grade_parser.add_argument("--lut")
+    grade_parser.add_argument("--brightness", type=float, default=0.0)
+    grade_parser.add_argument("--saturation", type=float, default=1.0)
+    grade_parser.add_argument("--contrast", type=float, default=1.0)
+    grade_parser.add_argument("--gamma", type=float, default=1.0)
+    grade_parser.set_defaults(handler=cmd_grade_asset)
+
+    key_parser = subparsers.add_parser(
+        "key-asset",
+        help="Key a green screen and composite it over a background clip",
+    )
+    key_parser.add_argument("project_id")
+    key_parser.add_argument("--background", required=True)
+    key_parser.add_argument("--foreground", required=True)
+    key_parser.add_argument("--key-color", default="0x00FF00")
+    key_parser.add_argument("--similarity", type=float, default=0.1)
+    key_parser.add_argument("--blend", type=float, default=0.1)
+    key_parser.set_defaults(handler=cmd_key_asset)
+
+    speed_parser = subparsers.add_parser(
+        "change-speed",
+        help="Slow down or speed up a clip with pitch-correct audio",
+    )
+    speed_parser.add_argument("project_id")
+    speed_parser.add_argument("artifact_id")
+    speed_parser.add_argument("--speed", type=float, required=True)
+    speed_parser.set_defaults(handler=cmd_change_speed)
 
     compose_parser = subparsers.add_parser(
         "compose-assets",

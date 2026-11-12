@@ -22,6 +22,7 @@ from ..errors import (
     ConflictError,
     RightsEligibilityError,
 )
+from ..finishing import FFmpegFinishAdapter
 from ..judge import OpenAICompatibleJudge
 from ..models import (
     AssetRightsRecord,
@@ -29,7 +30,7 @@ from ..models import (
     DependencyRef,
 )
 from ..review_policy import CampaignRisk, ReviewPolicy, decide_review
-from ..utils import canonical_json, sha256_bytes
+from ..utils import canonical_json, sha256_bytes, sha256_file
 
 
 class AssetsUseCases:
@@ -497,6 +498,151 @@ class AssetsUseCases:
             "parent_artifact_id": artifact_id,
             "workflow_hash": result.workflow_hash,
             "operation": result.operation["type"],
+        }
+
+    def grade_asset(
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        lut_path: Any | None = None,
+        brightness: float = 0.0,
+        saturation: float = 1.0,
+        contrast: float = 1.0,
+        gamma: float = 1.0,
+        adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Apply a LUT and/or EQ grade to a finished clip."""
+
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        source = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        result = (adapter or FFmpegFinishAdapter()).grade(
+            source,
+            lut_path=lut_path,
+            brightness=brightness,
+            saturation=saturation,
+            contrast=contrast,
+            gamma=gamma,
+        )
+        derivative = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DERIVATIVE,
+            relative_path=f"assets/derived/{result.content_hash[:12]}-graded.mp4",
+            content=result.content,
+            operation={
+                "type": "grade",
+                "lut_sha256": sha256_file(lut_path) if lut_path else None,
+                "brightness": brightness,
+                "saturation": saturation,
+                "contrast": contrast,
+                "gamma": gamma,
+                "filter_graph": result.filter_graph,
+            },
+            parent_artifact_id=artifact_id,
+        )
+        return {
+            "artifact": derivative,
+            "parent_artifact_id": artifact_id,
+            "filter_graph": result.filter_graph,
+            "command_hash": result.command_hash,
+        }
+
+    def key_asset(
+        self,
+        project_id: str,
+        *,
+        background_artifact_id: str,
+        foreground_artifact_id: str,
+        key_color: str = "0x00FF00",
+        similarity: float = 0.1,
+        blend: float = 0.1,
+        adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Key a green screen and composite it over another clip."""
+
+        background = self.repository.get_artifact(background_artifact_id)
+        foreground = self.repository.get_artifact(foreground_artifact_id)
+        for artifact in (background, foreground):
+            if artifact["project_id"] != project_id:
+                raise ConflictError("Artifact belongs to a different project")
+        background_path = self.artifact_store.resolve(
+            project_id, background["relative_path"]
+        )
+        foreground_path = self.artifact_store.resolve(
+            project_id, foreground["relative_path"]
+        )
+        result = (adapter or FFmpegFinishAdapter()).key_composite(
+            background=background_path,
+            foreground=foreground_path,
+            key_color=key_color,
+            similarity=similarity,
+            blend=blend,
+        )
+        derivative = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DERIVATIVE,
+            relative_path=f"assets/derived/{result.content_hash[:12]}-keyed.mp4",
+            content=result.content,
+            operation={
+                "type": "key_composite",
+                "key_color": key_color,
+                "similarity": similarity,
+                "blend": blend,
+                "filter_graph": result.filter_graph,
+            },
+            parent_artifact_id=foreground_artifact_id,
+            dependencies=(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=background["id"],
+                    entity_hash=background["content_hash"],
+                ),
+            ),
+        )
+        return {
+            "artifact": derivative,
+            "parent_artifact_id": foreground_artifact_id,
+            "background_artifact_id": background_artifact_id,
+            "filter_graph": result.filter_graph,
+            "command_hash": result.command_hash,
+        }
+
+    def change_asset_speed(
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        speed: float,
+        adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Slow down or speed up a clip, keeping audio in sync via atempo."""
+
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        source = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        result = (adapter or FFmpegFinishAdapter()).change_speed(source, speed=speed)
+        derivative = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DERIVATIVE,
+            relative_path=(
+                f"assets/derived/{result.content_hash[:12]}-speed-{speed:g}.mp4"
+            ),
+            content=result.content,
+            operation={
+                "type": "speed_change",
+                "speed": speed,
+                "filter_graph": result.filter_graph,
+            },
+            parent_artifact_id=artifact_id,
+        )
+        return {
+            "artifact": derivative,
+            "parent_artifact_id": artifact_id,
+            "filter_graph": result.filter_graph,
+            "command_hash": result.command_hash,
         }
 
     def judge_asset(

@@ -42,12 +42,20 @@ class FFmpegAssemblyAdapter:
         fps: int = 24,
         width: int = 1080,
         height: int = 1920,
+        starts: list[Decimal] | None = None,
     ) -> AssembledFilm:
         if not segments:
             raise ConfigurationError("Assembly needs at least one clip")
+        if starts is not None and len(starts) != len(segments):
+            raise ConfigurationError("Assembly needs one in-point per clip")
         plan = build_plan(
             [
-                Segment(index=index, path=str(path), duration=duration)
+                Segment(
+                    index=index,
+                    path=str(path),
+                    duration=duration,
+                    start=(starts[index] if starts is not None else Decimal(0)),
+                )
                 for index, (path, duration) in enumerate(segments)
             ],
             transition=transition,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import urllib.parse
@@ -48,6 +49,45 @@ class PexelsSearchResult:
     result_count: int
     page: int
     response_hash: str
+    durations: tuple[float | None, ...] = ()
+
+
+def dedupe_candidates(
+    candidates: tuple[AssetCandidate, ...],
+) -> tuple[AssetCandidate, ...]:
+    """Drop repeated provider ids while preserving API order."""
+
+    seen: set[tuple[str, str]] = set()
+    unique: list[AssetCandidate] = []
+    for candidate in candidates:
+        key = (
+            str(candidate.source.provider),
+            candidate.source.provider_asset_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return tuple(unique)
+
+
+def choose_in_point(
+    source_duration: float,
+    clip_duration: float,
+    *,
+    seed: str = "",
+) -> float:
+    """Pick a deterministic, auditable in-point so clips do not all start at 0."""
+
+    source = float(source_duration)
+    clip = float(clip_duration)
+    if clip <= 0:
+        raise ValueError("clip_duration must be positive")
+    if source <= clip:
+        return 0.0
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    fraction = int(digest[:12], 16) / float(0xFFFFFFFFFFFF)
+    return round(fraction * (source - clip), 3)
 
 
 def _preview_url(payload: dict[str, Any]) -> str | None:
@@ -212,6 +252,9 @@ class PexelsClient:
         page: int = 1,
         orientation: str | None = None,
         size: str | None = None,
+        min_duration_seconds: float | None = None,
+        max_duration_seconds: float | None = None,
+        prefer_duration_seconds: float | None = None,
     ) -> PexelsSearchResult:
         if not query.strip():
             raise ValueError("Search query must not be empty")
@@ -221,6 +264,21 @@ class PexelsClient:
             raise ValueError(f"orientation must be one of {sorted(ORIENTATIONS)}")
         if size is not None and size not in SIZES:
             raise ValueError(f"size must be one of {sorted(SIZES)}")
+        for label, value in (
+            ("min_duration_seconds", min_duration_seconds),
+            ("max_duration_seconds", max_duration_seconds),
+            ("prefer_duration_seconds", prefer_duration_seconds),
+        ):
+            if value is not None and value <= 0:
+                raise ValueError(f"{label} must be positive")
+        if (
+            min_duration_seconds is not None
+            and max_duration_seconds is not None
+            and min_duration_seconds > max_duration_seconds
+        ):
+            raise ValueError(
+                "min_duration_seconds must not exceed max_duration_seconds"
+            )
 
         key = self._resolve_key()
         params = {
@@ -249,12 +307,47 @@ class PexelsClient:
             )
             for result in results
         )
+        durations = tuple(
+            float(result["duration"]) if result.get("duration") is not None else None
+            for result in results
+        )
+        paired = [
+            (candidate, duration)
+            for candidate, duration in zip(candidates, durations, strict=False)
+            if (
+                min_duration_seconds is None
+                or (duration is not None and duration >= min_duration_seconds)
+            )
+            and (
+                max_duration_seconds is None
+                or (duration is not None and duration <= max_duration_seconds)
+            )
+        ]
+        seen: set[tuple[str, str]] = set()
+        unique: list[tuple[AssetCandidate, float | None]] = []
+        for candidate, duration in paired:
+            dedupe_key = (
+                str(candidate.source.provider),
+                candidate.source.provider_asset_id,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            unique.append((candidate, duration))
+        if prefer_duration_seconds is not None:
+            unique.sort(
+                key=lambda item: (
+                    item[1] is None,
+                    abs((item[1] or 0.0) - prefer_duration_seconds),
+                )
+            )
         total = payload.get("total_results")
         return PexelsSearchResult(
-            candidates=candidates,
+            candidates=tuple(candidate for candidate, _ in unique),
             result_count=int(total if total is not None else len(candidates)),
             page=max(1, page),
             response_hash=response_hash,
+            durations=tuple(duration for _, duration in unique),
         )
 
     def search_with_eligibility(
