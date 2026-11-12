@@ -11,8 +11,8 @@ from ..adapters.encode import FFmpegEncodeAdapter
 from ..utils import sha256_bytes, sha256_json
 
 STYLE = (
-    "FontName=Segoe UI,FontSize=18,PrimaryColour=&H00FFFFFF,"
-    "OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,MarginV=48"
+    "FontName=Segoe UI,FontSize=10,PrimaryColour=&H00FFFFFF,"
+    "OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0,MarginV=30"
 )
 
 

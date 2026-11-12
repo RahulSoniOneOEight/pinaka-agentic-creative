@@ -126,7 +126,9 @@ from .wikimedia import WikimediaClient
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, indent=2, ensure_ascii=False, default=str)
+    # ASCII-escaped output is portable across Windows consoles; the value is
+    # still valid JSON, so consumers decode it normally.
+    return json.dumps(value, indent=2, ensure_ascii=True, default=str)
 
 
 def _default_home() -> Path:
@@ -361,7 +363,7 @@ def cmd_synthesize_narration(args: argparse.Namespace) -> dict[str, Any]:
         args.project_id,
         voice=args.voice,
         speed=args.speed,
-        script=Path(args.script_file).read_text(encoding="utf-8")
+        script=Path(args.script_file).read_text(encoding="utf-8-sig")
         if args.script_file
         else None,
         route=args.route,
@@ -1129,7 +1131,7 @@ def cmd_draft_script(args: argparse.Namespace) -> dict[str, Any]:
         duration_seconds=args.duration,
         max_words=args.max_words,
         model=args.model,
-        script=Path(args.script_file).read_text(encoding="utf-8")
+        script=Path(args.script_file).read_text(encoding="utf-8-sig")
         if args.script_file
         else None,
     )

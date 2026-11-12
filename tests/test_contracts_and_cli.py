@@ -80,3 +80,12 @@ def test_cli_pilot_contract_new_plan_and_next(tmp_path, capsys):
     assert main(["--home", str(home), "next", project_id]) == 0
     next_action = json.loads(capsys.readouterr().out)
     assert next_action["action"] == "approve_brief"
+
+
+def test_cli_json_output_is_ascii_safe():
+    from pinaka.cli import _json
+
+    text = _json({"text": "\ufeffcafé"})
+
+    assert "\ufeff" not in text
+    assert json.loads(text)["text"] == "\ufeffcafé"
