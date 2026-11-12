@@ -70,7 +70,7 @@ sourced artifact (never a protected original)
 ```
 
 ```powershell
-pinaka enhance-still-vertex <project-id> --file vertex-still-enhance.json
+pinaka enhance-still-vertex <project-id> --file config/retired/vertex-still-enhance.json
 # add --plan <plan-id> --item <key> to reserve the estimated cost first
 ```
 

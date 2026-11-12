@@ -23,6 +23,8 @@ models.py               -> legacy import compatibility
 
 - SQLite is the single mutable owner of projects, approvals, reservations, jobs and audit events.
   JSON holds immutable snapshots/manifests, not a competing editable state store.
+- One credential boundary (`policy/secrets.py`) refuses credential-shaped field names *and* values
+  in anything the controller persists; the error names the location, never the value.
 - ArtifactStore owns project files; SQLite records their hashes, dependency graph and lineage.
   Versioned fact sets own source-bound values used by a production.
 - Every database mutation uses `BEGIN IMMEDIATE` and appends its event in the same transaction.
@@ -81,6 +83,14 @@ models.py               -> legacy import compatibility
   untouched. The optional free-tier Gemini adapter is separate, explicitly selected, and still
   available through the renamed `google-image` extra; it is not a Vertex fallback.
 - Music/SFX: sourced open-licensed or owned audio; no paid generation route in this catalog.
+
+## Static checks
+
+`python -m mypy` is a release gate over the modules that are already clean: `policy/`,
+`operations/`, `contracts/`, `adapters/`, `fal.py`, `studio_gateway.py`, `artifacts.py`,
+`database.py`, `errors.py`, `utils.py`, `enums.py`, `budget.py`. The feature mixins are the
+remaining surface; add a module to `[tool.mypy].files` only when it passes, so coverage grows
+monotonically. `scripts/check.ps1` and CI run the same command.
 
 ## Compatibility and limits
 

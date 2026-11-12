@@ -25,6 +25,8 @@ jobs:
         run: ruff check src tests scripts
       - name: Format
         run: ruff format --check src tests scripts
+      - name: Types
+        run: python -m mypy
       - name: Compile
         run: python -m compileall -q src tests scripts
       - name: Secret scan

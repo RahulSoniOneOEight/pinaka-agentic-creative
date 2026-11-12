@@ -32,10 +32,26 @@ from ..studio import StudioAdapter
 from ..studio_gateway import (
     StudioOpenRequest,
     StudioPending,
+    StudioStale,
     StudioSubmission,
     StudioTransport,
 )
 from ..utils import sha256_bytes, sha256_json
+
+
+def _pending_result(pending: StudioPending, **extra: Any) -> dict[str, Any]:
+    """A resumable step, marked explicitly when the spool went stale."""
+
+    result: dict[str, Any] = {
+        "status": "pending",
+        "step": pending.step,
+        "message": str(pending),
+        **extra,
+    }
+    if isinstance(pending, StudioStale):
+        result["stale"] = True
+        result["age_seconds"] = pending.age_seconds
+    return result
 
 
 class StudioExecutionUseCases:
@@ -339,12 +355,7 @@ class StudioExecutionUseCases:
             try:
                 opened = transport.open_production(open_request)
             except StudioPending as pending:
-                return {
-                    "status": "pending",
-                    "step": pending.step,
-                    "message": str(pending),
-                    "production": None,
-                }
+                return _pending_result(pending, production=None)
             production = self.repository.open_studio_production(
                 project_id,
                 operation_id=operation_id,
@@ -363,12 +374,7 @@ class StudioExecutionUseCases:
             try:
                 submission = transport.submit(production, packet)
             except StudioPending as pending:
-                return {
-                    "status": "pending",
-                    "step": pending.step,
-                    "message": str(pending),
-                    "production": production,
-                }
+                return _pending_result(pending, production=production)
             job_row = self.repository.record_studio_job(
                 production["id"],
                 external_job_id=submission.external_job_id,
@@ -395,12 +401,7 @@ class StudioExecutionUseCases:
             try:
                 polled = transport.poll(production, submission)
             except StudioPending as pending:
-                return {
-                    "status": "pending",
-                    "step": pending.step,
-                    "message": str(pending),
-                    "production": production,
-                }
+                return _pending_result(pending, production=production)
             job_row = self.repository.update_studio_job(
                 job_row["id"], status=polled.status, detail=polled.detail
             )
@@ -449,12 +450,7 @@ class StudioExecutionUseCases:
         try:
             collected = transport.collect(production, submission)
         except StudioPending as pending:
-            return {
-                "status": "pending",
-                "step": pending.step,
-                "message": str(pending),
-                "production": production,
-            }
+            return _pending_result(pending, production=production)
 
         approved = self.repository.approved_variance_for_job(
             budget_job.id, collected.actual_cost_minor

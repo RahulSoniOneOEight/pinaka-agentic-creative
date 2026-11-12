@@ -8,6 +8,7 @@ from ..enums import (
     ApprovalStage,
     ProjectStatus,
 )
+from ..policy.secrets import SENSITIVE_KEY_NAMES
 
 ALLOWED_TRANSITIONS: dict[ProjectStatus, set[ProjectStatus]] = {
     ProjectStatus.DRAFT: {ProjectStatus.PLANNED, ProjectStatus.CANCELLED},
@@ -84,14 +85,7 @@ APPROVAL_RESULT_STATUS: dict[ApprovalStage, ProjectStatus | None] = {
     ApprovalStage.FINAL: ProjectStatus.FINAL_APPROVED,
 }
 
-SENSITIVE_KEY_PARTS = (
-    "api_key",
-    "apikey",
-    "password",
-    "secret",
-    "authorization",
-    "access_token",
-)
+SENSITIVE_KEY_PARTS = tuple(sorted(SENSITIVE_KEY_NAMES))
 
 STUDIO_AUTO_SPEND_MINOR = 100
 

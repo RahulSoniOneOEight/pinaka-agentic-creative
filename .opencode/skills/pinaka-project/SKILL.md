@@ -18,7 +18,7 @@ Use this skill for `/pinaka/*` project work in this repository.
 
 ## Approved pilot
 
-The current pilot contract is `config/pilots/pinaka-virtual-cfo-10s.json`.
+The archived pilot contract is `config/pilots/pinaka-virtual-cfo-10s.json`.
 
 - Client: Pinaka Intelligence
 - Output: 10 seconds, 1080×1920, 9:16, English
@@ -27,8 +27,17 @@ The current pilot contract is `config/pilots/pinaka-virtual-cfo-10s.json`.
 - Provider mode: disabled
 - Maximum paid spend: INR 0.00
 
-Do not enable GPT, DeepSeek, fal or another managed profile until a later approval names the exact
-model/endpoint and raises the budget above zero.
+That archived pilot stays zero-spend. New work may use a paid route only when all of these hold:
+
+1. the slot's approved sources include generation (`_enforce_generation_routing`);
+2. a current budget plan is `within_target` or approved, with that line item still `planned`;
+3. the job is reserved through the controller, one take, no auto-retry;
+4. the human authorization names a ceiling.
+
+Hosted stills/edits use `fal.image`; generated motion uses Studio `fal.video` only, one shot at a
+time. Veo and Runway are refused in code. `pinaka operations` is the source of truth for routes,
+funding and receipts — do not hardcode a provider policy in a prompt. Check a fal credential without
+spending anything with `pinaka fal-check`.
 
 ## Standard flow
 

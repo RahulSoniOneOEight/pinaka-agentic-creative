@@ -9,6 +9,8 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & $python -m ruff format --check src tests scripts
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $python -m mypy
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $pytestArgs = @("-m", "pytest", "-q")
     if ($Fast) {
         & $python -c "import xdist"

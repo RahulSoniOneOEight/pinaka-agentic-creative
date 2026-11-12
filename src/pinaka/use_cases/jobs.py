@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from ..adapters.base import GenerationAdapter
@@ -20,10 +21,8 @@ from ..models import (
 )
 from ..operations import operation as catalog_operation
 from ..policy.guards import require_one_take
+from ..policy.secrets import reject_sensitive_payload
 from ..utils import sha256_json
-from ._shared import (
-    SENSITIVE_KEY_PARTS,
-)
 
 
 class JobsUseCases:
@@ -49,17 +48,9 @@ class JobsUseCases:
 
     @classmethod
     def _reject_sensitive_payload(cls, value: Any, path: str = "request") -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                normalized = str(key).lower().replace("-", "_")
-                if any(part in normalized for part in SENSITIVE_KEY_PARTS):
-                    raise IntegrityError(
-                        f"Sensitive field is forbidden in persisted payloads: {path}.{key}"
-                    )
-                cls._reject_sensitive_payload(child, f"{path}.{key}")
-        elif isinstance(value, (list, tuple)):
-            for index, child in enumerate(value):
-                cls._reject_sensitive_payload(child, f"{path}[{index}]")
+        """Compatibility shim over the shared credential boundary."""
+
+        reject_sensitive_payload(value, path)
 
     def mark_job_submitting(self, job_id: str) -> JobRecord:
         return self.repository.update_job_status(
@@ -124,6 +115,30 @@ class JobsUseCases:
             error=error,
             asset_artifact_id=asset_artifact_id,
             approved_variance_minor=approved_variance_minor,
+        )
+
+    def void_job(self, job_id: str, *, reason: str) -> JobRecord:
+        """Release a reservation that never reached a provider.
+
+        Only a ``BUDGET_RESERVED`` job may be voided. A submitted or unknown
+        submission might already have been charged, so it must go through
+        reconciliation instead of being written off here.
+        """
+
+        if not reason or not reason.strip():
+            raise IntegrityError("A void reason is required for the audit log")
+        self._reject_sensitive_payload({"reason": reason}, "void_job")
+        job = self.repository.get_job(job_id)
+        if job.status != JobStatus.BUDGET_RESERVED:
+            raise ConflictError(
+                "Only a BUDGET_RESERVED job can be voided; "
+                f"{job.id} is {job.status.value}"
+            )
+        return self.settle_job(
+            job_id,
+            target=JobStatus.FAILED,
+            actual_cost=Money(amount=Decimal(0), currency=job.reserved_cost.currency),
+            error={"type": "voided", "reason": reason},
         )
 
     def run_adapter_once(

@@ -20,37 +20,57 @@ class ProvidersStore:
         purpose: str,
         *,
         notifications: tuple[str, ...] = (),
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any]:
+        """Append one spend entry; pass ``connection`` to join a caller's transaction."""
+
+        if connection is not None:
+            return self._record_provider_spend(
+                connection, provider, amount_cents, tier, purpose, notifications
+            )
+        with self.database.transaction() as owned:
+            return self._record_provider_spend(
+                owned, provider, amount_cents, tier, purpose, notifications
+            )
+
+    def _record_provider_spend(
+        self,
+        connection: sqlite3.Connection,
+        provider: str,
+        amount_cents: int,
+        tier: str,
+        purpose: str,
+        notifications: tuple[str, ...],
     ) -> dict[str, Any]:
         spend_id = new_id("spd")
         now = utc_now()
-        with self.database.transaction() as connection:
-            connection.execute(
-                "INSERT INTO provider_spend(id, provider, amount_cents, tier, purpose, "
-                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (spend_id, provider, amount_cents, tier, purpose, now),
-            )
+        connection.execute(
+            "INSERT INTO provider_spend(id, provider, amount_cents, tier, purpose, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (spend_id, provider, amount_cents, tier, purpose, now),
+        )
+        self._event(
+            connection,
+            project_id=None,
+            entity_type="provider_spend",
+            entity_id=spend_id,
+            event_type="provider_spend.recorded",
+            payload={
+                "provider": provider,
+                "amount_cents": amount_cents,
+                "tier": tier,
+                "purpose": purpose,
+            },
+        )
+        for message in notifications:
             self._event(
                 connection,
                 project_id=None,
                 entity_type="provider_spend",
                 entity_id=spend_id,
-                event_type="provider_spend.recorded",
-                payload={
-                    "provider": provider,
-                    "amount_cents": amount_cents,
-                    "tier": tier,
-                    "purpose": purpose,
-                },
+                event_type="budget.threshold_reached",
+                payload={"provider": provider, "message": message},
             )
-            for message in notifications:
-                self._event(
-                    connection,
-                    project_id=None,
-                    entity_type="provider_spend",
-                    entity_id=spend_id,
-                    event_type="budget.threshold_reached",
-                    payload={"provider": provider, "message": message},
-                )
         return {
             "id": spend_id,
             "provider": provider,
@@ -61,14 +81,22 @@ class ProvidersStore:
             "notifications": list(notifications),
         }
 
-    def provider_spend_total_cents(self, provider: str) -> int:
-        with self.database.read() as connection:
-            row = connection.execute(
-                "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM provider_spend "
-                "WHERE provider = ?",
-                (provider,),
-            ).fetchone()
-            return int(row["total"])
+    def provider_spend_total_cents(
+        self, provider: str, *, connection: sqlite3.Connection | None = None
+    ) -> int:
+        if connection is not None:
+            return self._provider_spend_total(connection, provider)
+        with self.database.read() as owned:
+            return self._provider_spend_total(owned, provider)
+
+    @staticmethod
+    def _provider_spend_total(connection: sqlite3.Connection, provider: str) -> int:
+        row = connection.execute(
+            "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM provider_spend "
+            "WHERE provider = ?",
+            (provider,),
+        ).fetchone()
+        return int(row["total"])
 
     def list_provider_spend(self, provider: str) -> list[dict[str, Any]]:
         with self.database.read() as connection:

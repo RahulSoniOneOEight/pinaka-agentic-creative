@@ -17,7 +17,7 @@ lineage, capability probes, an audit stream, and a deterministic mock provider.
 - A changed fact set invalidates only dependent approvals and artifacts.
 - Originals are imported content-addressably and never overwritten by controller APIs.
 - Secrets are rejected from persisted request/response fields.
-- No real generation, stock, Penpot, upload, or publishing adapter is enabled yet.
+- Paid generation exists only through a funded budget item; publication remains a separate human act.
 
 ## Install on Windows
 
@@ -31,6 +31,7 @@ python -m venv .venv
 
 ```powershell
 .\.venv\Scripts\python -m pytest
+.\.venv\Scripts\python -m mypy
 .\.venv\Scripts\ruff check src tests
 .\.venv\Scripts\ruff format --check src tests
 .\.venv\Scripts\python -m compileall -q src tests
@@ -50,7 +51,9 @@ Useful commands:
 
 ```powershell
 .\.venv\Scripts\python -m pinaka --home .\workspace capabilities
+.\.venv\Scripts\python -m pinaka --home .\workspace fal-check
 .\.venv\Scripts\python -m pinaka --home .\workspace list-projects
+.\.venv\Scripts\python -m pinaka --home .\workspace operations
 .\.venv\Scripts\python -m pinaka --home .\workspace events
 .\.venv\Scripts\python -m pinaka --home .\workspace evaluate-profile --file .\config\pilots\pinaka-virtual-cfo-profile.json
 .\.venv\Scripts\python -m pinaka --home .\workspace creative-plan --file .\config\pilots\pinaka-virtual-cfo-profile.json
@@ -94,19 +97,9 @@ Local ComfyUI generation is also exposed through the controller:
 The adapter only connects to loopback ComfyUI, allows only the configured checkpoint and a fixed
 text-to-image workflow, and refuses any non-zero cost.
 
-Vertex Nano Banana uses the existing Google Cloud ADC login instead of an API key:
-
-```powershell
-.\.venv\Scripts\python -m pinaka --home .\workspace register-tool-profile --file .\config\tools\google-vertex-nano-banana.json
-.\.venv\Scripts\python -m pinaka --home .\workspace generate-vertex-image <project-id> --prompt "..." --model gemini-nano-banana-2.1 --aspect-ratio 16:9 --max-cost-cents 5
-```
-
-This route draws on project `spheric-host-505921-t5` at `global` and its finite Google Cloud trial
-credit, **not** the AI Studio free tier. List prices put a 1K Nano Banana 2.1 image at roughly
-**$0.034** and a 1K Gemini 3.1 Flash Image at roughly **$0.067**. The adapter requires an explicit
-per-call ceiling and never uses an API key. If ADC expires, run `gcloud auth application-default login`.
-A verified controller sample produced a 1376×768 image for **4 cents of trial credit**; the spend is
-recorded as an `external_spend` artifact in the project.
+Vertex Nano Banana and the ADC image route are **retired**. Their configuration files are kept
+under `config/retired/` for history only; no CLI verb registers or runs them. `docs/vertex-adc.md`
+and `docs/nano-banana.md` describe the historic experiments and why the route was removed.
 
 ## Runtime layout
 
@@ -161,8 +154,9 @@ Local tools now include FFmpeg, ImageMagick, Playwright/Chromium, Blender, Inksc
 Audacity, Natron, Synfig, OpenToonz, Manim, QCTools CLI and MediaConch CLI. ComfyUI v0.44.0,
 QCTools/MediaConch and A/B analytics are controller-integrated; ComfyUI uses CPU PyTorch and an
 SD1.5 checkpoint, and a controller-owned 256x256 smoke test completed in 25.5 seconds at zero spend.
-Nano Banana is implemented as a free-tier-only route and requires `GEMINI_API_KEY`; no paid provider
-is enabled.
+Hosted stills and edits use fal behind funded plan items; the optional free-tier Gemini route still
+requires `GEMINI_API_KEY` and refuses paid billing. Check the fal credential without spending
+anything with `pinaka fal-check`, which reports `authenticated`, the key source and its shape.
 
 See `docs/implementation-report.md` for verified evidence, capability findings, deferred work, and
 residual risks. See `docs/openmontage-controller-integration.md` for the Studio work-packet boundary,

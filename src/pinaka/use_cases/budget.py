@@ -52,17 +52,23 @@ class BudgetUseCases:
 
         budget = budget or TieredBudget.load()
         amount_cents = int((Decimal(str(amount_usd)) * 100).to_integral_value())
-        already = self.repository.provider_spend_total_cents(provider)
-        decision = evaluate_spend(already, amount_cents, budget)
-        if not decision.allowed:
-            raise BudgetExceededError(decision.reason)
-        record = self.repository.record_provider_spend(
-            provider,
-            amount_cents,
-            decision.tier,
-            purpose,
-            notifications=decision.notifications,
-        )
+        # One write transaction: the total that the decision reads is the total
+        # the append sees, so two callers cannot both pass the last cent.
+        with self.database.transaction() as connection:
+            already = self.repository.provider_spend_total_cents(
+                provider, connection=connection
+            )
+            decision = evaluate_spend(already, amount_cents, budget)
+            if not decision.allowed:
+                raise BudgetExceededError(decision.reason)
+            record = self.repository.record_provider_spend(
+                provider,
+                amount_cents,
+                decision.tier,
+                purpose,
+                notifications=decision.notifications,
+                connection=connection,
+            )
         return {
             "decision": decision.model_dump(mode="json"),
             "record": record,

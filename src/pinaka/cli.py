@@ -955,6 +955,11 @@ def cmd_studio_run(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def cmd_void_job(args: argparse.Namespace) -> dict[str, Any]:
+    job = _controller(args).void_job(args.job_id, reason=args.reason)
+    return {"job": job.model_dump(mode="json")}
+
+
 def cmd_studio_production(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).studio_production(args.operation_id) or {
         "production": None
@@ -1153,6 +1158,12 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_enhance_still(args: argparse.Namespace) -> dict[str, Any]:
     payload = _load_json(args.file)
     return _controller(args).enhance_still(args.project_id, **payload)
+
+
+def cmd_fal_check(args: argparse.Namespace) -> dict[str, Any]:
+    from .fal import FalClient
+
+    return FalClient().probe_credentials()
 
 
 def cmd_operations(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -2362,6 +2373,14 @@ def build_parser() -> argparse.ArgumentParser:
     studio_run_parser.add_argument("--requested-by")
     studio_run_parser.set_defaults(handler=cmd_studio_run)
 
+    void_job_parser = subparsers.add_parser(
+        "void-job",
+        help="Release a reservation that never reached a provider (BUDGET_RESERVED only)",
+    )
+    void_job_parser.add_argument("job_id")
+    void_job_parser.add_argument("--reason", required=True)
+    void_job_parser.set_defaults(handler=cmd_void_job)
+
     studio_production_parser = subparsers.add_parser(
         "studio-production", help="Show a Studio production and its jobs"
     )
@@ -2472,6 +2491,12 @@ def build_parser() -> argparse.ArgumentParser:
         "operations", help="Describe supported operation policy (not live readiness)"
     )
     operations_parser.set_defaults(handler=cmd_operations)
+
+    fal_check_parser = subparsers.add_parser(
+        "fal-check",
+        help="Test the fal credential with a zero-cost, read-only model-catalog call",
+    )
+    fal_check_parser.set_defaults(handler=cmd_fal_check)
 
     composition_parser = subparsers.add_parser(
         "author-composition",

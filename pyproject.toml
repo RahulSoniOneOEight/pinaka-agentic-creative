@@ -17,6 +17,7 @@ dev = [
   "pytest>=8.3,<9",
   "pytest-xdist>=3.6,<4",
   "ruff>=0.14,<1",
+  "mypy>=1.13,<2",
 ]
 media = [
   "imageio-ffmpeg>=0.5,<1",
@@ -55,3 +56,28 @@ testpaths = ["tests"]
 markers = [
   "slow: local subprocess/media/transport integration (included in the full release gate)",
 ]
+
+# Static-typing ratchet: these modules are enforced today. The controller's
+# feature mixins are typed incrementally; add a module here only when it is
+# clean, so coverage monotonically grows and never regresses.
+[tool.mypy]
+python_version = "3.10"
+files = [
+  "src/pinaka/policy",
+  "src/pinaka/operations",
+  "src/pinaka/contracts",
+  "src/pinaka/adapters",
+  "src/pinaka/fal.py",
+  "src/pinaka/studio_gateway.py",
+  "src/pinaka/artifacts.py",
+  "src/pinaka/database.py",
+  "src/pinaka/errors.py",
+  "src/pinaka/utils.py",
+  "src/pinaka/enums.py",
+  "src/pinaka/budget.py",
+]
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true

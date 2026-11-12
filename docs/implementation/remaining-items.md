@@ -23,7 +23,7 @@
 | U6 | Aggregate-local repositories | PASS: compatible facade; existing atomic state+event transaction boundary preserved |
 | U7 | Aggregate-local contracts | PASS: legacy imports alias the same strict classes; all feature/contract regressions retained |
 | U8 | Targeted/parallel test lanes | PASS: xdist declared/pinned, strict slow marker, full serial/parallel verification; scripts fail closed and resolve repository location |
-| P1 | Live fal image verification | BLOCKED: Studio rejects the explicitly authorized zero-credit production budget before any job exists |
+| P1 | Live fal image verification | BLOCKED: the local credential is refused by fal (`pinaka fal-check` → 401) and Studio rejects the explicitly authorized zero-credit production budget before any job exists |
 | P2 | Live Studio still/clip/import/assembly | BLOCKED: same admission failure; no paid generation, no import/assembly of a live clip claimed |
 
 ## Invariants
@@ -55,27 +55,28 @@ An approximate price is not a spending ceiling; a blocked live test is not a pas
 
 ### Local fal credential check (free, no submission)
 
-The second route — Pinaka calling fal directly with the key file at
-`%USERPROFILE%/.config/opencode/secrets/fal-api-key` — was tested without submitting a job:
+Method: `pinaka fal-check` performs one read-only `GET https://api.fal.ai/v1/models`. That endpoint
+answers **200 without any credential**, so a 401 isolates the credential from route-level auth
+errors; nothing is submitted and nothing is charged.
 
 | Request | Result |
 |---|---|
-| real app, **no** auth header | 401 |
-| real app, garbage key `0000:0000` | 401 |
-| real app, stored key | 401 |
-| fake app, **no** auth header | 404 |
-| fake app, stored key | 404 |
+| public endpoint, no auth | 200 |
+| public endpoint, stored key | 401 `authorization_error` |
+| public endpoint, malformed key `0000:0000` | 401 |
 
-401 is therefore the unauthenticated response, and the stored value produces exactly the same
-result as sending nothing. The 404 on an unknown app happens without authentication and is not
-evidence of a valid key. The stored value is a bare `fal_...` with no colon, while fal parses
-`Authorization: Key <key_id>:<key_secret>`; a malformed value is treated as no auth.
+The stored value is well formed: one line, 39 characters, `fal_` single-token shape, no whitespace.
+It is byte-identical to the value later supplied for reinstatement. fal's own client sends
+`Authorization: Key <FAL_KEY>` verbatim and never splits on `:`; this repository accepts both shapes
+(`tests/test_fal.py::test_single_token_fal_keys_are_accepted`). The earlier "malformed because it has
+no `id:secret`" explanation was **wrong** — the credential itself is refused (revoked, expired or
+never issued), not mis-shaped. Route-level probes cannot decide this: `GET fal.run/fal-ai/flux/schnell`
+returns 401 with *and* without a key, and an unknown model returns 404 with *and* without one.
 
-Conclusion: **the local fal credential is not accepted by the model API.** This is independent of
-the Studio `credits: 0` blocker: P1/P2 are blocked on both routes until either a valid
-`key_id:key_secret` key with the `API` preset is installed, or Studio admits a zero-credit budget.
-No job was created and no charge was incurred. Studio's own stored credential is separate and was
-not read or copied.
+Consequence: P1/P2 are blocked on the credential, not on formatting. Remediation: create a key with
+the `API` preset at fal.ai/dashboard/keys, save the single line, and require
+`pinaka fal-check` → `authenticated: true` before any funded call. No job was created and no charge
+was incurred. Studio's own stored credential is separate and was not read or copied.
 
 ### Audio closure corrections
 
@@ -90,19 +91,21 @@ ratio. Actual final-mix loudness and true peak remain measured QA; a listening r
 
 ### Final local verification
 
-- Serial: `python -m pytest -q` — **516 passed in 49.85 s**.
-- Parallel full gate from outside the repository:
-  `scripts/check.ps1 -Fast -Workers 4` — Ruff passed, 201 files formatted,
-  **516 passed in 21.54 s**. No slow tests omitted on this Windows host.
-- Python compileall and `uv lock --check` passed. Lock resolves 147 packages.
-- CLI `--help` and `operations` exercised; retired Vertex verbs are absent.
+- Serial: `python -m pytest -q` — **577 passed in 50.62 s**.
+- Parallel full gate: `python -m pytest -q -n 4 --dist loadfile` — **577 passed in 33.16 s**.
+  No slow tests omitted on this Windows host.
+- `ruff check` and `ruff format --check` pass across 207 files.
+- `python -m mypy` passes for 41 modules (the ratchet list in `pyproject.toml`).
+- CLI `--help`, `operations` and `fal-check` exercised; retired Vertex verbs are absent.
+- `fal-check` against the installed credential: `authenticated: false`, `http_status: 401`,
+  `detail: "Invalid API key or malformed Authorization header"` — a reported result, not a gate.
 - Focused modular-architecture tests: 9 passed in 0.44 s (pytest time, excluding shell/Ruff).
 - Quick script smoke: external working directory, explicit test selection, missing-test exit 4
   propagated, and stale/empty failure cache exits without invoking the suite.
 - Two PowerShell interoperability cases and three cache-selector cases are now regressions. The
   PowerShell-specific tests are explicitly skipped where `powershell.exe` is unavailable (e.g. Linux CI).
 - The original suite included 18 Vertex-only tests, now retired; two fal pricing tests were moved,
-  not discarded. New architecture, funded-fal, audio and test-lane regressions replace/add coverage.
+  not discarded. New credential-boundary, one-take, spool, void-job and probe regressions add coverage.
 - Source scan found no credential-pattern matches. No live credentials or original/archived media
   were read, copied, overwritten or committed by this bundle.
 

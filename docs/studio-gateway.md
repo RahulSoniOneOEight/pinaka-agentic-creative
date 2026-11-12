@@ -39,7 +39,23 @@ For a production keyed by the packet hash prefix:
 ```
 
 Requests are written once. A missing response returns `status: pending` with the step and the file to
-produce; nothing is charged and the budget reservation stays held.
+produce; nothing is charged and the budget reservation stays held. The request file is created with
+an exclusive open, so two racing operators cannot overwrite each other's packet.
+
+Responses are validated before use: required fields must be non-empty strings, the status must be a
+known Studio status, every collected output needs a 64-character sha256 and an `artifacts/` path,
+and `actual_cost_minor` must be a non-negative integer. A malformed reply raises instead of being
+imported.
+
+A request with no reply for `stale_after_seconds` (default 900) raises `StudioStale`, naming the
+request file and the reservation it is holding. Release that reservation deliberately:
+
+```powershell
+pinaka void-job <job-id> --reason "Studio host never answered the open request"
+```
+
+`void-job` accepts only a `BUDGET_RESERVED` job. A submitted or unknown submission may already have
+been charged and must go through reconciliation instead.
 
 Collect response:
 
@@ -78,12 +94,15 @@ lineage.
 | Host has not answered | `status: pending`, step named, request file written |
 | Transport reports failed/cancelled | Settles at zero, production marked failed/cancelled |
 | Settlement refused | Artifacts registered by that call are discarded; nothing charged |
+| Host silent past the stale window | `StudioStale` names the request file; `void-job` releases the reservation |
+| Malformed host response | Refused before import; the reservation stays held for a corrected reply |
 
 ## CLI
 
 ```powershell
 pinaka studio-run <project-id> <operation-id> --transport spool --spool ./studio-spool
 pinaka studio-production <operation-id>
+pinaka void-job <job-id> --reason "host never answered"
 ```
 
 ## What is not implemented

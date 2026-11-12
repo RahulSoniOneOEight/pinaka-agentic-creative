@@ -28,8 +28,8 @@ response.
 | Project | `spheric-host-505921-t5` |
 | Location | `global` |
 | ADC store | `D:\pinaka-credentials\gcloud\application_default_credentials.json` (also `%APPDATA%\gcloud\...` via junction) |
-| Tool profile | `config/tools/google-vertex-nano-banana.json` |
-| Provider profile | `config/providers/google-vertex-nano-banana.json` |
+| Tool profile | `config/retired/google-vertex-nano-banana.tool.json` |
+| Provider profile | `config/retired/google-vertex-nano-banana.provider.json` |
 | Secret note | `D:\pinaka-credentials\secrets\nano-banana.md` |
 
 Override the project/location in another environment with `GOOGLE_CLOUD_PROJECT` and
@@ -119,9 +119,9 @@ The existing media-workspace sample is
 
 1. Confirm ADC: `gcloud auth application-default login` if expired, then run the model lookup.
 2. Register the tool profile:
-   `register-tool-profile --file config/tools/google-vertex-nano-banana.json`.
+   `register-tool-profile --file config/retired/google-vertex-nano-banana.tool.json`.
 3. Register the provider profile for routing:
-   `register-provider-profile --file config/providers/google-vertex-nano-banana.json`.
+   `register-provider-profile --file config/retired/google-vertex-nano-banana.provider.json`.
 4. Confirm the project has an active brief approval.
 5. Choose the model and set `--max-cost-cents` to the conservative estimate.
 6. Generate one sample, inspect it, and import/approve the exact hash before batch work.

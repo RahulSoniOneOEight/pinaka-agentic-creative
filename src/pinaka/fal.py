@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -13,12 +14,16 @@ from typing import Any
 from .ai_edit import EditResult
 from .errors import ConfigurationError
 from .judge import VisualFinding, VisualJudgement, VisualScores
+from .policy.secrets import SENSITIVE_VALUE_PATTERNS
 from .utils import sha256_bytes, sha256_json, utc_now
 
 API_KEY_ENV = "FAL_KEY"
 API_KEY_FILE_ENV = "FAL_KEY_FILE"
 DEFAULT_API_KEY_FILE = Path.home() / ".config" / "opencode" / "secrets" / "fal-api-key"
 DEFAULT_BASE_URL = "https://queue.fal.run"
+# A public, zero-cost endpoint: 200 without a credential, 401 when the sent
+# credential is invalid. It isolates authentication from route-level errors.
+CREDENTIAL_PROBE_URL = "https://api.fal.ai/v1/models"
 
 Transport = Callable[[str, str, bytes | None, dict[str, str]], bytes]
 
@@ -48,12 +53,21 @@ class FalClient:
         self.clock = clock
 
     def _resolve_key(self) -> str:
-        key = (self.api_key or os.environ.get(API_KEY_ENV) or "").strip()
+        return self._resolve_key_with_source()[0]
+
+    def _resolve_key_with_source(self) -> tuple[str, str]:
+        key = (self.api_key or "").strip()
+        if key:
+            source = "argument"
+        else:
+            key = (os.environ.get(API_KEY_ENV) or "").strip()
+            source = f"env:{API_KEY_ENV}"
         if not key:
             configured = os.environ.get(API_KEY_FILE_ENV)
             path = Path(configured).expanduser() if configured else DEFAULT_API_KEY_FILE
             if path.is_file():
                 key = path.read_text(encoding="utf-8").strip()
+                source = f"file:{path}"
         if not key:
             raise ConfigurationError(
                 f"fal requires an API key in {API_KEY_ENV} or a key file; none is configured"
@@ -69,7 +83,51 @@ class FalClient:
             raise ConfigurationError(
                 "The stored fal key is neither an 'id:secret' key nor a 'fal_...' key"
             )
-        return key
+        return key, source
+
+    @staticmethod
+    def _key_shape(key: str) -> str:
+        if ":" in key:
+            return "id:secret"
+        if key.startswith("fal_"):
+            return "single-token"
+        return "unrecognised"
+
+    def probe_credentials(self, *, url: str = CREDENTIAL_PROBE_URL) -> dict[str, Any]:
+        """Test the credential without submitting or charging provider work.
+
+        Returns authentication evidence, never the secret. A 401 here means the
+        credential itself was refused; it cannot be confused with a route or
+        application-level "authentication required" response.
+        """
+
+        key, source = self._resolve_key_with_source()
+        headers = {"Authorization": f"Key {key}"}
+        result: dict[str, Any] = {
+            "schema": "pinaka.fal.credential-probe/v1",
+            "endpoint": url,
+            "key_source": source,
+            "key_shape": self._key_shape(key),
+            "authenticated": False,
+            "http_status": None,
+            "detail": "",
+        }
+        if self.transport is not None:
+            self.transport("GET", url, None, headers)
+            result["authenticated"] = True
+            result["http_status"] = 200
+            return result
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                result["authenticated"] = True
+                result["http_status"] = response.status
+        except urllib.error.HTTPError as error:
+            result["http_status"] = error.code
+            result["detail"] = _safe_probe_detail(error.read(2048))
+        except urllib.error.URLError as error:
+            result["detail"] = f"network error: {error.reason}"
+        return result
 
     def _request(self, method: str, url: str, payload: Any | None = None) -> bytes:
         key = self._resolve_key()
@@ -124,6 +182,27 @@ def _first_output_url(payload: dict[str, Any]) -> str:
     if payload.get("url"):
         return str(payload["url"])
     raise ConfigurationError("fal output contained no image URL")
+
+
+def _safe_probe_detail(raw: bytes) -> str:
+    """Provider error text with any credential-shaped token removed."""
+
+    text = raw.decode("utf-8", "replace").strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    message = ""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message", ""))
+        else:
+            message = str(error or payload.get("detail", ""))
+    text = message or text
+    for pattern in SENSITIVE_VALUE_PATTERNS:
+        text = pattern.sub("[redacted]", text)
+    return text[:240]
 
 
 @dataclass(frozen=True)

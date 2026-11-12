@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from .enums import ArtifactKind
+from .errors import ConfigurationError, IntegrityError
 from .utils import canonical_json, sha256_bytes
 
 PRODUCTION_STATUSES = {
+    "opened",
     "opening",
     "submitted",
     "working",
@@ -17,6 +22,8 @@ PRODUCTION_STATUSES = {
     "unknown",
 }
 
+STUDIO_JOB_STATUSES = PRODUCTION_STATUSES | {"accepted", "queued"}
+
 
 class StudioPending(Exception):
     """Raised by a transport when the next Studio response is not available yet."""
@@ -24,6 +31,17 @@ class StudioPending(Exception):
     def __init__(self, message: str, *, step: str) -> None:
         super().__init__(message)
         self.step = step
+
+
+class StudioStale(StudioPending):
+    """A spool request outlived its window without a host response."""
+
+    def __init__(
+        self, message: str, *, step: str, age_seconds: float, request_path: str
+    ) -> None:
+        super().__init__(message, step=step)
+        self.age_seconds = age_seconds
+        self.request_path = request_path
 
 
 @dataclass(frozen=True)
@@ -205,33 +223,89 @@ class SpoolStudioTransport:
 
     Requests are written as JSON; the host replies with a matching response file.
     This keeps live MCP calls outside the controller while preserving idempotency.
+    A request that outlives ``stale_after_seconds`` raises ``StudioStale`` so a
+    held reservation can be voided deliberately instead of waiting forever.
     """
 
     name = "spool"
 
-    def __init__(self, spool: Path | str):
+    def __init__(self, spool: Path | str, *, stale_after_seconds: int = 900):
+        if stale_after_seconds <= 0:
+            raise ValueError("stale_after_seconds must be positive")
         self.spool = Path(spool)
         self.spool.mkdir(parents=True, exist_ok=True)
+        self.stale_after_seconds = stale_after_seconds
+
+    def _write_once(self, path: Path, request: dict[str, Any]) -> None:
+        """Create the request atomically; a racing writer leaves it untouched."""
+
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(canonical_json(request))
+                handle.flush()
+                os.fsync(handle.fileno())
+        except FileExistsError:
+            return
 
     def _exchange(self, step: str, key: str, request: dict[str, Any]) -> dict[str, Any]:
         request_path = self.spool / f"{key}.{step}.request.json"
         response_path = self.spool / f"{key}.{step}.response.json"
-        if not request_path.exists():
-            request_path.write_text(canonical_json(request), encoding="utf-8")
+        self._write_once(request_path, request)
         if not response_path.exists():
+            age = max(0.0, time.time() - request_path.stat().st_mtime)
+            if age >= self.stale_after_seconds:
+                raise StudioStale(
+                    f"Studio has not answered {request_path.name} in "
+                    f"{int(age)}s; void the held reservation or have the host respond",
+                    step=step,
+                    age_seconds=age,
+                    request_path=str(request_path),
+                )
             raise StudioPending(
                 f"Awaiting Studio response: {response_path.name}", step=step
             )
-        import json
+        try:
+            reply = json.loads(response_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ConfigurationError(
+                f"Studio {step} response is not valid JSON: {response_path.name}"
+            ) from error
+        if not isinstance(reply, dict):
+            raise ConfigurationError(
+                f"Studio {step} response must be a JSON object: {response_path.name}"
+            )
+        return reply
 
-        return json.loads(response_path.read_text(encoding="utf-8"))
+    @staticmethod
+    def _required_text(reply: dict[str, Any], name: str, step: str) -> str:
+        value = reply.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ConfigurationError(
+                f"Studio {step} response needs a non-empty string {name!r}"
+            )
+        return value
+
+    @staticmethod
+    def _checked_status(
+        reply: dict[str, Any], step: str, *, required: bool = False
+    ) -> str:
+        if "status" not in reply:
+            if required:
+                raise ConfigurationError(f"Studio {step} response needs a 'status'")
+            return "unknown"
+        status = str(reply["status"])
+        if status not in STUDIO_JOB_STATUSES:
+            raise ConfigurationError(
+                f"Studio {step} response reported an unknown status: {status!r}"
+            )
+        return status
 
     def open_production(self, request: StudioOpenRequest) -> StudioOpenResult:
         key = request.packet_hash[:16]
         reply = self._exchange("open", key, request.to_payload())
         return StudioOpenResult(
-            external_production_id=str(reply["production_id"]),
-            status=str(reply.get("status", "opened")),
+            external_production_id=self._required_text(reply, "production_id", "open"),
+            status=self._checked_status(reply, "open"),
             raw=reply,
         )
 
@@ -249,8 +323,8 @@ class SpoolStudioTransport:
             },
         )
         return StudioSubmission(
-            external_job_id=str(reply["job_id"]),
-            status=str(reply.get("status", "accepted")),
+            external_job_id=self._required_text(reply, "job_id", "submit"),
+            status=self._checked_status(reply, "submit"),
             raw=reply,
         )
 
@@ -269,7 +343,7 @@ class SpoolStudioTransport:
         )
         return StudioPoll(
             external_job_id=submission.external_job_id,
-            status=str(reply["status"]),
+            status=self._checked_status(reply, "poll", required=True),
             detail=reply,
         )
 
@@ -286,19 +360,44 @@ class SpoolStudioTransport:
                 "job_id": submission.external_job_id,
             },
         )
-        outputs = tuple(
-            StudioCollectedOutput(
-                source_path=item["source_path"],
-                relative_path=item["relative_path"],
+        raw_outputs = reply.get("outputs")
+        if not isinstance(raw_outputs, list):
+            raise ConfigurationError("Studio collect response needs an 'outputs' list")
+        actual_minor = reply.get("actual_cost_minor")
+        if (
+            not isinstance(actual_minor, int)
+            or isinstance(actual_minor, bool)
+            or actual_minor < 0
+        ):
+            raise ConfigurationError(
+                "Studio collect response needs a non-negative integer 'actual_cost_minor'"
+            )
+        outputs = []
+        for index, item in enumerate(raw_outputs):
+            if not isinstance(item, dict):
+                raise ConfigurationError(
+                    f"Studio collect output {index} must be a JSON object"
+                )
+            content_hash = self._required_text(item, "content_hash", "collect")
+            if len(content_hash) != 64 or any(
+                character not in "0123456789abcdef" for character in content_hash
+            ):
+                raise IntegrityError(
+                    f"Studio collect output {index} has an invalid sha256"
+                )
+            output = StudioCollectedOutput(
+                source_path=self._required_text(item, "source_path", "collect"),
+                relative_path=self._required_text(item, "relative_path", "collect"),
                 kind=ArtifactKind(item.get("kind", "derivative")),
-                role=item["role"],
-                content_hash=item["content_hash"],
+                role=self._required_text(item, "role", "collect"),
+                content_hash=content_hash,
                 parent_artifact_id=item.get("parent_artifact_id"),
             )
-            for item in reply.get("outputs", ())
-        )
+            if not output.relative_path.replace("\\", "/").startswith("artifacts/"):
+                raise IntegrityError("Studio outputs must be stored beneath artifacts/")
+            outputs.append(output)
         return StudioCollected(
-            outputs=outputs,
-            actual_cost_minor=int(reply.get("actual_cost_minor", 0)),
+            outputs=tuple(outputs),
+            actual_cost_minor=actual_minor,
             raw=reply,
         )

@@ -12,14 +12,24 @@
 | U6 repository split | Closed | `store/`; original transaction/event boundary preserved |
 | U7 contract split | Closed | `contracts/`; legacy imports preserved |
 | U8 test lanes | Closed | Declared/pinned xdist, slow integration marker, scripts tested outside repository |
-| P1 live fal image | **Blocked, not closed** | Studio refuses `credits: 0` at production creation; direct fal is unauthenticated (401 identical to no-auth, see below) |
+| F2 credential boundary | Closed | `policy/secrets.py` refuses credential names and values in persisted payloads; `tests/test_secret_guard.py` |
+| F3 one-take guard | Closed | Multiplier/retry field matrix, not a single provider name; `tests/test_policy_guardrails.py` |
+| F4 Studio spool hardening | Closed | Response validation, exclusive request write, staleness with `void-job` release; `tests/test_studio_spool.py`, `tests/test_job_void.py` |
+| F5 doc and skill drift | Closed | README current-state claims, agent skill, Vertex configs moved to `config/retired/` |
+| F6 typing and ledger atomicity | Closed | `python -m mypy` ratchet in CI and `check.ps1`; provider spend check+append in one transaction |
+| P1 live fal image | **Blocked, not closed** | Studio refuses `credits: 0` at production creation; the local credential is refused by fal's own auth probe (`pinaka fal-check` → 401 on a public endpoint that answers 200 without a key). The key is well formed; it is not mis-shaped |
 | P2 live Studio image-to-video/import/assembly | **Blocked, not closed** | Same admission refusal; no accepted paid job exists |
+
+`pinaka fal-check` is the zero-cost credential probe used by P1: a read-only model-catalog call that
+answers 200 without a key, so a 401 isolates the credential from route-level auth. See the evidence
+table in `implementation/remaining-items.md`.
 | B2 paid music generation | Closed / excluded | User chose open-licensed/owned sources only |
 
 The user explicitly authorized **USD 1 maximum total** for P1/P2, with zero OpenMontage credits,
 one still, one five-second H3 clip, no retry and no publication. That authorization is not the
-blocker: Studio's zero-credit budget validator is. No defaults or alternative credentials were used
-to bypass it. New real spend is **USD 0**.
+blocker: two independent admissions are — Studio's zero-credit budget validator, and fal refusing
+the local credential. No defaults or alternative credentials were used to bypass either. New real
+spend is **USD 0**.
 
 Detailed contract, baseline, request ID, exact refusal, test evidence, rollback and remaining
 limitations: [implementation/remaining-items.md](implementation/remaining-items.md).
