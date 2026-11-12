@@ -131,10 +131,42 @@ def test_assemble_film_requires_a_clip_for_every_shot(controller):
         controller.assemble_film(project.id)
 
 
+class CapturingAssembly(FakeAssembly):
+    def __init__(self) -> None:
+        self.segments = None
+
+    def assemble(self, *, segments, **kwargs):
+        self.segments = segments
+        return super().assemble(segments=segments, **kwargs)
+
+
 def test_assemble_film_rejects_an_unknown_transition(controller):
     project, _ = _film_project(controller)
     with pytest.raises(IntegrityError, match="transition"):
         controller.assemble_film(project.id, transition="wipe")
+
+
+def test_assemble_film_snaps_cuts_to_a_beat_grid(controller):
+    project, shots = _film_project(controller)
+    boundaries = []
+    cursor = 0.0
+    for shot in shots:
+        cursor += float(shot["duration_seconds"]) + 0.03
+        boundaries.append(cursor)
+    adapter = CapturingAssembly()
+
+    result = controller.assemble_film(
+        project.id,
+        adapter=adapter,
+        beat_grid=tuple(boundaries),
+        beat_tolerance=0.1,
+    )
+
+    assert result["beat_quantization"]["snapped"] == len(shots)
+    assert result["video"]["operation"]["beat_quantization"]["snapped"] == len(shots)
+    assert [round(float(duration), 2) for _, duration in adapter.segments] == [
+        round(value, 2) for value in result["beat_quantization"]["durations"]
+    ]
 
 
 def test_motion_takes_fit_the_remaining_budget(controller):

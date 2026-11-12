@@ -58,6 +58,9 @@ Useful commands:
 .\.venv\Scripts\python -m pinaka --home .\workspace grade-asset <project-id> <artifact-id> --lut .\assets\look.cube
 .\.venv\Scripts\python -m pinaka --home .\workspace key-asset <project-id> --background <id> --foreground <id>
 .\.venv\Scripts\python -m pinaka --home .\workspace change-speed <project-id> <artifact-id> --speed 0.5
+.\.venv\Scripts\python -m pinaka --home .\workspace detect-beats --audio .\assets\track.mp3 --output .\workspace\beats.json
+.\.venv\Scripts\python -m pinaka --home .\workspace assemble-film <project-id> --beat-grid .\workspace\beats.json
+.\.venv\Scripts\python -m pinaka --home .\workspace avatar-generate <project-id> --source <portrait> --audio <narration> --plan <plan> --item <item> --consent "<release>"
 .\.venv\Scripts\python -m pinaka --home .\workspace events
 .\.venv\Scripts\python -m pinaka --home .\workspace evaluate-profile --file .\config\pilots\pinaka-virtual-cfo-profile.json
 .\.venv\Scripts\python -m pinaka --home .\workspace creative-plan --file .\config\pilots\pinaka-virtual-cfo-profile.json
@@ -145,7 +148,9 @@ by an agent or operator without an implicit hosted call. `pinaka operations` des
 routes and funding policy; it does not claim live provider readiness or balances.
 Captions are plan-timed by default; `transcribe-audio --srt` builds speech-timed cues from local ASR,
 and both paths apply the locale line/character rules with a `caption-drift` comparison. Finishing
-includes LUT/EQ grade, green-screen key/composite and pitch-correct speed change.
+includes LUT/EQ grade, green-screen key/composite and pitch-correct speed change. Music-led edits can
+cut on detected beats; avatar/lip-sync is implemented against fal's published schemas behind a
+likeness-consent gate, with no live call yet.
 Editable HyperFrames-style compositions are authored from the shot plan with no provider at all.
 Generated motion comes only from Studio's `fal.video` route, one shot at a time and keyframe-first;
 Veo and Runway are excluded and refused by the controller.

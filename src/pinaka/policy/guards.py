@@ -17,6 +17,15 @@ def require_funded_item(plan_id: str | None, item_key: str | None) -> None:
         raise IntegrityError("Paid work requires a funded plan_id and item_key")
 
 
+def require_likeness_consent(reference: str | None) -> None:
+    """Synthetic likeness needs a recorded, human-supplied consent reference."""
+
+    if not reference or not reference.strip():
+        raise IntegrityError(
+            "Avatar generation requires a recorded likeness-consent reference"
+        )
+
+
 def require_one_take(parameters: dict) -> None:
     """Do not let a provider's batch/retry switches multiply an authorized take.
 

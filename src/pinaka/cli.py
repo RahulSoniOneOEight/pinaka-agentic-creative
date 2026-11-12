@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from .adapters.captions import CaptionMuxAdapter
 from .adapters.comfyui import ComfyUIImageAdapter
+from .adapters.fal_avatar import AVATAR_MODELS, OMNIHUMAN_MODEL
 from .adapters.google_image import GeminiImageAdapter
 from .adapters.mock import MockGenerationAdapter
 from .adapters.transcribe import (
@@ -1079,6 +1080,13 @@ def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_assemble_film(args: argparse.Namespace) -> dict[str, Any]:
+    beat_grid = None
+    if args.beat_grid:
+        payload = _load_json(args.beat_grid)
+        beats = payload.get("beats") if isinstance(payload, dict) else payload
+        if not isinstance(beats, list) or not beats:
+            raise ValueError("A beat grid file needs a non-empty 'beats' list")
+        beat_grid = tuple(float(beat) for beat in beats)
     return _controller(args).assemble_film(
         args.project_id,
         transition=args.transition,
@@ -1086,7 +1094,23 @@ def cmd_assemble_film(args: argparse.Namespace) -> dict[str, Any]:
         fps=args.fps,
         width=args.width,
         height=args.height,
+        beat_grid=beat_grid,
+        beat_tolerance=args.beat_tolerance,
     )
+
+
+def cmd_detect_beats(args: argparse.Namespace) -> dict[str, Any]:
+    from .beats import detect_beats
+
+    result = detect_beats(args.audio)
+    if args.output:
+        path = Path(args.output).expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        result = {**result, "output": str(path)}
+    return result
 
 
 def cmd_motion_takes(args: argparse.Namespace) -> dict[str, Any]:
@@ -1217,6 +1241,22 @@ def cmd_generate_asset(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_enhance_still(args: argparse.Namespace) -> dict[str, Any]:
     payload = _load_json(args.file)
     return _controller(args).enhance_still(args.project_id, **payload)
+
+
+def cmd_generate_avatar(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).generate_avatar(
+        args.project_id,
+        source_artifact_id=args.source,
+        audio_artifact_id=args.audio,
+        plan_id=args.plan,
+        item_key=args.item,
+        model=args.model,
+        likeness_consent=args.consent,
+        resolution=args.resolution,
+        turbo_mode=not args.no_turbo,
+        prompt=args.prompt,
+        sync_mode=args.sync_mode,
+    )
 
 
 def cmd_fal_check(args: argparse.Namespace) -> dict[str, Any]:
@@ -2571,7 +2611,19 @@ def build_parser() -> argparse.ArgumentParser:
     assembly_parser.add_argument("--fps", type=int, default=24)
     assembly_parser.add_argument("--width", type=int, default=1080)
     assembly_parser.add_argument("--height", type=int, default=1920)
+    assembly_parser.add_argument(
+        "--beat-grid", help="detect-beats JSON; snap cuts to this beat grid"
+    )
+    assembly_parser.add_argument("--beat-tolerance", type=float, default=0.08)
     assembly_parser.set_defaults(handler=cmd_assemble_film)
+
+    detect_beats_parser = subparsers.add_parser(
+        "detect-beats",
+        help="Detect tempo and a beat grid from a local audio file (no network)",
+    )
+    detect_beats_parser.add_argument("--audio", required=True)
+    detect_beats_parser.add_argument("--output")
+    detect_beats_parser.set_defaults(handler=cmd_detect_beats)
 
     takes_parser = subparsers.add_parser(
         "motion-takes",
@@ -2601,6 +2653,33 @@ def build_parser() -> argparse.ArgumentParser:
     image_edit_parser.add_argument("project_id")
     image_edit_parser.add_argument("--file", required=True)
     image_edit_parser.set_defaults(handler=cmd_enhance_still)
+
+    avatar_parser = subparsers.add_parser(
+        "avatar-generate",
+        help="One funded fal avatar/lip-sync take with recorded likeness consent",
+    )
+    avatar_parser.add_argument("project_id")
+    avatar_parser.add_argument("--source", required=True)
+    avatar_parser.add_argument("--audio", required=True)
+    avatar_parser.add_argument("--plan", required=True)
+    avatar_parser.add_argument("--item", required=True)
+    avatar_parser.add_argument("--consent", required=True)
+    avatar_parser.add_argument(
+        "--model",
+        default=OMNIHUMAN_MODEL,
+        choices=list(AVATAR_MODELS),
+    )
+    avatar_parser.add_argument(
+        "--resolution", choices=["720p", "1080p"], default="720p"
+    )
+    avatar_parser.add_argument("--no-turbo", action="store_true")
+    avatar_parser.add_argument("--prompt")
+    avatar_parser.add_argument(
+        "--sync-mode",
+        choices=["cut_off", "loop", "bounce", "silence", "remap"],
+        default="cut_off",
+    )
+    avatar_parser.set_defaults(handler=cmd_generate_avatar)
 
     operations_parser = subparsers.add_parser(
         "operations", help="Describe supported operation policy (not live readiness)"

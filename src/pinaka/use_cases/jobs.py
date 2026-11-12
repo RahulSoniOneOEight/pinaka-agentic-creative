@@ -153,16 +153,25 @@ class JobsUseCases:
         dependencies: tuple[DependencyRef, ...] = (),
     ) -> tuple[JobRecord, dict[str, Any] | None]:
         if request.provider == "fal":
-            if request.operation not in {"image.generate", "image.edit"}:
+            if request.operation not in {
+                "image.generate",
+                "image.edit",
+                "avatar.generate",
+            }:
                 raise IntegrityError(
-                    "fal image execution requires a declared catalog operation"
+                    "fal execution requires a declared catalog operation"
                 )
-            catalog_operation(request.operation).validate(
-                "fal.image", model=request.endpoint
-            )
+            if request.operation == "avatar.generate":
+                catalog_operation("avatar.generate").validate(
+                    "fal.avatar", model=request.endpoint
+                )
+            else:
+                catalog_operation(request.operation).validate(
+                    "fal.image", model=request.endpoint
+                )
             require_one_take(request.parameters)
             if budget_plan_item is None:
-                raise IntegrityError("Paid fal image work requires a funded plan item")
+                raise IntegrityError("Paid fal work requires a funded plan item")
         if request.provider != adapter.provider_name:
             raise IntegrityError(
                 f"Request provider {request.provider!r} does not match adapter "

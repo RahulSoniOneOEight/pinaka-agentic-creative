@@ -107,16 +107,18 @@ ratio. Actual final-mix loudness and true peak remain measured QA; a listening r
   filter builders are unit-tested, execution is not run in the suite.
 - Image edits can carry ordered reference images in `image_urls`. The provider-side consistency
   claim remains **unproven live**.
-- Beat snapping and song-fit planning exist as pure functions; beat extraction and assembly wiring
-  are not implemented. Avatar/lip-sync is **blocked** until a provider contract is verified.
+- Beat detection is local (FFmpeg + numpy); `assemble-film --beat-grid` snaps cuts and records the
+  quantization. Song-fit remains a planner.
+- Avatar/lip-sync is implemented against fal's published schemas with a likeness-consent gate and a
+  funded `avatar.generate` route. **No live avatar call has been made.**
 
 ### Final local verification
 
-- Serial: `python -m pytest -q` — **617 passed in 50.53 s**.
-- Parallel full gate: `python -m pytest -q -n 4 --dist loadfile` — **617 passed in 19.21 s**.
+- Serial: `python -m pytest -q` — **627 passed in 49.18 s**.
+- Parallel full gate: `python -m pytest -q -n 4 --dist loadfile` — **627 passed in 33.57 s**.
   No slow tests omitted on this Windows host.
-- `ruff check` and `ruff format --check` pass across 217 files.
-- `python -m mypy` passes for 46 modules (the ratchet list in `pyproject.toml`).
+- `ruff check` and `ruff format --check` pass across 219 files.
+- `python -m mypy` passes for 47 modules (the ratchet list in `pyproject.toml`).
 - CLI `--help`, `operations` and `fal-check` exercised; retired Vertex verbs are absent.
 - `fal-check` against the installed credential: the dead `fal_sk_...` value returned 401; the
   replacement `id:secret` key returns `authenticated: true`, `http_status: 200`.

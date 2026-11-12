@@ -59,6 +59,22 @@ _OPERATIONS = {
             "budget_plan_id+item_key",
         ),
         Operation(
+            "avatar.generate",
+            ("fal.avatar",),
+            True,
+            (
+                "active_project",
+                "funded_item",
+                "source_hash",
+                "audio_hash",
+                "likeness_consent",
+                "one_take",
+            ),
+            "funded_plan_item_exact_quote",
+            "provider_job",
+            "budget_plan_id+item_key",
+        ),
+        Operation(
             "speech.synthesize",
             ("kokoro",),
             False,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from ..adapters.assembly import FFmpegAssemblyAdapter
 from ..assets import (
     AssetCriteria,
 )
+from ..beats import quantize_durations
 from ..enums import (
     ArtifactKind,
     JobStatus,
@@ -51,6 +53,8 @@ class MotionUseCases:
         fps: int = 24,
         width: int = 1080,
         height: int = 1920,
+        beat_grid: tuple[float, ...] | None = None,
+        beat_tolerance: float = 0.08,
         adapter: Any | None = None,
     ) -> dict[str, Any]:
         """Trim every shot clip to its planned duration and join the film."""
@@ -100,11 +104,24 @@ class MotionUseCases:
                 "Every shot needs an attached clip before assembly: "
                 + ", ".join(missing)
             )
-        import tempfile
-        from pathlib import Path as _Path
-
+        beat_report: dict[str, Any] | None = None
+        if beat_grid:
+            if not 0 <= beat_tolerance <= 0.5:
+                raise IntegrityError("beat_tolerance must be between 0 and 0.5s")
+            quantized = quantize_durations(
+                [float(duration) for _, duration in segments],
+                beat_grid,
+                tolerance_seconds=beat_tolerance,
+            )
+            segments = [
+                (path, Decimal(str(duration)))
+                for (path, _), duration in zip(
+                    segments, quantized["durations"], strict=True
+                )
+            ]
+            beat_report = quantized
         with tempfile.TemporaryDirectory(prefix="pinaka-assembly-") as temp:
-            output = _Path(temp) / "film.mp4"
+            output = Path(temp) / "film.mp4"
             result = (adapter or FFmpegAssemblyAdapter()).assemble(
                 segments=segments,
                 output_path=output,
@@ -127,6 +144,7 @@ class MotionUseCases:
                 "shots": [item["shot"] for item in used],
                 "command_hash": result.command_hash,
                 "encoder_version": result.encoder_version,
+                **({"beat_quantization": beat_report} if beat_report else {}),
             },
             dependencies=tuple(
                 DependencyRef(
@@ -143,6 +161,7 @@ class MotionUseCases:
             "total_seconds": str(result.total_seconds),
             "segments": used,
             "metadata": result.metadata,
+            "beat_quantization": beat_report,
         }
 
     def plan_motion_takes(
