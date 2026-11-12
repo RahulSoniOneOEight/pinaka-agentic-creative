@@ -162,6 +162,35 @@ pinaka synthesize-narration-vertex <project-id> --script-file script.txt --reser
 With `--reserve`, the estimated TTS cost is reserved as a controller budget job before synthesis and
 settled afterwards; a failed synthesis cancels at zero. USD projects only.
 
+## Element → slot binding
+
+Reusable elements carry their artwork, so a shot can be dressed without assigning files by hand.
+
+```powershell
+pinaka bind-elements <project-id>
+```
+
+```text
+element (character.prop/location/world) + bound shot + matching slot
+  → slot primary assignment (via the normal treatment decision)
+  → composition layer
+```
+
+| Element kind | Matching slot roles |
+|---|---|
+| `character`, `prop` | subject, character, prop, visual, hero, presenter |
+| `location`, `world` | background, world, location, environment, scene |
+
+Rules:
+
+- an element without artwork is skipped with a reason;
+- a slot that already has a primary asset is never overwritten;
+- roles that do not match are ignored quietly;
+- re-running is idempotent.
+
+Verified: two elements across three shots assigned six slot primaries with no skips, producing twelve
+composition layers (three duck subjects per scene plus one background each).
+
 ## Governed finish
 
 ```powershell

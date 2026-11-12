@@ -845,6 +845,10 @@ def cmd_bind_creative_element(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).bind_element_to_shot(args.project_id, request)
 
 
+def cmd_bind_elements(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).bind_elements_to_slots(args.project_id)
+
+
 def cmd_prepare_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
     request = StudioWorkPacketRequest.model_validate(_load_json(args.file))
     if args.spend_approval:
@@ -2235,6 +2239,13 @@ def build_parser() -> argparse.ArgumentParser:
     element_bind_parser.add_argument("project_id")
     element_bind_parser.add_argument("--file", required=True)
     element_bind_parser.set_defaults(handler=cmd_bind_creative_element)
+
+    element_apply_parser = subparsers.add_parser(
+        "bind-elements",
+        help="Assign element artwork to matching slots across bound shots",
+    )
+    element_apply_parser.add_argument("project_id")
+    element_apply_parser.set_defaults(handler=cmd_bind_elements)
 
     studio_prepare_parser = subparsers.add_parser(
         "prepare-studio-work-packet",

@@ -253,6 +253,20 @@ def _image_mime(path: Any) -> str | None:
     return IMAGE_MIME.get(str(getattr(path, "suffix", "")).lower())
 
 
+SUBJECT_ROLE_HINTS = ("subject", "character", "prop", "visual", "hero", "presenter")
+BACKGROUND_ROLE_HINTS = ("background", "world", "location", "environment", "scene")
+
+
+def _slot_accepts_element(slot_role: str, element_kind: str) -> bool:
+    role = (slot_role or "").lower()
+    kind = (element_kind or "").lower()
+    if kind in {"character", "prop"}:
+        return any(hint in role for hint in SUBJECT_ROLE_HINTS)
+    if kind in {"location", "world"}:
+        return any(hint in role for hint in BACKGROUND_ROLE_HINTS)
+    return False
+
+
 class CreativeController:
     """Policy boundary for state, approvals, spending, and artifact lineage."""
 
@@ -475,6 +489,75 @@ class CreativeController:
                 f"Cannot bind creative elements for a {project.status.value} project"
             )
         return self.repository.bind_element_to_shot(project_id, request)
+
+    def bind_elements_to_slots(self, project_id: str) -> dict[str, Any]:
+        """Assign element artwork to matching slots so compositions pick it up."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot bind artwork for a {project.status.value} project"
+            )
+        elements = {
+            element["id"]: element
+            for element in self.repository.list_creative_elements(project_id)
+        }
+        slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
+        bindings = self.repository.list_shot_element_bindings(project_id)
+        assigned: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for binding in bindings:
+            element = elements.get(binding["element_id"])
+            if not element:
+                continue
+            artifact_id = element.get("source_artifact_id")
+            if not artifact_id:
+                skipped.append(
+                    {
+                        "element": element["stable_key"],
+                        "reason": "element has no artwork artifact",
+                    }
+                )
+                continue
+            for slot in slots.values():
+                if slot["shot_id"] != binding["shot_id"]:
+                    continue
+                if not _slot_accepts_element(slot["role"], element["kind"]):
+                    continue
+                existing = self.repository.slot_asset_by_role(
+                    slot["id"], SlotAssetRole.PRIMARY.value
+                )
+                if existing:
+                    skipped.append(
+                        {
+                            "element": element["stable_key"],
+                            "slot": slot["stable_key"],
+                            "reason": "slot already has a primary asset",
+                        }
+                    )
+                    continue
+                self.assign_slot_asset(
+                    project_id,
+                    slot["id"],
+                    artifact_id=artifact_id,
+                    role=SlotAssetRole.PRIMARY,
+                    criteria=AssetCriteria(),
+                    decided_by="controller:element-binding",
+                )
+                assigned.append(
+                    {
+                        "element": element["stable_key"],
+                        "slot": slot["stable_key"],
+                        "role": slot["role"],
+                        "artifact_id": artifact_id,
+                    }
+                )
+        return {
+            "project_id": project_id,
+            "assigned": assigned,
+            "skipped": skipped,
+            "assigned_count": len(assigned),
+        }
 
     def create_project_from_contract(
         self, contract: PilotContract
