@@ -238,11 +238,26 @@ def build_composition(
             if item.get("kind") in {"character", "prop", "location"}
         )
         image_layers = []
+        video_layers = []
         for layer in sorted(
             (layers or {}).get(shot["stable_key"], ()),
-            key=lambda item: str(item.get("role", "")).lower() not in BACKGROUND_ROLES,
+            key=lambda item: (
+                0
+                if item.get("kind") == "video"
+                else 1
+                if str(item.get("role", "")).lower() not in BACKGROUND_ROLES
+                else 0
+            ),
         ):
             role = str(layer.get("role", "visual"))
+            if layer.get("kind") == "video":
+                video_layers.append(
+                    f'<video class="layer clip" data-role="{_escape(role)}" '
+                    f'data-start="{start}" data-end="{end}" '
+                    f'src="{layer["path"]}" muted playsinline '
+                    f'preload="auto"></video>'
+                )
+                continue
             if role.lower() in BACKGROUND_ROLES:
                 image_layers.append(
                     f'<img class="{_layer_class(role)}" data-role="{_escape(role)}" '
@@ -278,7 +293,7 @@ def build_composition(
                     f'left:{spread:.1f}%;{animation}" '
                     f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
                 )
-        image_layers_html = "".join(image_layers)
+        image_layers_html = "".join(video_layers + image_layers)
         scenes.append(
             f'  <section class="scene" data-shot="{_escape(shot["stable_key"])}" '
             f'data-start="{start}" data-end="{end}" data-duration="{duration}" '
@@ -347,6 +362,11 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   height: 100%;
   object-fit: cover;
 }}
+.layer.clip {{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}}
 .layer.subject {{
   max-width: 62%;
   max-height: 62%;
@@ -393,6 +413,14 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
       var dur = Math.max(e - s, 0.0001);
       var p = Math.max(0, Math.min(1, (at - s) / dur));
       el.style.opacity = at >= s && at < e ? "1" : "0";
+      el.querySelectorAll("video.clip").forEach(function (v) {{
+        var start = parseFloat(v.dataset.start || "0");
+        var local = Math.max(0, Math.min(at - start, v.duration || at));
+        v.pause();
+        if (Math.abs((v.currentTime || 0) - local) > 0.02) {{
+          v.currentTime = local;
+        }}
+      }});
       el.querySelectorAll(".layer.subject").forEach(function (img) {{
         var action = img.dataset.action || "bob";
         var copy = parseInt(img.dataset.copy || "0", 10);
@@ -443,6 +471,11 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
       }});
     }});
   }}
+  document.querySelectorAll("video.clip").forEach(function (v) {{
+    if (isNaN(at)) {{
+      v.play().catch(function () {{}});
+    }}
+  }});
   window.addEventListener("resize", fit);
   fit();
 }})();

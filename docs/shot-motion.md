@@ -43,6 +43,23 @@ pinaka prepare-motion <project> --file shot-motion.json   # reserve + write pack
 pinaka import-motion  <project> --file motion-result.json # register clip + settle
 ```
 
+`import-motion` accepts an optional `shot_id`; when given, the clip is attached to that shot as a
+`motion` slot primary, so the composition uses it without further wiring.
+
+## Composition
+
+A shot with an attached clip renders it as a `<video class="layer clip">` layer covering the frame,
+behind the text overlay.
+
+- The authored HTML references the clip by `file://` URI; it is not base64-embedded.
+- At `?t=` the inline script sets each clip's `currentTime` to the shot-local position.
+- Any composition containing a clip is captured through **Playwright**, which waits for `seeked`
+  before screenshotting; headless Chrome's one-shot screenshot cannot.
+- Clip-free compositions keep using the faster Chrome capture.
+
+Verified with a synthetic 5-second clip: 10 frames at 2 fps, the rendered frame at 2 s showed the
+clip's own timecode at 2 with the beat text on top.
+
 ```json
 {
   "shot_id": "shot_…",
@@ -85,8 +102,8 @@ re-roll.
 - **Veo and Runway are not part of the flow.** Veo 3.1 is a temporary Google preview; Runway routes
   exist in Studio but have no key and spend Runway credits, not the fal balance.
 - No automatic retry, no speculative variants.
-- Generated clips are not yet placed into the HTML composition; assembly currently uses the
-  deterministic renderer and imported media separately.
+- Generated clips are imported, attached to their shot and rendered in the composition; assembly of a
+  full multi-clip film still runs through the deterministic renderer.
 
 ## Cost sanity
 

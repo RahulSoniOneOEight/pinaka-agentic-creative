@@ -16,6 +16,7 @@ from .adapters.burned_captions import BurnedCaptionAdapter
 from .adapters.captions import CaptionMuxAdapter
 from .adapters.encode import FFmpegEncodeAdapter, VideoEncodeAdapter
 from .adapters.frames import ChromeFrameCapture, FrameCaptureAdapter
+from .adapters.frames_playwright import PlaywrightFrameCapture
 from .adapters.google_vertex_image import (
     GoogleVertexImageAdapter,
     estimate_cost_minor,
@@ -260,6 +261,11 @@ IMAGE_MIME = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
     ".svg": "image/svg+xml",
+}
+VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
 }
 
 
@@ -3116,7 +3122,23 @@ class CreativeController:
                 continue
             artifact = self.repository.get_artifact(assignment["artifact_id"])
             path = self.artifact_store.resolve(project_id, artifact["relative_path"])
-            mime = _image_mime(path)
+            image_mime = _image_mime(path)
+            if image_mime is None and path.suffix.lower() in VIDEO_MIME:
+                if not path.is_file():
+                    skipped.append(
+                        {"artifact_id": artifact["id"], "reason": "file missing"}
+                    )
+                    continue
+                layers.setdefault(shot["stable_key"], []).append(
+                    {
+                        "role": slot["role"] or assignment["role"],
+                        "kind": "video",
+                        "mime": VIDEO_MIME[path.suffix.lower()],
+                        "path": path.as_uri(),
+                    }
+                )
+                continue
+            mime = image_mime
             if mime is None:
                 skipped.append(
                     {
@@ -3264,7 +3286,12 @@ class CreativeController:
                 f"Render would produce {frame_count} frames; limit is {max_frames}"
             )
         html_path = self.artifact_store.resolve(project_id, artifact["relative_path"])
-        capture = capture or ChromeFrameCapture()
+        if capture is None:
+            capture = (
+                PlaywrightFrameCapture()
+                if 'class="layer clip"' in html
+                else ChromeFrameCapture()
+            )
         encoder = encoder or FFmpegEncodeAdapter()
         captured = capture.capture(
             html_path=html_path,
@@ -3802,6 +3829,7 @@ class CreativeController:
         content_hash: str,
         actual_cost_minor: int | None = None,
         output_relative_path: str | None = None,
+        shot_id: str | None = None,
     ) -> dict[str, Any]:
         """Register a generated shot clip and settle its reservation."""
 
@@ -3843,7 +3871,66 @@ class CreativeController:
             reason="Studio shot motion settled after generation",
             asset_artifact_id=artifact["id"],
         )
-        return {"artifact": artifact, "settlement": settlement, "job_id": job.id}
+        attached = None
+        if shot_id:
+            attached = self.attach_shot_clip(
+                project_id, shot_id=shot_id, artifact_id=artifact["id"]
+            )
+        return {
+            "artifact": artifact,
+            "settlement": settlement,
+            "job_id": job.id,
+            "attached": attached,
+        }
+
+    def attach_shot_clip(
+        self,
+        project_id: str,
+        *,
+        shot_id: str,
+        artifact_id: str,
+        role: str = "motion",
+    ) -> dict[str, Any]:
+        """Bind a generated clip to its shot so compositions use it."""
+
+        shot = self.repository.get_shot(shot_id)
+        if shot["project_id"] != project_id:
+            raise ConflictError("Shot belongs to a different project")
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Clip belongs to a different project")
+        if str(Path(artifact["relative_path"]).suffix).lower() not in VIDEO_MIME:
+            raise IntegrityError("Only video clips can be attached as motion")
+        slot = next(
+            (
+                item
+                for item in self.repository.list_slots(project_id)
+                if item["shot_id"] == shot_id and item["role"].lower() == role.lower()
+            ),
+            None,
+        )
+        if slot is None:
+            slot = self.add_slot(
+                project_id,
+                SlotCreate(
+                    shot_id=shot_id,
+                    stable_key=f"{shot['stable_key']}.{role}",
+                    role=role,
+                    identity_requirement="Generated clip for this shot",
+                    fact_requirement="Matches the shot action",
+                    transformation_permission="Trim and compose",
+                    approved_sources=("owned", "generated"),
+                ),
+            )
+        self.assign_slot_asset(
+            project_id,
+            slot["id"],
+            artifact_id=artifact_id,
+            role=SlotAssetRole.PRIMARY,
+            criteria=AssetCriteria(),
+            decided_by="controller:motion-import",
+        )
+        return {"slot": slot, "artifact_id": artifact_id, "role": role}
 
     def _motion_shot(
         self, project_id: str, request: ShotMotionRequest

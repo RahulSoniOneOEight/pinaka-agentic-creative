@@ -11,9 +11,9 @@ from pinaka.models import (
     BudgetPlanCreate,
     BudgetPlanItemCreate,
     Money,
-    ShotCreate,
     ShotMotionRequest,
     SlotCreate,
+    TextBriefRequest,
 )
 from pinaka.motion import DEFAULT_MODEL, estimate_minor, plan_preview, supports
 
@@ -55,21 +55,15 @@ def test_mode_support_and_batch_preview():
 
 def _setup(controller, *, budget="10.00", estimate=30):
     project = create_project(controller, budget=budget)
-    shot = controller.add_shot(
-        project.id,
-        ShotCreate(
-            stable_key="shot-01",
-            ordinal=1,
-            beat="establish",
-            duration_seconds=Decimal(5),
-            narrative="Duck swims",
-        ),
+    controller.plan_from_text(
+        project.id, TextBriefRequest(text="Make a 5 second rhyme for kids")
     )
+    shot = controller.repository.list_shots(project.id)[0]
     slot = controller.add_slot(
         project.id,
         SlotCreate(
             shot_id=shot["id"],
-            stable_key="shot-01.motion",
+            stable_key="shot-01.subject",
             role="subject",
             identity_requirement="i",
             fact_requirement="f",
@@ -215,6 +209,45 @@ def test_import_rejects_an_unknown_job(controller):
             job_id="job_missing",
             source_path="x",
             content_hash="a" * 64,
+        )
+
+
+def test_import_attaches_the_clip_and_composition_uses_it(controller, tmp_path):
+    project, shot, _, frame, plan = _setup(controller)
+    prepared = controller.prepare_shot_motion(project.id, _request(shot, frame, plan))
+    clip = tmp_path / "shot-01.mp4"
+    clip.write_bytes(b"GENERATED-CLIP")
+    from pinaka.utils import sha256_bytes
+
+    imported = controller.import_shot_motion(
+        project.id,
+        job_id=prepared["job"]["id"],
+        source_path=str(clip),
+        content_hash=sha256_bytes(clip.read_bytes()),
+        shot_id=shot["id"],
+    )
+    assert imported["attached"]["role"] == "motion"
+    slots = [
+        slot
+        for slot in controller.repository.list_slots(project.id)
+        if slot["shot_id"] == shot["id"] and slot["role"] == "motion"
+    ]
+    assert slots, "a motion slot should be created for the shot"
+    assignment = controller.repository.slot_asset_by_role(slots[0]["id"], "primary")
+    assert assignment["artifact_id"] == imported["artifact"]["id"]
+
+    authored = controller.author_composition(project.id, width=540, height=960)
+    html = controller.read_artifact_text(authored["artifact"]["id"])
+    assert '<video class="layer clip"' in html
+    assert "file:///" in html
+    assert "v.currentTime = local" in html
+
+
+def test_attach_rejects_a_non_video(controller):
+    project, shot, _, frame, _ = _setup(controller)
+    with pytest.raises(IntegrityError, match="video"):
+        controller.attach_shot_clip(
+            project.id, shot_id=shot["id"], artifact_id=frame["id"]
         )
 
 
