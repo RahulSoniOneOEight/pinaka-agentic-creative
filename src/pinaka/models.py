@@ -602,6 +602,7 @@ class PublicationAuthorizationCreate(StrictModel):
 
 class ShotMotionRequest(StrictModel):
     shot_id: str = Field(min_length=1, max_length=120)
+    route: str = Field(default="fal.video", min_length=1, max_length=120)
     model: str = Field(min_length=1, max_length=120)
     mode: Literal[
         "text-to-video",
@@ -628,6 +629,13 @@ class ShotMotionRequest(StrictModel):
             raise ValueError(f"{self.mode} requires first_frame_artifact_id")
         if self.mode == "first-and-last-frame" and not self.last_frame_artifact_id:
             raise ValueError("first-and-last-frame requires last_frame_artifact_id")
+        if self.route != "fal.video":
+            raise ValueError(
+                "Shot motion runs only through Studio's fal.video route; "
+                "Veo and Runway are not part of the flow"
+            )
+        if "veo" in self.model.lower():
+            raise ValueError("Veo models are not part of the flow")
         return self
 
 

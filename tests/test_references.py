@@ -188,9 +188,9 @@ def test_provider_hints_appear_only_when_generated_motion_is_requested(controlle
     )
     packet = prepared["packet"]
     assert packet["generated_motion"]["requested"] is True
-    assert packet["generated_motion"]["providers"] == ["veo", "runway"]
+    assert packet["generated_motion"]["providers"] == ["fal.video"]
     assert (
-        packet["provider_reference_hints"]["veo"]["reference_images"][0]["sha256"]
+        packet["provider_reference_hints"]["fal.video"]["imageReferences"][0]["sha256"]
         == art["content_hash"]
     )
     assert packet["controller_authority"]["generated_motion_authorized"] is True

@@ -20,7 +20,10 @@ Generated **video** comes from Studio's `fal.video` route, one shot at a time, s
 approved still. It needs a funded plan item and a stated intent, and it produces exactly one take per
 request. See [`shot-motion.md`](shot-motion.md).
 
-Veo and Runway are **not** part of this flow at all — they are only considered if a person names them.
+**Veo and Runway are excluded from the flow entirely.** They are not fallbacks, not alternates, and
+not available "if a person names them": the controller refuses a non-`fal.video` route and any model
+whose name contains `veo`. Only `fal.video` models (including the fal-hosted
+`google/gemini-omni-flash/v1.2`) are selectable.
 
 Until generated motion is requested:
 
@@ -77,19 +80,22 @@ Reference artifacts are also added to the packet inputs, so their hashes are par
 
 ## Provider mapping (exception path only)
 
-| Role | Veo field | Runway field |
-|---|---|---|
-| character / location / style / product | `reference_images[]` | `reference_images[]` |
-| first_frame | `image` | `promptImage` |
-| last_frame | `last_frame` | `lastFrame` |
+Only Studio's `fal.video` route has a mapping; `pinaka.references` rejects any other provider.
 
-Field names follow each provider's documented request shape and **must be re-verified against the
-live API before the first paid call**. The mapping lives in `pinaka.references` so an adapter can
-consume it without guessing.
+| Role | `fal.video` field |
+|---|---|
+| character / location / style / product | `imageReferences[]` |
+| first_frame | `firstFrame` |
+| last_frame | `lastFrame` |
+
+Field names follow the route's documented request shape and **must be re-verified against the live
+API before the first paid call**. The mapping lives in `pinaka.references` so an adapter can consume
+it without guessing.
 
 ## Not implemented
 
-- Live Veo or Runway generation. Both are paid per second, are **outside the standard flow**, and
-  are only considered when a person explicitly requests generated motion.
+- Live Studio `fal.video` generation. The packet, import and render path is built and tested with
+  fakes, but no paid clip has been generated yet.
+- Veo and Runway. Deliberately excluded, not pending: no mapping, no rate card, no route.
 - Automatic reference selection from the storyboard.
 - Reference-derived variants (A/B) per shot.

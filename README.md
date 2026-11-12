@@ -146,8 +146,8 @@ Gemini runs through **Vertex AI with Application Default Credentials** (no API k
 generation, narration and transcription, with a free model-availability check. fal work is priced per
 model through `pinaka.pricing`, so a creative can be planned against a small dollar target before any
 paid call. Editable HyperFrames-style compositions are authored from the shot plan with no provider at all.
-Generated motion (Veo/Runway) is not part of the flow and only runs when a person explicitly asks for
-it.
+Generated motion comes only from Studio's `fal.video` route, one shot at a time and keyframe-first;
+Veo and Runway are excluded and refused by the controller.
 
 The archived 10-second pilot remains the verified production baseline.
 

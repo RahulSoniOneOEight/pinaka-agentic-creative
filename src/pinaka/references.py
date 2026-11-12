@@ -5,20 +5,12 @@ from typing import Any
 # Provider field names are the documented request keys for the reference roles.
 # They must be re-verified against the live API before the first paid call.
 PROVIDER_FIELDS: dict[str, dict[str, str]] = {
-    "veo": {
-        "character": "reference_images",
-        "location": "reference_images",
-        "style": "reference_images",
-        "product": "reference_images",
-        "first_frame": "image",
-        "last_frame": "last_frame",
-    },
-    "runway": {
-        "character": "reference_images",
-        "location": "reference_images",
-        "style": "reference_images",
-        "product": "reference_images",
-        "first_frame": "promptImage",
+    "fal.video": {
+        "character": "imageReferences",
+        "location": "imageReferences",
+        "style": "imageReferences",
+        "product": "imageReferences",
+        "first_frame": "firstFrame",
         "last_frame": "lastFrame",
     },
 }
@@ -48,7 +40,7 @@ def provider_reference_payload(
         field = fields.get(str(role))
         if field is None:
             continue
-        if field in {"reference_images"}:
+        if field in {"reference_images", "imageReferences"}:
             payload.setdefault(field, []).append({"path": path, "sha256": content_hash})
         else:
             payload[field] = {"path": path, "sha256": content_hash}

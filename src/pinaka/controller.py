@@ -124,6 +124,7 @@ from .models import (
     WorkableBriefCreate,
 )
 from .motion import affordable_takes
+from .motion import assert_route as assert_motion_route
 from .motion import estimate_minor as estimate_motion_minor
 from .motion import supports as motion_supports
 from .planning import (
@@ -3879,6 +3880,7 @@ class CreativeController:
                 f"Cannot plan motion for a {project.status.value} project"
             )
         shot = self._motion_shot(project_id, request)
+        assert_motion_route(request.route)
         if not motion_supports(request.model, request.mode):
             raise IntegrityError(
                 f"{request.model} does not support mode {request.mode!r}"
@@ -3973,6 +3975,7 @@ class CreativeController:
             "schema": "pinaka.studio.motion-packet/v1",
             "project_id": project_id,
             "shot": shot,
+            "route": request.route,
             "model": request.model,
             "mode": request.mode,
             "resolution": request.resolution,

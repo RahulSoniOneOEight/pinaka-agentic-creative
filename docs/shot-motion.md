@@ -1,6 +1,7 @@
 # Per-Shot Motion (Studio `fal.video`)
 
-**Status:** Implemented: planning, budgeted packets, and governed import. No live generation executed.
+**Status:** Implemented: planning, budgeted packets, governed import, film assembly and take planning.
+No live generation executed. Veo and Runway are excluded by the controller, not by convention.
 
 ## What this is
 
@@ -34,6 +35,9 @@ re-rollable.
 
 Defaults: `minimax/h3` at `768p` — best quality per dollar for keyframe work.
 
+Every family above is served by Studio's `fal.video` route and billed against the fal balance. There
+is no second route in the rate card: Veo and Runway are not listed because they are not selectable.
+
 ## Flow
 
 ```powershell
@@ -63,6 +67,7 @@ clip's own timecode at 2 with the beat text on top.
 ```json
 {
   "shot_id": "shot_…",
+  "route": "fal.video",
   "model": "minimax/h3",
   "mode": "first-frame",
   "resolution": "768p",
@@ -117,20 +122,23 @@ Verified locally with two synthetic clips: cut produced 10.2 s, dissolve 9.3 s f
 | Need | Use |
 |---|---|
 | Bulk shots, best value | `minimax/h3` first-frame @768p |
-| Hero shot, Veo-like look | `gemini-omni-flash/v1.2` @720p |
+| Hero shot, richer motion | `gemini-omni-flash/v1.2` @720p (fal-hosted, not Veo) |
 | A beat longer than 15s | `ltx-2.5/fast` (up to 20s, one generation, no seam) |
 | Keyframe in-between | `minimax/h3` first-and-last-frame |
 | Restyle existing clip | `minimax/h3` video-to-video |
 
 ## Not in this path
 
-- **Veo and Runway are not part of the flow.** Veo 3.1 is a temporary Google preview; Runway routes
-  exist in Studio but have no key and spend Runway credits, not the fal balance.
+- **Veo and Runway are excluded, not merely deprecated.** `ShotMotionRequest` accepts only
+  `route="fal.video"` and refuses any `veo` model; `motion.assert_route` rejects every other route;
+  `references.PROVIDER_FIELDS` contains only `fal.video`. There is no fallback path.
+  Veo 3.1 is a temporary Google preview, and Runway routes have no key and spend Runway credits
+  rather than the fal balance.
 - No automatic retry, no speculative variants.
-- Generated clips are imported, attached to their shot and rendered in the composition; assembly of a
-  full multi-clip film still runs through the deterministic renderer.
+- Generated clips are imported, attached to their shot and rendered in the composition; full-film
+  joining runs through `assemble-film`.
 
 ## Cost sanity
 
 Eight 5-second shots at `minimax/h3` 768p is **$2.40**, leaving room to re-roll within a $10 balance.
-The same seconds on Veo would be $8–16 with no retry headroom.
+Veo is not an option at any price, so there is no $8–16 comparison to make.

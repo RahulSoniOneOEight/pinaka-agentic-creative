@@ -251,6 +251,36 @@ def test_attach_rejects_a_non_video(controller):
         )
 
 
+def test_veo_and_runway_routes_are_refused():
+    with pytest.raises(
+        ValidationError, match="Veo and Runway are not part of the flow"
+    ):
+        ShotMotionRequest(
+            shot_id="s",
+            route="google.veo-3-1-generate-preview",
+            model="minimax/h3",
+            mode="text-to-video",
+            resolution="720p",
+            duration_seconds=Decimal(5),
+            prompt="x",
+        )
+    with pytest.raises(ValidationError, match="Veo models are not part of the flow"):
+        ShotMotionRequest(
+            shot_id="s",
+            model="veo-3.1",
+            mode="text-to-video",
+            resolution="720p",
+            duration_seconds=Decimal(5),
+            prompt="x",
+        )
+    from pinaka.motion import assert_route
+
+    with pytest.raises(ValueError, match="not in the flow"):
+        assert_route("runway.gemini-omni-flash")
+    with pytest.raises(ValueError, match="not part of the flow"):
+        estimate_minor("veo-3.1", seconds=5, resolution="720p")
+
+
 def test_first_frame_is_required_for_keyframe_modes():
     with pytest.raises(ValidationError, match="requires first_frame_artifact_id"):
         ShotMotionRequest(

@@ -87,7 +87,8 @@ Assigned slot assets are embedded into the composition as image layers, so the a
 actual artwork rather than text placeholders.
 
 Motion is **deterministic**: layers move with the built-in actions or a custom path. Generated video
-(Veo/Runway) is not part of this flow and only enters when a person explicitly asks for it.
+is the exception: it comes only from Studio's `fal.video` route when a person explicitly asks for it.
+Veo and Runway are excluded.
 
 ```text
 slot asset assignment (primary/backup)

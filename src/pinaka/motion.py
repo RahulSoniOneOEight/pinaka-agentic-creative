@@ -103,9 +103,21 @@ STUDIO_VIDEO_MODELS: dict[str, VideoModel] = {
 
 DEFAULT_MODEL = "minimax/h3"
 DEFAULT_RESOLUTION = "768p"
+ALLOWED_ROUTE = "fal.video"
+
+
+def assert_route(route: str) -> None:
+    """Only Studio's fal.video route is in the flow; Veo and Runway are excluded."""
+
+    if route.lower() != ALLOWED_ROUTE:
+        raise ValueError(
+            f"Shot motion runs only through {ALLOWED_ROUTE}; {route!r} is not in the flow"
+        )
 
 
 def model(family: str) -> VideoModel:
+    if "veo" in family.lower():
+        raise ValueError("Veo models are not part of the flow")
     try:
         return STUDIO_VIDEO_MODELS[family]
     except KeyError as error:
