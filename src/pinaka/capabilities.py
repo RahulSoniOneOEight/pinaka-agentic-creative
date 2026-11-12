@@ -391,7 +391,11 @@ def probe_all() -> list[CapabilityResult]:
         ),
         probe_environment("openai", ("OPENAI_API_KEY",)),
         probe_environment("deepseek", ("DEEPSEEK_API_KEY",)),
-        probe_environment("fal", ("FAL_KEY", "FAL_API_KEY")),
+        probe_secret(
+            "fal",
+            ("FAL_KEY", "FAL_API_KEY"),
+            "%USERPROFILE%/.config/opencode/secrets/fal-api-key",
+        ),
         probe_penpot_mcp(),
     ]
     return results
