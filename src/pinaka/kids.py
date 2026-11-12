@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from decimal import Decimal
+from itertools import pairwise
 
 from .models import QACheck
 
@@ -9,6 +10,9 @@ FLASH_LIMIT_PER_SECOND = 3.0
 LUMA_CHANGE_THRESHOLD = 0.10
 KIDS_LOUDNESS_LUFS = -16.0
 KIDS_TRUE_PEAK_DBTP = -2.0
+KIDS_MAX_CUE_GAIN_DB = -12.0
+KIDS_MIN_CUE_GAP_MS = 2000
+KIDS_MAX_CUES = 8
 
 
 def count_flashes(
@@ -138,11 +142,55 @@ def check_kids_loudness(
     )
 
 
+def check_cue_limits(
+    cues: Sequence[dict],
+    *,
+    max_gain_db: float = KIDS_MAX_CUE_GAIN_DB,
+    min_gap_ms: int = KIDS_MIN_CUE_GAP_MS,
+    max_cues: int = KIDS_MAX_CUES,
+) -> QACheck:
+    """Keep sound effects gentle and sparse for a made-for-kids profile."""
+
+    problems: list[str] = []
+    ordered = sorted(cues, key=lambda cue: int(cue["start_ms"]))
+    if len(ordered) > max_cues:
+        problems.append(f"{len(ordered)} cues exceeds the kids limit of {max_cues}")
+    loud = [
+        str(cue.get("cue_key") or "cue")
+        for cue in ordered
+        if float(cue["gain_db"]) > max_gain_db
+    ]
+    if loud:
+        problems.append(f"Cues above {max_gain_db} dB: " + ", ".join(loud))
+    stacked = [
+        f"{previous.get('cue_key')} -> {current.get('cue_key')}"
+        for previous, current in pairwise(ordered)
+        if int(current["start_ms"]) - int(previous["start_ms"]) < min_gap_ms
+    ]
+    if stacked:
+        problems.append(
+            f"Cues spaced closer than {min_gap_ms} ms: " + ", ".join(stacked)
+        )
+    passed = not problems
+    return QACheck(
+        check="kids.audio_cues",
+        status="pass" if passed else "fail",
+        detail="Kids cue limits satisfied." if passed else "; ".join(problems),
+        evidence={
+            "cues": len(ordered),
+            "max_cues": max_cues,
+            "max_gain_db": max_gain_db,
+            "min_gap_ms": min_gap_ms,
+        },
+    )
+
+
 def kids_safety_checks(
     *,
     luminance: Sequence[float] | None = None,
     fps: float | None = None,
     loudness: dict[str, object] | None = None,
+    cues: Sequence[dict] | None = None,
 ) -> list[QACheck]:
     """Run the kids checks that have measurements available."""
 
@@ -151,6 +199,8 @@ def kids_safety_checks(
         checks.append(check_flash_rate(luminance, fps))
     if loudness is not None:
         checks.append(check_kids_loudness(loudness))
+    if cues is not None:
+        checks.append(check_cue_limits(cues))
     return checks
 
 

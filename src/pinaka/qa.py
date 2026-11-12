@@ -3,12 +3,14 @@ from __future__ import annotations
 import html
 import re
 from decimal import Decimal
+from itertools import pairwise
 from typing import Any
 
 from .animatic import SPACING, TYPE_SCALE, decimal_seconds
 from .models import QACheck, QAReport, QAStatus
 
 MIN_TEXT_CONTRAST = 4.5
+MIN_CUE_GAP_MS = 2000
 
 
 def _linear(channel: int) -> float:
@@ -348,6 +350,108 @@ def run_animatic_qa(
                 "artifacts.hashes",
                 "One or more animatic artifacts failed hash verification.",
             )
+        )
+    return checks
+
+
+def check_audio_layers(mux_manifest: dict[str, Any]) -> list[QACheck]:
+    """Validate the music bed and cue plan recorded in the mux manifest."""
+
+    layers = mux_manifest.get("audio_layers") or {}
+    bed = layers.get("bed")
+    cues = list(layers.get("cues") or [])
+    checks: list[QACheck] = []
+    if not bed and not cues:
+        checks.append(
+            _pass("audio.layers", "The mix carries narration only.", {"layers": 0})
+        )
+        return checks
+
+    unhashed = [cue["cue_key"] for cue in cues if not cue.get("content_hash")]
+    if (bed and not bed.get("content_hash")) or unhashed:
+        checks.append(
+            _fail(
+                "audio.layers",
+                "Every bed and cue must carry a verified content hash.",
+                {"unhashed_cues": unhashed},
+            )
+        )
+    else:
+        checks.append(
+            _pass(
+                "audio.layers",
+                f"Mix carries a bed ({bool(bed)}) and {len(cues)} cue(s), all hashed.",
+                {
+                    "bed": bool(bed),
+                    "cues": len(cues),
+                    "plan_hash": layers.get("plan_hash"),
+                },
+            )
+        )
+
+    level_problems: list[str] = []
+    if bed:
+        gain = float(bed["gain_db"])
+        if not -30.0 <= gain <= -12.0:
+            level_problems.append(f"Bed gain {gain} dB is outside the -30..-12 dB band")
+    for cue in cues:
+        gain = float(cue["gain_db"])
+        if not -40.0 <= gain <= -6.0:
+            level_problems.append(
+                f"Cue {cue['cue_key']} gain {gain} dB is outside the -40..-6 dB band"
+            )
+    if level_problems:
+        checks.append(_fail("audio.level", "; ".join(level_problems)))
+    else:
+        checks.append(
+            _pass(
+                "audio.level",
+                "Bed and cue gains sit inside the approved bands.",
+                {
+                    "bed_gain_db": bed["gain_db"] if bed else None,
+                    "cue_gains_db": [cue["gain_db"] for cue in cues],
+                },
+            )
+        )
+
+    ordered = sorted(cues, key=lambda cue: cue["start_ms"])
+    too_close = [
+        f"{previous['cue_key']} -> {current['cue_key']}"
+        for previous, current in pairwise(ordered)
+        if current["start_ms"] - previous["start_ms"] < MIN_CUE_GAP_MS
+    ]
+    if too_close:
+        checks.append(
+            _fail(
+                "audio.density",
+                f"Cues are stacked closer than {MIN_CUE_GAP_MS} ms: "
+                + ", ".join(too_close),
+            )
+        )
+    else:
+        checks.append(
+            _pass(
+                "audio.density",
+                f"{len(cues)} cue(s) respect the {MIN_CUE_GAP_MS} ms spacing rule.",
+            )
+        )
+
+    missing_credits = [
+        item.get("cue_key") or "music bed"
+        for item in ([bed] if bed else []) + cues
+        if item.get("attribution_required") and not item.get("attribution")
+    ]
+    if missing_credits:
+        checks.append(
+            _fail(
+                "audio.credits",
+                "Attribution is required but missing for: "
+                + ", ".join(str(item) for item in missing_credits),
+            )
+        )
+    else:
+        checks.append(
+            _pass("audio.credits", "Attribution is complete for every audio layer.")
         )
     return checks
 

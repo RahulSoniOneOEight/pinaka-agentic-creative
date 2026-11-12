@@ -505,6 +505,7 @@ def test_narration_mux_and_voiced_qa(controller):
         "narration.fit",
         "narration.script",
         "artifacts.hashes",
+        "audio.layers",
     } == names
     assert {row["status"] for row in qa["qa_results"]} == {"pass"}
     assert controller.verify_artifact(qa["report_artifact"]["id"])

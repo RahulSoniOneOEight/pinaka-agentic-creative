@@ -17,6 +17,7 @@ def build_delivery_packet(
     metadata: Path | str,
     output_dir: Path | str,
     formats_dir: Path | str | None = None,
+    credits: Path | str | None = None,
 ) -> dict[str, Any]:
     sources = {
         "master.mp4": Path(master).expanduser().resolve(),
@@ -25,6 +26,8 @@ def build_delivery_packet(
         "formats-manifest.json": Path(formats_manifest).expanduser().resolve(),
         "metadata.json": Path(metadata).expanduser().resolve(),
     }
+    if credits is not None:
+        sources["credits.json"] = Path(credits).expanduser().resolve()
     missing = [str(path) for path in sources.values() if not path.is_file()]
     if missing:
         raise FileNotFoundError(f"Delivery inputs are missing: {missing}")

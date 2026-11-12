@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from typing import Any
 
@@ -314,6 +315,49 @@ def run_preflight(controller: CreativeController, project_id: str) -> dict[str, 
             "pass",
             "Publication is outside this preflight and requires a separate approval.",
             {"publishing_authorized": False},
+        )
+    )
+
+    beds = controller.repository.list_audio_beds(project_id)
+    cues = controller.repository.list_audio_cues(project_id)
+    audio_problems: list[str] = []
+    for bed in beds:
+        decision = json.loads(bed["decision_json"])
+        if not decision.get("commercial_use_allowed"):
+            audio_problems.append(f"bed {bed['role']}: commercial use not allowed")
+        if not decision.get("modifications_allowed"):
+            audio_problems.append(f"bed {bed['role']}: modification not allowed")
+        if decision.get("attribution_required") and not decision.get(
+            "attribution_text"
+        ):
+            audio_problems.append(f"bed {bed['role']}: attribution missing")
+    for cue in cues:
+        decision = json.loads(cue["decision_json"])
+        if not decision.get("commercial_use_allowed"):
+            audio_problems.append(f"cue {cue['cue_key']}: commercial use not allowed")
+        if not decision.get("modifications_allowed"):
+            audio_problems.append(f"cue {cue['cue_key']}: modification not allowed")
+        if decision.get("attribution_required") and not decision.get(
+            "attribution_text"
+        ):
+            audio_problems.append(f"cue {cue['cue_key']}: attribution missing")
+    roles = {bed["role"] for bed in beds}
+    if beds and "primary" not in roles:
+        audio_problems.append("a backup bed exists without a primary bed")
+    rules.append(
+        _rule(
+            "R-AUDIO-001",
+            "fail" if audio_problems else "pass",
+            "Audio layers are licence-clean and credited."
+            if not audio_problems
+            else "; ".join(audio_problems),
+            {
+                "beds": len(beds),
+                "cues": len(cues),
+                "cue_roles": sorted({cue["role"] for cue in cues}),
+                "primary_bed": "primary" in roles,
+                "backup_bed": "backup" in roles,
+            },
         )
     )
 

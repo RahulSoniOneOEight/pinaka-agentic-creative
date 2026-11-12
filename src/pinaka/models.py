@@ -639,6 +639,20 @@ class ShotMotionRequest(StrictModel):
         return self
 
 
+class AudioCueRequest(StrictModel):
+    """One SFX, ambience or stinger placed on the final audio timeline."""
+
+    cue_key: str = Field(min_length=1, max_length=120)
+    artifact_id: str = Field(min_length=1, max_length=120)
+    role: Literal["sfx", "ambience", "stinger"]
+    start_ms: int = Field(ge=0, le=3_600_000)
+    duration_ms: int = Field(gt=0, le=10_000)
+    gain_db: Decimal = Field(default=Decimal(-18), ge=-60, le=0)
+    loop: bool = False
+    shot_id: str | None = Field(default=None, max_length=120)
+    decided_by: str = Field(min_length=1, max_length=200)
+
+
 class StudioReadinessReport(StrictModel):
     """Outcome of one live Studio readiness probe, recorded by the operator."""
 

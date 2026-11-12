@@ -85,6 +85,7 @@ from .models import (
     AssetEligibilityResult,
     AssetRightsRecord,
     AssetUseContext,
+    AudioCueRequest,
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
     BudgetRaiseCreate,
@@ -136,7 +137,12 @@ from .planning import (
     scene_plan_markdown,
 )
 from .publication import PublicationAuthorization
-from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
+from .qa import (
+    build_report,
+    check_audio_layers,
+    run_animatic_qa,
+    run_voiced_animatic_qa,
+)
 from .references import (
     SUPPORTED_PROVIDERS,
     provider_reference_payload,
@@ -253,6 +259,8 @@ SENSITIVE_KEY_PARTS = (
 STUDIO_AUTO_SPEND_MINOR = 100
 SPEND_CURRENCIES = ("USD", "INR")
 DEFAULT_RUN_CAP_MINOR = {"USD": 100, "INR": 8500}
+MAX_AUDIO_CUES = 12
+BED_GAIN_DB = -20.0
 DEFAULT_CREATIVE_TARGET_MINOR = {"USD": 100, "INR": 8500}
 GENERATED_SOURCES = frozenset(
     {"generated", "paid_generation", "ai_generated", "ai", "synthesis"}
@@ -1418,12 +1426,168 @@ class CreativeController:
             problems.append("missing primary")
         if "backup" not in beds:
             problems.append("missing backup")
+        cues = self.repository.list_audio_cues(project_id)
         return {
             "project_id": project_id,
             "primary_artifact_id": beds.get("primary", {}).get("artifact_id"),
             "backup_artifact_id": beds.get("backup", {}).get("artifact_id"),
+            "cue_count": len(cues),
+            "cue_roles": sorted({cue["role"] for cue in cues}),
             "resolved": not problems,
             "problems": problems,
+        }
+
+    def assign_audio_cue(
+        self, project_id: str, request: AudioCueRequest
+    ) -> dict[str, Any]:
+        """Place one SFX, ambience or stinger cue on the final timeline.
+
+        Only open-source audio is accepted: the licence must allow commercial use and
+        modification, and attribution must be recorded where the licence requires it.
+        """
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(f"Cannot cue audio on a {project.status.value} project")
+        artifact = self.repository.get_artifact(request.artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        if artifact["kind"] != ArtifactKind.AUDIO.value:
+            raise IntegrityError("Audio cues must reference an audio artifact")
+        rights_payload = artifact["operation"].get("rights")
+        if not rights_payload:
+            raise IntegrityError(
+                "Audio cues require recorded licence evidence on the artifact"
+            )
+        rights = AssetRightsRecord.model_validate(rights_payload)
+        if rights.commercial_use_allowed is not True:
+            raise IntegrityError(
+                f"Licence {rights.license_name!r} does not allow commercial use"
+            )
+        if rights.modifications_allowed is not True:
+            raise IntegrityError(
+                f"Licence {rights.license_name!r} does not allow modification "
+                "(mixing or trimming is a derivative)"
+            )
+        if rights.attribution_required and not rights.attribution_text:
+            raise IntegrityError(
+                f"Licence {rights.license_name!r} requires attribution text"
+            )
+        existing = [
+            cue
+            for cue in self.repository.list_audio_cues(project_id)
+            if cue["cue_key"] != request.cue_key
+        ]
+        if len(existing) >= MAX_AUDIO_CUES:
+            raise IntegrityError(
+                f"A film may carry at most {MAX_AUDIO_CUES} audio cues"
+            )
+        duration_ms = int(Decimal(str(project.duration_seconds)) * 1000)
+        if request.start_ms + request.duration_ms > duration_ms:
+            raise IntegrityError(
+                "Audio cue runs past the end of the film "
+                f"({request.start_ms + request.duration_ms} ms > {duration_ms} ms)"
+            )
+        decision = {
+            "licence_name": rights.license_name,
+            "licence_code": rights.license_code,
+            "licence_url": str(rights.license_url),
+            "commercial_use_allowed": rights.commercial_use_allowed,
+            "modifications_allowed": rights.modifications_allowed,
+            "attribution_required": rights.attribution_required,
+            "attribution_text": rights.attribution_text,
+            "decided_by": request.decided_by,
+            "role": request.role,
+        }
+        return self.repository.upsert_audio_cue(
+            project_id,
+            cue_key=request.cue_key,
+            artifact_id=request.artifact_id,
+            role=request.role,
+            start_ms=request.start_ms,
+            duration_ms=request.duration_ms,
+            gain_db=str(request.gain_db),
+            loop=request.loop,
+            shot_id=request.shot_id,
+            verdict="accepted",
+            decision=decision,
+        )
+
+    def audio_credits(self, project_id: str) -> dict[str, Any]:
+        """Write the attribution block every open-source bed and cue requires."""
+
+        entries: list[dict[str, Any]] = []
+        beds = self.repository.list_audio_beds(project_id)
+        for bed in beds:
+            artifact = self.repository.get_artifact(bed["artifact_id"])
+            metadata = self._audio_layer_metadata(artifact)
+            entries.append(
+                {
+                    "kind": "music_bed",
+                    "role": bed["role"],
+                    "cue_key": None,
+                    "artifact_id": artifact["id"],
+                    "file": artifact["relative_path"],
+                    "content_hash": artifact["content_hash"],
+                    "licence": metadata["licence"],
+                    "licence_url": metadata["licence_url"],
+                    "attribution": metadata["attribution"],
+                    "attribution_required": metadata["attribution_required"],
+                }
+            )
+        for cue in self.repository.list_audio_cues(project_id):
+            artifact = self.repository.get_artifact(cue["artifact_id"])
+            metadata = self._audio_layer_metadata(artifact)
+            entries.append(
+                {
+                    "kind": "audio_cue",
+                    "role": cue["role"],
+                    "cue_key": cue["cue_key"],
+                    "artifact_id": artifact["id"],
+                    "file": artifact["relative_path"],
+                    "content_hash": artifact["content_hash"],
+                    "licence": metadata["licence"],
+                    "licence_url": metadata["licence_url"],
+                    "attribution": metadata["attribution"],
+                    "attribution_required": metadata["attribution_required"],
+                }
+            )
+        missing = [
+            entry["cue_key"] or f"bed:{entry['role']}"
+            for entry in entries
+            if entry["attribution_required"] and not entry["attribution"]
+        ]
+        payload = {
+            "schema_version": 1,
+            "project_id": project_id,
+            "credits": entries,
+            "requires_attribution": missing,
+        }
+        content = canonical_json(payload).encode("utf-8")
+        digest = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"artifacts/audio/credits-{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "audio_credits",
+                "beds": len(beds),
+                "cues": len(entries) - len(beds),
+            },
+            dependencies=tuple(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=entry["artifact_id"],
+                    entity_hash=entry["content_hash"],
+                )
+                for entry in entries
+            ),
+        )
+        return {
+            "credits": entries,
+            "missing_attribution": missing,
+            "artifact": artifact,
         }
 
     def promote_backup(
@@ -5983,6 +6147,137 @@ class CreativeController:
                 f"Muxed true peak {true_peak:.1f} dBTP exceeds the -1.0 dBTP ceiling"
             )
 
+    @staticmethod
+    def _audio_layer_metadata(artifact: dict[str, Any]) -> dict[str, Any]:
+        """Licence fields live on the artifact; the decision only records the choice."""
+
+        rights_payload = (artifact.get("operation") or {}).get("rights")
+        if not rights_payload:
+            return {
+                "licence": None,
+                "licence_url": None,
+                "attribution": None,
+                "attribution_required": False,
+            }
+        rights = AssetRightsRecord.model_validate(rights_payload)
+        return {
+            "licence": rights.license_name,
+            "licence_url": str(rights.license_url),
+            "attribution": rights.attribution_text,
+            "attribution_required": bool(rights.attribution_required),
+        }
+
+    def _audio_layer_plan(self, project_id: str) -> dict[str, Any]:
+        """Resolve the primary music bed and every cue into a deterministic mix plan."""
+
+        beds = {bed["role"]: bed for bed in self.repository.list_audio_beds(project_id)}
+        primary = beds.get("primary")
+        cues = self.repository.list_audio_cues(project_id)
+        dependencies: list[DependencyRef] = []
+        bed_layer: dict[str, Any] | None = None
+        if primary:
+            artifact = self.repository.get_artifact(primary["artifact_id"])
+            if not self.verify_artifact(artifact["id"]):
+                raise IntegrityError("Music bed failed hash verification")
+            path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+            if not path.is_file():
+                raise NotFoundError(f"Music bed file missing: {path.name}")
+            metadata = self._audio_layer_metadata(artifact)
+            bed_layer = {
+                "artifact_id": artifact["id"],
+                "relative_path": artifact["relative_path"],
+                "content_hash": artifact["content_hash"],
+                "path": path,
+                "gain_db": BED_GAIN_DB,
+                "licence": metadata["licence"],
+                "attribution": metadata["attribution"],
+                "attribution_required": metadata["attribution_required"],
+            }
+            dependencies.append(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=artifact["id"],
+                    entity_hash=artifact["content_hash"],
+                )
+            )
+        cue_layers: list[dict[str, Any]] = []
+        for cue in cues:
+            artifact = self.repository.get_artifact(cue["artifact_id"])
+            if not self.verify_artifact(artifact["id"]):
+                raise IntegrityError(
+                    f"Audio cue {cue['cue_key']!r} failed hash verification"
+                )
+            path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+            if not path.is_file():
+                raise NotFoundError(f"Audio cue file missing: {path.name}")
+            metadata = self._audio_layer_metadata(artifact)
+            cue_layers.append(
+                {
+                    "cue_key": cue["cue_key"],
+                    "artifact_id": artifact["id"],
+                    "relative_path": artifact["relative_path"],
+                    "content_hash": artifact["content_hash"],
+                    "path": path,
+                    "role": cue["role"],
+                    "shot_id": cue["shot_id"],
+                    "start_ms": int(cue["start_ms"]),
+                    "duration_ms": int(cue["duration_ms"]),
+                    "gain_db": float(cue["gain_db"]),
+                    "loop": bool(cue["loop"]),
+                    "licence": metadata["licence"],
+                    "attribution": metadata["attribution"],
+                    "attribution_required": metadata["attribution_required"],
+                }
+            )
+            dependencies.append(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=artifact["id"],
+                    entity_hash=artifact["content_hash"],
+                )
+            )
+        summary = {
+            "bed": (
+                {
+                    "artifact_id": bed_layer["artifact_id"],
+                    "relative_path": bed_layer["relative_path"],
+                    "content_hash": bed_layer["content_hash"],
+                    "gain_db": bed_layer["gain_db"],
+                    "licence": bed_layer["licence"],
+                    "attribution": bed_layer["attribution"],
+                    "attribution_required": bed_layer["attribution_required"],
+                }
+                if bed_layer
+                else None
+            ),
+            "cues": [
+                {
+                    "cue_key": cue["cue_key"],
+                    "artifact_id": cue["artifact_id"],
+                    "relative_path": cue["relative_path"],
+                    "content_hash": cue["content_hash"],
+                    "role": cue["role"],
+                    "shot_id": cue["shot_id"],
+                    "start_ms": cue["start_ms"],
+                    "duration_ms": cue["duration_ms"],
+                    "gain_db": cue["gain_db"],
+                    "loop": cue["loop"],
+                    "licence": cue["licence"],
+                    "attribution": cue["attribution"],
+                    "attribution_required": cue["attribution_required"],
+                }
+                for cue in cue_layers
+            ],
+        }
+        summary["plan_hash"] = sha256_json(summary)
+        return {
+            "bed": bed_layer,
+            "cues": cue_layers,
+            "dependencies": dependencies,
+            "summary": summary,
+            "plan_hash": summary["plan_hash"],
+        }
+
     def mux_voiced_animatic(
         self,
         project_id: str,
@@ -6039,6 +6334,9 @@ class CreativeController:
             raise IntegrityError("Narration WAV failed hash verification")
         duration = decimal_seconds(encode_manifest["duration_seconds"])
 
+        audio_layers = self._audio_layer_plan(project_id)
+        layer_plan_hash = audio_layers["plan_hash"]
+
         tool = self.register_tool_profile(
             ToolProfileCreate(
                 stable_key="ffmpeg-mux",
@@ -6055,7 +6353,7 @@ class CreativeController:
             operation="mux_narration",
             idempotency_key=(
                 f"mux-{video_artifact['content_hash'][:12]}-"
-                f"{narration_artifact['content_hash'][:12]}"
+                f"{narration_artifact['content_hash'][:12]}-{layer_plan_hash[:12]}"
             ),
             parameters={
                 "video_artifact_id": video_artifact["id"],
@@ -6063,6 +6361,11 @@ class CreativeController:
                 "narration_artifact_id": narration_artifact["id"],
                 "narration_hash": narration_artifact["content_hash"],
                 "duration_seconds": str(duration),
+                "audio_layer_plan_hash": layer_plan_hash,
+                "bed_artifact_id": (
+                    audio_layers["bed"]["artifact_id"] if audio_layers["bed"] else None
+                ),
+                "cue_keys": [cue["cue_key"] for cue in audio_layers["cues"]],
             },
             output_declaration={
                 "media_type": "video/mp4",
@@ -6107,11 +6410,27 @@ class CreativeController:
             project_id, narration_artifact["relative_path"]
         )
         try:
-            result = muxer.mux(
-                video_path=video_path,
-                audio_path=audio_path,
-                duration_seconds=float(duration),
-            )
+            mux_kwargs: dict[str, Any] = {
+                "video_path": video_path,
+                "audio_path": audio_path,
+                "duration_seconds": float(duration),
+            }
+            if audio_layers["bed"] or audio_layers["cues"]:
+                mux_kwargs["bed_path"] = (
+                    audio_layers["bed"]["path"] if audio_layers["bed"] else None
+                )
+                mux_kwargs["bed_gain_db"] = BED_GAIN_DB
+                mux_kwargs["cues"] = [
+                    {
+                        "path": str(cue["path"]),
+                        "start_ms": cue["start_ms"],
+                        "duration_ms": cue["duration_ms"],
+                        "gain_db": cue["gain_db"],
+                        "loop": cue["loop"],
+                    }
+                    for cue in audio_layers["cues"]
+                ]
+            result = muxer.mux(**mux_kwargs)
         except (OSError, RuntimeError, ValueError) as error:
             self.record_execution_receipt(
                 operation["id"],
@@ -6167,10 +6486,11 @@ class CreativeController:
                     entity_id=narration_artifact["id"],
                     entity_hash=narration_artifact["content_hash"],
                 ),
+                *audio_layers["dependencies"],
             ),
         )
         mux_manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "project_id": project_id,
             "video_artifact_id": voiced_artifact["id"],
             "video_hash": voiced_artifact["content_hash"],
@@ -6185,6 +6505,7 @@ class CreativeController:
             "duration_seconds": str(duration),
             "metadata": metadata,
             "loudness": result.loudness,
+            "audio_layers": audio_layers["summary"],
             "command_hash": result.command_hash,
             "encoder_version": result.encoder_version,
             "licence_note": (
@@ -6302,6 +6623,7 @@ class CreativeController:
             narration_verified=narration_verified,
             expected_text_hash=expected_text_hash,
         )
+        checks = checks + check_audio_layers(mux_manifest)
         report = build_report(
             project_id=project_id,
             subject_artifact_id=video_artifact["id"],

@@ -70,6 +70,7 @@ from .models import (
     ApprovalRequest,
     AssetCandidate,
     AssetUseContext,
+    AudioCueRequest,
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
     BudgetRaiseCreate,
@@ -490,6 +491,7 @@ def cmd_delivery_packet(args: argparse.Namespace) -> dict[str, Any]:
         metadata=args.metadata,
         output_dir=args.output_dir,
         formats_dir=args.formats_dir,
+        credits=getattr(args, "credits", None),
     )
 
 
@@ -1281,6 +1283,16 @@ def cmd_assign_audio_bed(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_audio_coverage(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).audio_coverage(args.project_id)
+
+
+def cmd_assign_audio_cue(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    request = AudioCueRequest.model_validate(payload)
+    return _controller(args).assign_audio_cue(args.project_id, request)
+
+
+def cmd_audio_credits(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).audio_credits(args.project_id)
 
 
 def cmd_promote_backup(args: argparse.Namespace) -> dict[str, Any]:
@@ -2086,6 +2098,10 @@ def build_parser() -> argparse.ArgumentParser:
     delivery_parser.add_argument("--metadata", required=True)
     delivery_parser.add_argument("--output-dir", required=True)
     delivery_parser.add_argument(
+        "--credits",
+        help="audio-credits JSON to include as credits.json",
+    )
+    delivery_parser.add_argument(
         "--formats-dir",
         help="Directory of 1:1/16:9/4:5 MP4 derivatives to include",
     )
@@ -2753,6 +2769,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audio_cov_parser.add_argument("project_id")
     audio_cov_parser.set_defaults(handler=cmd_audio_coverage)
+
+    cue_parser = subparsers.add_parser(
+        "assign-audio-cue",
+        help="Place an open-source SFX, ambience or stinger cue on the timeline",
+    )
+    cue_parser.add_argument("project_id")
+    cue_parser.add_argument("--file", required=True)
+    cue_parser.set_defaults(handler=cmd_assign_audio_cue)
+
+    credits_parser = subparsers.add_parser(
+        "audio-credits",
+        help="Write the attribution block for every music bed and cue",
+    )
+    credits_parser.add_argument("project_id")
+    credits_parser.set_defaults(handler=cmd_audio_credits)
 
     context_parser = subparsers.add_parser(
         "set-use-context",

@@ -278,6 +278,7 @@ def evaluate_publication(
     height_px: int | None,
     has_embedded_captions: bool,
     caption_hash: str | None,
+    audio_layers: int = 0,
     now: datetime | None = None,
 ) -> PublicationPlan:
     """Evaluate a publication plan. This function never publishes anything."""
@@ -456,6 +457,34 @@ def evaluate_publication(
             checks.append(
                 _check("P-DISCLOSURE-001", "pass", "Disclosures are recorded.")
             )
+        if audio_layers:
+            if "music_licence" in request.disclosures:
+                checks.append(
+                    _check(
+                        "P-MUSIC-001",
+                        "pass",
+                        "Music and sound licences are disclosed.",
+                        {"audio_layers": audio_layers},
+                    )
+                )
+            else:
+                checks.append(
+                    _check(
+                        "P-MUSIC-001",
+                        "fail",
+                        "The master carries music or sound layers but the "
+                        "music_licence disclosure is missing.",
+                        {"audio_layers": audio_layers},
+                    )
+                )
+        else:
+            checks.append(
+                _check(
+                    "P-MUSIC-001",
+                    "pass",
+                    "No music or sound layers are present.",
+                )
+            )
         if len(request.title) > channel.max_title_chars:
             checks.append(
                 _check(
@@ -546,6 +575,8 @@ def check_publication(
         height_px=probe["height_px"],
         has_embedded_captions=bool(probe["has_subtitles"]),
         caption_hash=caption_hash,
+        audio_layers=len(controller.repository.list_audio_beds(project_id))
+        + len(controller.repository.list_audio_cues(project_id)),
     )
 
 

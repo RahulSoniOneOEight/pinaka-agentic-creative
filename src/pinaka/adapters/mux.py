@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -32,6 +33,9 @@ class MuxAdapter(Protocol):
         video_path: Path,
         audio_path: Path,
         duration_seconds: float,
+        bed_path: Path | None = None,
+        bed_gain_db: float = -20.0,
+        cues: Sequence[Mapping[str, Any]] = (),
     ) -> MuxedVideo: ...
 
 
@@ -132,6 +136,9 @@ class FFmpegMuxAdapter:
         video_path: Path,
         audio_path: Path,
         duration_seconds: float,
+        bed_path: Path | None = None,
+        bed_gain_db: float = -20.0,
+        cues: Sequence[Mapping[str, Any]] = (),
     ) -> MuxedVideo:
         if not video_path.is_file():
             raise FileNotFoundError(f"Silent video not found: {video_path}")
@@ -139,9 +146,18 @@ class FFmpegMuxAdapter:
             raise FileNotFoundError(f"Narration audio not found: {audio_path}")
         if duration_seconds <= 0:
             raise ValueError("Duration must be positive")
+        if bed_path is not None and not Path(bed_path).is_file():
+            raise FileNotFoundError(f"Music bed not found: {bed_path}")
+        for cue in cues:
+            if not Path(cue["path"]).is_file():
+                raise FileNotFoundError(f"Audio cue not found: {cue['path']}")
         version = self.version()
         measured = self._loudness(audio_path)
-        filter_graph = (
+        cue_list = list(cues)
+
+        inputs: list[str] = [str(video_path), str(audio_path)]
+        loop_flags: list[list[str]] = [[], []]
+        voice_filter = (
             "[1:a]"
             "loudnorm=I=-16:TP=-1.5:LRA=11:"
             f"measured_I={measured['input_i']}:"
@@ -149,45 +165,87 @@ class FFmpegMuxAdapter:
             f"measured_LRA={measured['input_lra']}:"
             f"measured_thresh={measured['input_thresh']}:"
             f"offset={measured['target_offset']},"
-            "adelay=200,"
+            "adelay=200:all=1,"
             f"apad=whole_dur={duration_seconds},"
             f"atrim=0:{duration_seconds}"
-            "[a]"
+            "[voice]"
         )
+        parts: list[str] = [voice_filter]
+        mix_labels: list[str] = []
+        index = 2
+        if bed_path is not None:
+            inputs.append(str(bed_path))
+            loop_flags.append([])
+            fade_out = max(0.0, duration_seconds - 0.6)
+            parts.append(
+                f"[{index}:a]volume={bed_gain_db}dB,"
+                f"atrim=0:{duration_seconds},"
+                "afade=t=in:st=0:d=0.4,"
+                f"afade=t=out:st={fade_out}:d=0.6[bed]"
+            )
+            parts.append("[voice]asplit=2[v1][v2]")
+            parts.append(
+                "[bed][v2]sidechaincompress="
+                "threshold=0.03:ratio=8:attack=20:release=300[ducked]"
+            )
+            mix_labels.append("[v1]")
+            mix_labels.append("[ducked]")
+            index += 1
+        else:
+            parts.append("[voice]anull[v1]")
+            mix_labels.append("[v1]")
+
+        for position, cue in enumerate(cue_list):
+            inputs.append(str(cue["path"]))
+            loop_flags.append(["-stream_loop", "-1"] if cue.get("loop") else [])
+            seconds = round(int(cue["duration_ms"]) / 1000, 3)
+            gain = float(cue["gain_db"])
+            parts.append(
+                f"[{index}:a]volume={gain}dB,"
+                f"atrim=0:{seconds},"
+                f"adelay=delays={int(cue['start_ms'])}:all=1"
+                f"[cue{position}]"
+            )
+            mix_labels.append(f"[cue{position}]")
+            index += 1
+
+        parts.append(
+            "".join(mix_labels)
+            + f"amix=inputs={len(mix_labels)}:duration=first:normalize=0[a]"
+        )
+        filter_graph = ";".join(parts)
+
         with tempfile.TemporaryDirectory(prefix="pinaka-mux-") as temp:
             output = Path(temp) / "voiced-master.mp4"
-            command = [
-                self.executable,
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-i",
-                str(video_path),
-                "-i",
-                str(audio_path),
-                "-filter_complex",
-                filter_graph,
-                "-map",
-                "0:v:0",
-                "-map",
-                "[a]",
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "192k",
-                "-ar",
-                "48000",
-                "-ac",
-                "2",
-                "-t",
-                f"{duration_seconds}",
-                "-movflags",
-                "+faststart",
-                str(output),
-            ]
+            command = [self.executable, "-y", "-hide_banner", "-loglevel", "error"]
+            for position, item in enumerate(inputs):
+                command.extend(loop_flags[position])
+                command.extend(["-i", item])
+            command.extend(
+                [
+                    "-filter_complex",
+                    filter_graph,
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "[a]",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    "-t",
+                    f"{duration_seconds}",
+                    "-movflags",
+                    "+faststart",
+                    str(output),
+                ]
+            )
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -210,6 +268,22 @@ class FFmpegMuxAdapter:
                 "version": version,
                 "video_hash": sha256_bytes(video_path.read_bytes()),
                 "audio_hash": sha256_bytes(audio_path.read_bytes()),
+                "bed_hash": (
+                    sha256_bytes(Path(bed_path).read_bytes())
+                    if bed_path is not None
+                    else None
+                ),
+                "bed_gain_db": bed_gain_db if bed_path is not None else None,
+                "cues": [
+                    {
+                        "hash": sha256_bytes(Path(cue["path"]).read_bytes()),
+                        "start_ms": int(cue["start_ms"]),
+                        "duration_ms": int(cue["duration_ms"]),
+                        "gain_db": str(cue["gain_db"]),
+                        "loop": bool(cue.get("loop")),
+                    }
+                    for cue in cue_list
+                ],
                 "duration_seconds": duration_seconds,
                 "filter_graph": filter_graph,
                 "audio_codec": "aac",

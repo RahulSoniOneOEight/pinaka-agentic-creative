@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -869,6 +869,28 @@ CREATE INDEX IF NOT EXISTS idx_shot_references_project
 """
 
 
+SCHEMA_V19 = r"""
+CREATE TABLE IF NOT EXISTS audio_cues (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    cue_key TEXT NOT NULL,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+    shot_id TEXT REFERENCES shots(id) ON DELETE SET NULL,
+    role TEXT NOT NULL,
+    start_ms INTEGER NOT NULL CHECK (start_ms >= 0),
+    duration_ms INTEGER NOT NULL CHECK (duration_ms > 0 AND duration_ms <= 10000),
+    gain_db TEXT NOT NULL,
+    loop INTEGER NOT NULL DEFAULT 0 CHECK (loop IN (0, 1)),
+    verdict TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id, cue_key)
+);
+CREATE INDEX IF NOT EXISTS idx_audio_cues_project ON audio_cues(project_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -888,4 +910,5 @@ MIGRATIONS = {
     16: SCHEMA_V16,
     17: SCHEMA_V17,
     18: SCHEMA_V18,
+    19: SCHEMA_V19,
 }
