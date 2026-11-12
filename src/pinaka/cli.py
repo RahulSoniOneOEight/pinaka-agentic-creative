@@ -84,6 +84,7 @@ from .models import (
     PilotContract,
     ProjectCreate,
     ProviderModelProfileCreate,
+    PublicationAuthorizationCreate,
     SegmentCreate,
     ShotElementBindingCreate,
     StudioReadinessReport,
@@ -1337,24 +1338,39 @@ def cmd_retention_plan(args: argparse.Namespace) -> dict[str, Any]:
     return _write_json(args.output, report.model_dump(mode="json"))
 
 
+def _publication_authorization(
+    controller: Any, project_id: str, payload: dict[str, Any], channel: str
+) -> PublicationAuthorization:
+    if payload.get("authorization"):
+        return PublicationAuthorization.model_validate(payload["authorization"])
+    return controller.stored_publication_authorization(project_id, channel)
+
+
+def cmd_authorize_publication(args: argparse.Namespace) -> dict[str, Any]:
+    request = PublicationAuthorizationCreate.model_validate(_load_json(args.file))
+    return _controller(args).authorize_publication(args.project_id, request)
+
+
 def cmd_publication_check(args: argparse.Namespace) -> dict[str, Any]:
+    controller = _controller(args)
     payload = _load_json(args.file)
     request = PublicationRequest.model_validate(payload["request"])
-    authorization = PublicationAuthorization.model_validate(
-        payload.get("authorization", {})
+    authorization = _publication_authorization(
+        controller, args.project_id, payload, request.channel
     )
-    plan = check_publication(_controller(args), args.project_id, request, authorization)
+    plan = check_publication(controller, args.project_id, request, authorization)
     return _write_json(args.output, plan.model_dump(mode="json"))
 
 
 def cmd_publication_package(args: argparse.Namespace) -> dict[str, Any]:
+    controller = _controller(args)
     payload = _load_json(args.file)
     request = PublicationRequest.model_validate(payload["request"])
-    authorization = PublicationAuthorization.model_validate(
-        payload.get("authorization", {})
+    authorization = _publication_authorization(
+        controller, args.project_id, payload, request.channel
     )
     package = build_dispatch_package(
-        _controller(args),
+        controller,
         args.project_id,
         request,
         authorization,
@@ -2691,6 +2707,14 @@ def build_parser() -> argparse.ArgumentParser:
     publication_parser.add_argument("--file", required=True)
     publication_parser.add_argument("--output")
     publication_parser.set_defaults(handler=cmd_publication_check)
+
+    publication_auth_parser = subparsers.add_parser(
+        "authorize-publication",
+        help="Record a human publication authorization for the approved hash",
+    )
+    publication_auth_parser.add_argument("project_id")
+    publication_auth_parser.add_argument("--file", required=True)
+    publication_auth_parser.set_defaults(handler=cmd_authorize_publication)
 
     publication_package_parser = subparsers.add_parser(
         "publication-package",

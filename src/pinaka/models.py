@@ -559,6 +559,13 @@ class OverageReconcileCreate(StrictModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
+class PublicationAuthorizationCreate(StrictModel):
+    channels: tuple[str, ...] = Field(min_length=1)
+    authorized_by: str = Field(min_length=1, max_length=200)
+    reference: str | None = Field(default=None, max_length=500)
+    expires_at: str | None = Field(default=None, max_length=50)
+
+
 class StudioReadinessReport(StrictModel):
     """Outcome of one live Studio readiness probe, recorded by the operator."""
 

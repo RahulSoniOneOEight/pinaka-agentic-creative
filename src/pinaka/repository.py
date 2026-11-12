@@ -3694,6 +3694,108 @@ class Repository:
             ).fetchone()
             return self._studio_job_dict(updated)
 
+    @staticmethod
+    def _publication_authorization_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "artifact_id": row["artifact_id"],
+            "artifact_hash": row["artifact_hash"],
+            "channels": json.loads(row["channels_json"]),
+            "authorized_by": row["authorized_by"],
+            "reference": row["reference"],
+            "authorized_at": row["authorized_at"],
+            "expires_at": row["expires_at"],
+            "revoked_at": row["revoked_at"],
+            "created_at": row["created_at"],
+        }
+
+    def record_publication_authorization(
+        self,
+        project_id: str,
+        *,
+        artifact_id: str,
+        artifact_hash: str,
+        channels: tuple[str, ...],
+        authorized_by: str,
+        reference: str | None = None,
+        expires_at: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            artifact = connection.execute(
+                """
+                SELECT id, content_hash FROM artifacts
+                WHERE id = ? AND project_id = ?
+                """,
+                (artifact_id, project_id),
+            ).fetchone()
+            if not artifact or artifact["content_hash"] != artifact_hash:
+                raise IntegrityError("Publication artifact/hash mismatch")
+            connection.execute(
+                """
+                UPDATE publication_authorizations
+                SET revoked_at = ?
+                WHERE project_id = ? AND revoked_at IS NULL
+                """,
+                (now, project_id),
+            )
+            authorization_id = new_id("pubauth")
+            connection.execute(
+                """
+                INSERT INTO publication_authorizations(
+                    id, project_id, artifact_id, artifact_hash, channels_json,
+                    authorized_by, reference, authorized_at, expires_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    authorization_id,
+                    project_id,
+                    artifact_id,
+                    artifact_hash,
+                    canonical_json(channels),
+                    authorized_by,
+                    reference,
+                    now,
+                    expires_at,
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="publication_authorization",
+                entity_id=authorization_id,
+                event_type="publication.authorized",
+                payload={
+                    "artifact_id": artifact_id,
+                    "artifact_hash": artifact_hash,
+                    "channels": channels,
+                    "authorized_by": authorized_by,
+                },
+            )
+            row = connection.execute(
+                "SELECT * FROM publication_authorizations WHERE id = ?",
+                (authorization_id,),
+            ).fetchone()
+            return self._publication_authorization_dict(row)
+
+    def current_publication_authorization(
+        self, project_id: str
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                """
+                SELECT * FROM publication_authorizations
+                WHERE project_id = ? AND revoked_at IS NULL
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+            return self._publication_authorization_dict(row) if row else None
+
     def studio_jobs(self, production_id: str) -> list[dict[str, Any]]:
         with self.database.read() as connection:
             rows = connection.execute(

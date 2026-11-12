@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -832,6 +832,25 @@ CREATE INDEX IF NOT EXISTS idx_budget_variance_pending
 """
 
 
+SCHEMA_V17 = r"""
+CREATE TABLE IF NOT EXISTS publication_authorizations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    artifact_hash TEXT NOT NULL,
+    channels_json TEXT NOT NULL,
+    authorized_by TEXT NOT NULL,
+    reference TEXT,
+    authorized_at TEXT NOT NULL,
+    expires_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_publication_auth_project
+    ON publication_authorizations(project_id, revoked_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -849,4 +868,5 @@ MIGRATIONS = {
     14: SCHEMA_V14,
     15: SCHEMA_V15,
     16: SCHEMA_V16,
+    17: SCHEMA_V17,
 }

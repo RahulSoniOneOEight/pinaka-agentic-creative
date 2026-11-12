@@ -99,6 +99,7 @@ from .models import (
     ProjectCreate,
     ProjectRecord,
     ProviderModelProfileCreate,
+    PublicationAuthorizationCreate,
     SegmentCreate,
     ShotCreate,
     ShotElementBindingCreate,
@@ -123,6 +124,7 @@ from .planning import (
     propose_shots,
     scene_plan_markdown,
 )
+from .publication import PublicationAuthorization
 from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
 from .repository import Repository
 from .review_policy import CampaignRisk, ReviewPolicy, decide_review
@@ -3442,6 +3444,80 @@ class CreativeController:
             ].startswith("scenes/composition-"):
                 return artifact
         return None
+
+    def authorize_publication(
+        self, project_id: str, request: PublicationAuthorizationCreate
+    ) -> dict[str, Any]:
+        """Record a human publication authorization for the approved final hash."""
+
+        project = self.repository.get_project(project_id)
+        if project.status not in {
+            ProjectStatus.FINAL_APPROVED,
+            ProjectStatus.ARCHIVED,
+        }:
+            raise ConflictError(
+                "Publication authorization requires a final-approved or archived project"
+            )
+        final = self.repository.active_approval(project_id, ApprovalStage.FINAL.value)
+        if not final or not final.get("output_hash"):
+            raise ApprovalRequiredError(
+                "An active final approval with an exact output hash is required"
+            )
+        artifact = self.repository.artifact_by_content_hash(
+            project_id, final["output_hash"]
+        )
+        if not artifact:
+            raise NotFoundError(
+                "The approved final artifact is no longer current; re-approve it first"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "publication_authorization"
+        )
+        return self.repository.record_publication_authorization(
+            project_id,
+            artifact_id=artifact["id"],
+            artifact_hash=artifact["content_hash"],
+            channels=request.channels,
+            authorized_by=request.authorized_by,
+            reference=request.reference,
+            expires_at=request.expires_at,
+        )
+
+    def publication_authorization(self, project_id: str) -> dict[str, Any] | None:
+        return self.repository.current_publication_authorization(project_id)
+
+    def stored_publication_authorization(
+        self, project_id: str, channel: str
+    ) -> PublicationAuthorization:
+        """Build the publication authorization for one channel from the record."""
+
+        record = self.repository.current_publication_authorization(project_id)
+        if not record or channel not in record["channels"]:
+            return PublicationAuthorization(authorized=False)
+        if record["expires_at"]:
+            try:
+                expires = datetime.fromisoformat(
+                    record["expires_at"].replace("Z", "+00:00")
+                )
+            except ValueError:
+                return PublicationAuthorization(authorized=False)
+            if expires <= datetime.now(timezone.utc):
+                return PublicationAuthorization(authorized=False)
+        return PublicationAuthorization(
+            authorized=True,
+            authorized_by=record["authorized_by"],
+            authorized_at=datetime.fromisoformat(
+                record["authorized_at"].replace("Z", "+00:00")
+            ),
+            artifact_hash=record["artifact_hash"],
+            channels=tuple(record["channels"]),
+            reference=record["reference"],
+            expires_at=(
+                datetime.fromisoformat(record["expires_at"].replace("Z", "+00:00"))
+                if record["expires_at"]
+                else None
+            ),
+        )
 
     def qa_render(
         self,
