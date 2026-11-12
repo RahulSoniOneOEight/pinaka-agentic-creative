@@ -87,6 +87,7 @@ from .models import (
     PublicationAuthorizationCreate,
     SegmentCreate,
     ShotElementBindingCreate,
+    ShotMotionRequest,
     ShotReferenceCreate,
     StudioReadinessReport,
     StudioResultPacketImport,
@@ -1021,6 +1022,27 @@ def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
         height=args.height,
         title=args.title,
         embed_layers=getattr(args, "embed_layers", True),
+    )
+
+
+def cmd_plan_shot_motion(args: argparse.Namespace) -> dict[str, Any]:
+    request = ShotMotionRequest.model_validate(_load_json(args.file))
+    return _controller(args).plan_shot_motion(args.project_id, request)
+
+
+def cmd_prepare_shot_motion(args: argparse.Namespace) -> dict[str, Any]:
+    request = ShotMotionRequest.model_validate(_load_json(args.file))
+    return _controller(args).prepare_shot_motion(args.project_id, request)
+
+
+def cmd_import_shot_motion(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).import_shot_motion(
+        args.project_id,
+        job_id=payload["job_id"],
+        source_path=payload["source_path"],
+        content_hash=payload["content_hash"],
+        actual_cost_minor=payload.get("actual_cost_minor"),
     )
 
 
@@ -2459,6 +2481,30 @@ def build_parser() -> argparse.ArgumentParser:
     vertex_check_parser.add_argument("--project")
     vertex_check_parser.add_argument("--location")
     vertex_check_parser.set_defaults(handler=cmd_vertex_check)
+
+    motion_plan_parser = subparsers.add_parser(
+        "plan-motion",
+        help="Estimate one per-shot Studio video generation without spending",
+    )
+    motion_plan_parser.add_argument("project_id")
+    motion_plan_parser.add_argument("--file", required=True)
+    motion_plan_parser.set_defaults(handler=cmd_plan_shot_motion)
+
+    motion_prepare_parser = subparsers.add_parser(
+        "prepare-motion",
+        help="Reserve budget and write a per-shot motion packet",
+    )
+    motion_prepare_parser.add_argument("project_id")
+    motion_prepare_parser.add_argument("--file", required=True)
+    motion_prepare_parser.set_defaults(handler=cmd_prepare_shot_motion)
+
+    motion_import_parser = subparsers.add_parser(
+        "import-motion",
+        help="Register a generated shot clip and settle its reservation",
+    )
+    motion_import_parser.add_argument("project_id")
+    motion_import_parser.add_argument("--file", required=True)
+    motion_import_parser.set_defaults(handler=cmd_import_shot_motion)
 
     composition_parser = subparsers.add_parser(
         "author-composition",

@@ -106,6 +106,7 @@ from .models import (
     SegmentCreate,
     ShotCreate,
     ShotElementBindingCreate,
+    ShotMotionRequest,
     ShotReferenceCreate,
     SlotCreate,
     StudioReadinessReport,
@@ -120,6 +121,8 @@ from .models import (
     VarianceDecisionCreate,
     WorkableBriefCreate,
 )
+from .motion import estimate_minor as estimate_motion_minor
+from .motion import supports as motion_supports
 from .planning import (
     DEFAULT_DURATION_SECONDS,
     analyze_text,
@@ -3636,6 +3639,231 @@ class CreativeController:
                 else None
             ),
         )
+
+    def plan_shot_motion(
+        self, project_id: str, request: ShotMotionRequest
+    ) -> dict[str, Any]:
+        """Estimate one per-shot Studio video generation without spending."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot plan motion for a {project.status.value} project"
+            )
+        shot = self._motion_shot(project_id, request)
+        if not motion_supports(request.model, request.mode):
+            raise IntegrityError(
+                f"{request.model} does not support mode {request.mode!r}"
+            )
+        estimate = estimate_motion_minor(
+            request.model,
+            seconds=float(request.duration_seconds),
+            resolution=request.resolution,
+        )
+        auto_cap = DEFAULT_RUN_CAP_MINOR.get(project.max_budget.currency, 0)
+        available = (
+            project.max_budget.minor - project.spent.minor - project.reserved.minor
+        )
+        return {
+            "shot": shot["stable_key"],
+            "model": request.model,
+            "mode": request.mode,
+            "resolution": request.resolution,
+            "duration_seconds": str(request.duration_seconds),
+            "estimate_minor": estimate,
+            "estimate": Money.from_minor(
+                estimate, project.max_budget.currency
+            ).model_dump(mode="json"),
+            "auto_cap_minor": auto_cap,
+            "requires_approval": estimate > auto_cap,
+            "available_minor": available,
+            "affordable": estimate <= available,
+        }
+
+    def prepare_shot_motion(
+        self, project_id: str, request: ShotMotionRequest
+    ) -> dict[str, Any]:
+        """Reserve budget and write a per-shot motion packet for the host."""
+
+        plan_id = request.plan_id
+        item_key = request.item_key
+        if not plan_id or not item_key:
+            raise IntegrityError(
+                "Paid shot motion needs a funded plan item (plan_id and item_key)"
+            )
+        planned = self.plan_shot_motion(project_id, request)
+        estimate = int(planned["estimate_minor"])
+        plan = self.repository.get_budget_plan(plan_id)
+        if plan["project_id"] != project_id:
+            raise ConflictError("Budget plan belongs to a different project")
+        item = next(
+            (entry for entry in plan["items"] if entry["stable_key"] == item_key),
+            None,
+        )
+        if not item:
+            raise NotFoundError(f"Budget item not found in plan: {item_key}")
+        if item["provider"] != "studio-video" or item["operation"] != "video.generate":
+            raise IntegrityError(
+                "Motion plan items must use provider 'studio-video' and "
+                "operation 'video.generate'"
+            )
+        if item["estimated_minor"] != estimate:
+            raise IntegrityError(
+                f"Plan item estimate {item['estimated_minor']} does not match the "
+                f"model estimate {estimate}"
+            )
+        first_frame = None
+        if request.first_frame_artifact_id:
+            first_frame = self._motion_frame(
+                project_id, request.first_frame_artifact_id, "first frame"
+            )
+        last_frame = None
+        if request.last_frame_artifact_id:
+            last_frame = self._motion_frame(
+                project_id, request.last_frame_artifact_id, "last frame"
+            )
+        shot = self._motion_shot(project_id, request)
+        output_path = f"artifacts/motion/{shot['stable_key']}-{estimate}.mp4"
+        job_request = JobRequest(
+            provider="studio-video",
+            endpoint="studio:fal.video",
+            operation="video.generate",
+            idempotency_key=(
+                f"motion-{shot['stable_key']}-{sha256_json(request.model_dump(mode='json'))[:16]}"
+            ),
+            estimated_cost=Money.from_minor(estimate, plan["currency"]),
+            parameters={
+                "model": request.model,
+                "mode": request.mode,
+                "resolution": request.resolution,
+                "duration_seconds": str(request.duration_seconds),
+                "output_relative_path": output_path,
+            },
+        )
+        reserved = self.reserve_budget_item(project_id, plan_id, item_key, job_request)
+        packet = {
+            "schema": "pinaka.studio.motion-packet/v1",
+            "project_id": project_id,
+            "shot": shot,
+            "model": request.model,
+            "mode": request.mode,
+            "resolution": request.resolution,
+            "duration_seconds": str(request.duration_seconds),
+            "prompt": request.prompt,
+            "first_frame": first_frame,
+            "last_frame": last_frame,
+            "max_cost_minor": estimate,
+            "currency": plan["currency"],
+            "output_relative_path": output_path,
+            "controller_authority": {
+                "system_of_record": "pinaka.CreativeController",
+                "generated_motion": True,
+                "one_take_per_request": True,
+                "auto_retry": False,
+            },
+        }
+        content = canonical_json(packet).encode("utf-8")
+        digest = sha256_bytes(content)
+        dependencies = [DependencyRef(entity_type="shot", entity_id=shot["id"])]
+        for frame in (first_frame, last_frame):
+            if frame:
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=frame["id"],
+                        entity_hash=frame["content_hash"],
+                    )
+                )
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.CONTRACT,
+            relative_path=f"artifacts/motion/packets/{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "shot_motion_packet",
+                "shot_id": shot["id"],
+                "model": request.model,
+            },
+            dependencies=tuple(dependencies),
+        )
+        return {
+            "packet_artifact": artifact,
+            "packet": packet,
+            "job": reserved["job"],
+            "estimate_minor": estimate,
+        }
+
+    def import_shot_motion(
+        self,
+        project_id: str,
+        *,
+        job_id: str,
+        source_path: str,
+        content_hash: str,
+        actual_cost_minor: int | None = None,
+        output_relative_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Register a generated shot clip and settle its reservation."""
+
+        job = self.repository.get_job(job_id)
+        if job.project_id != project_id:
+            raise ConflictError("Job belongs to a different project")
+        if job.status != JobStatus.BUDGET_RESERVED:
+            raise ConflictError(
+                f"Job is {job.status.value}; a new clip needs a reserved job"
+            )
+        source = Path(source_path).expanduser().resolve()
+        if not source.is_file():
+            raise NotFoundError(f"Generated clip not found: {source}")
+        content = source.read_bytes()
+        if sha256_bytes(content) != content_hash:
+            raise IntegrityError("Generated clip hash does not match")
+        output_path = output_relative_path or f"artifacts/motion/{job.id}.mp4"
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.GENERATED,
+            relative_path=output_path,
+            content=content,
+            operation={
+                "type": "studio_motion",
+                "job_id": job.id,
+            },
+            dependencies=(DependencyRef(entity_type="job", entity_id=job.id),),
+        )
+        cost = (
+            actual_cost_minor
+            if actual_cost_minor is not None
+            else job.estimated_cost.minor
+        )
+        settlement = self.settle_budget_item(
+            project_id,
+            job.id,
+            actual_cost=Money.from_minor(cost, job.estimated_cost.currency),
+            requested_by="host:studio-video",
+            reason="Studio shot motion settled after generation",
+            asset_artifact_id=artifact["id"],
+        )
+        return {"artifact": artifact, "settlement": settlement, "job_id": job.id}
+
+    def _motion_shot(
+        self, project_id: str, request: ShotMotionRequest
+    ) -> dict[str, Any]:
+        shot = self.repository.get_shot(request.shot_id)
+        if shot["project_id"] != project_id:
+            raise ConflictError("Shot belongs to a different project")
+        return shot
+
+    def _motion_frame(
+        self, project_id: str, artifact_id: str, label: str
+    ) -> dict[str, Any]:
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError(f"{label} belongs to a different project")
+        if not self.verify_artifact(artifact_id):
+            raise IntegrityError(f"{label} does not match its registered hash")
+        if not _image_mime(Path(artifact["relative_path"])):
+            raise IntegrityError(f"{label} is not an image artifact")
+        return artifact
 
     def qa_render(
         self,

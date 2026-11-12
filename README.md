@@ -163,10 +163,11 @@ residual risks. See `docs/openmontage-controller-integration.md` for the Studio 
 `docs/studio-gateway.md` for the live production gateway, `docs/creative-budget-planning.md` for
 budget plans and variance approval, `docs/raw-text-planner.md` for text intake,
 `docs/studio-session-readiness.md` for the per-session Studio check, and `docs/vertex-adc.md` for
-Gemini on Vertex with ADC and the fal cost model. See `docs/hyperframes-composition.md` for the
-editable composition format and its Chromium + FFmpeg render. See `docs/reference-roles.md` for
-governed shot references, and `docs/publication-handoff.md` for recording publication authority and
-building a manual-upload package. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
+Gemini on Vertex with ADC and the fal cost model. See `docs/shot-motion.md` for budgeted per-shot
+Studio video, `docs/hyperframes-composition.md` for the editable composition format, and
+`docs/reference-roles.md` for governed shot references, and
+`docs/publication-handoff.md` for recording publication authority and building a manual-upload
+package. See `docs/open-source-production-toolchain.md` for the open-source-first hybrid
 production tools and managed services, their roles, licensing boundaries, and current integration
 status. See `docs/two-phase-production-implementation-plan.md` for the two-phase delivery roadmap.
 See `docs/nano-banana.md` for the exact ADC/API-key image routes, models, pricing, commands and

@@ -16,17 +16,13 @@ an exact hash, and reused as composition layers.
 
 ## Generated motion is an exception
 
-Veo and Runway are **not** in this flow. They are only used when a person explicitly asks for
-generated motion, and the request must say why:
+Generated **video** comes from Studio's `fal.video` route, one shot at a time, seeded by the shot's
+approved still. It needs a funded plan item and a stated intent, and it produces exactly one take per
+request. See [`shot-motion.md`](shot-motion.md).
 
-```json
-{
-  "request_generated_motion": true,
-  "generated_motion_reason": "Client asked for live-action water motion in shot 1"
-}
-```
+Veo and Runway are **not** part of this flow at all — they are only considered if a person names them.
 
-Until that flag is set:
+Until generated motion is requested:
 
 - `provider_reference_hints` is empty;
 - `generated_motion.requested` is `false`;

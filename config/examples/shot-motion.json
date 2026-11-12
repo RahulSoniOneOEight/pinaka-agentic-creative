@@ -1,0 +1,11 @@
+{
+  "shot_id": "shot_REPLACE_WITH_ID",
+  "model": "minimax/h3",
+  "mode": "first-frame",
+  "resolution": "768p",
+  "duration_seconds": 5,
+  "prompt": "Slow 2s push-in as the three ducklings glide across the pond, paper-cut style preserved.",
+  "first_frame_artifact_id": "art_REPLACE_WITH_STILL_ID",
+  "plan_id": "budgetplan_REPLACE_WITH_ID",
+  "item_key": "shot-01-motion"
+}

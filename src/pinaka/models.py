@@ -600,6 +600,37 @@ class PublicationAuthorizationCreate(StrictModel):
     expires_at: str | None = Field(default=None, max_length=50)
 
 
+class ShotMotionRequest(StrictModel):
+    shot_id: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=120)
+    mode: Literal[
+        "text-to-video",
+        "first-frame",
+        "first-and-last-frame",
+        "reference-media",
+        "video-to-video",
+        "audio-to-video",
+    ]
+    resolution: str = Field(min_length=1, max_length=20)
+    duration_seconds: Decimal = Field(gt=0, le=60)
+    prompt: str = Field(min_length=1, max_length=4000)
+    first_frame_artifact_id: str | None = Field(default=None, max_length=120)
+    last_frame_artifact_id: str | None = Field(default=None, max_length=120)
+    plan_id: str | None = Field(default=None, max_length=120)
+    item_key: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def frames_match_the_mode(self) -> ShotMotionRequest:
+        if (
+            self.mode in {"first-frame", "first-and-last-frame"}
+            and not self.first_frame_artifact_id
+        ):
+            raise ValueError(f"{self.mode} requires first_frame_artifact_id")
+        if self.mode == "first-and-last-frame" and not self.last_frame_artifact_id:
+            raise ValueError("first-and-last-frame requires last_frame_artifact_id")
+        return self
+
+
 class StudioReadinessReport(StrictModel):
     """Outcome of one live Studio readiness probe, recorded by the operator."""
 
