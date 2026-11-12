@@ -27,6 +27,21 @@ def test_key_is_required(monkeypatch, tmp_path):
         FalClient(api_key="").run("fal-ai/test", {})
 
 
+def test_multiline_key_file_is_rejected_without_echoing_it(tmp_path):
+    import os
+
+    key_file = tmp_path / "key"
+    key_file.write_text("Key ID\nfal_secret_value\n", encoding="utf-8")
+    client = FalClient(api_key="", transport=lambda *args: b"")
+    os.environ["FAL_KEY_FILE"] = str(key_file)
+    try:
+        with pytest.raises(ConfigurationError, match="one line") as error:
+            client.run("fal-ai/test", {})
+    finally:
+        os.environ.pop("FAL_KEY_FILE", None)
+    assert "fal_secret_value" not in str(error.value)
+
+
 def test_key_format_is_checked(tmp_path):
     key_file = tmp_path / "key"
     key_file.write_text("shortkeywithnocolon", encoding="utf-8")

@@ -58,6 +58,13 @@ class FalClient:
             raise ConfigurationError(
                 f"fal requires an API key in {API_KEY_ENV} or a key file; none is configured"
             )
+        # A pasted notes block leaves interior newlines/spaces. Reject it here so the
+        # credential never reaches urllib, which puts the header value in its exception.
+        if any(character.isspace() for character in key):
+            raise ConfigurationError(
+                "The stored fal key must be one line with no spaces; "
+                "save the bare key, not a notes block"
+            )
         if ":" not in key and not key.startswith("fal_"):
             raise ConfigurationError(
                 "The stored fal key is neither an 'id:secret' key nor a 'fal_...' key"
