@@ -382,6 +382,30 @@ class ShotElementBindingCreate(StrictModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class ShotReferenceCreate(StrictModel):
+    shot_id: str = Field(min_length=1, max_length=120)
+    role: Literal[
+        "character",
+        "location",
+        "style",
+        "product",
+        "first_frame",
+        "last_frame",
+        "voice",
+    ]
+    artifact_id: str | None = Field(default=None, max_length=120)
+    element_id: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> ShotReferenceCreate:
+        if bool(self.artifact_id) == bool(self.element_id):
+            raise ValueError(
+                "A shot reference needs exactly one of artifact_id or element_id"
+            )
+        return self
+
+
 class StudioScope(StrictModel):
     autonomy: StudioAutonomy = StudioAutonomy.AUTOPILOT
     phases: tuple[StudioWorkPhase, ...] = Field(min_length=1)

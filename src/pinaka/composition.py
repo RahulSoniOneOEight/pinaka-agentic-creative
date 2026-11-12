@@ -60,7 +60,21 @@ def _subject_plan(shot: dict[str, Any]) -> dict[str, Any]:
         count = 1
     scale = float(configured.get("scale", 0.62))
     scale = min(0.95, max(0.2, scale))
-    return {"action": action, "count": count, "scale": scale}
+    path = configured.get("path")
+    points: list[dict[str, float]] = []
+    if isinstance(path, list):
+        for point in path:
+            try:
+                points.append(
+                    {
+                        "t": min(1.0, max(0.0, float(point["t"]))),
+                        "x": float(point["x"]),
+                        "y": float(point["y"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    return {"action": action, "count": count, "scale": scale, "path": points}
 
 
 def _infer_action(text: str) -> str:
@@ -92,6 +106,10 @@ def _infer_count(text: str) -> int:
     return 1
 
 
+def _num(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
 def _subject_keyframes(
     *,
     name: str,
@@ -101,12 +119,25 @@ def _subject_keyframes(
     total: Decimal,
     copy_index: int,
     count: int,
+    path: list[dict[str, float]] | None = None,
 ) -> tuple[str, str]:
     """Return (keyframes, animation shorthand) for one subject copy."""
 
     s = _pct(start, total)
     e = _pct(start + duration, total)
     mid = _pct(start + duration / 2, total)
+    if path:
+        steps = ["  0%, " + s + "% { transform: translate(0%, 0%); }"]
+        for point in path:
+            offset = duration * Decimal(str(point["t"]))
+            steps.append(
+                f"  {_pct(start + offset, total)}% "
+                f"{{ transform: translate({_num(point['x'])}%, "
+                f"{_num(point['y'])}%); }}"
+            )
+        steps.append(f"  {e}%, 100% {{ transform: translate(0%, 0%); }}")
+        frames = "@keyframes " + name + " {\n" + "\n".join(steps) + "\n}"
+        return frames, f"animation: {name} {total}s linear infinite"
     if action == "swim":
         frames = (
             f"@keyframes {name} {{\n"
@@ -229,15 +260,19 @@ def build_composition(
                     total=total,
                     copy_index=copy_index,
                     count=plan["count"],
+                    path=plan["path"],
                 )
                 if frames:
                     keyframes.append(frames)
                 per_scale = plan["scale"] / (1 + 0.6 * (plan["count"] - 1))
                 spread = (copy_index - (plan["count"] - 1) / 2) * (per_scale * 90.0)
+                path_attr = (
+                    f"data-path='{json.dumps(plan['path'])}' " if plan["path"] else ""
+                )
                 image_layers.append(
                     f'<img class="layer subject" data-role="{_escape(role)}" '
                     f'data-action="{plan["action"]}" data-copy="{copy_index}" '
-                    f'data-count="{plan["count"]}" '
+                    f'data-count="{plan["count"]}" {path_attr}'
                     f'style="max-width:{per_scale * 100:.0f}%;'
                     f"max-height:{per_scale * 100:.0f}%;"
                     f'left:{spread:.1f}%;{animation}" '
@@ -364,7 +399,29 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
         var n = parseInt(img.dataset.count || "1", 10) || 1;
         var transform = "none";
         var opacity = 1;
-        if (action === "swim") {{
+        if (img.dataset.path) {{
+          var pts = JSON.parse(img.dataset.path);
+          pts.sort(function (a, b) {{ return a.t - b.t; }});
+          var track = [{{ t: 0, x: 0, y: 0 }}].concat(pts).concat([
+            {{ t: 1, x: 0, y: 0 }}
+          ]);
+          var x = 0;
+          var y = 0;
+          for (var i = 1; i < track.length; i++) {{
+            if (p <= track[i].t) {{
+              var a = track[i - 1];
+              var b = track[i];
+              var span = Math.max(b.t - a.t, 0.0001);
+              var k = (p - a.t) / span;
+              x = a.x + (b.x - a.x) * k;
+              y = a.y + (b.y - a.y) * k;
+              break;
+            }}
+            x = track[i].x;
+            y = track[i].y;
+          }}
+          transform = "translate(" + x + "%, " + y + "%)";
+        }} else if (action === "swim") {{
           transform = "translateX(" + (-18 + 36 * p) + "%) translateY(" +
             (-3 * Math.sin(Math.PI * p)) + "%)";
         }} else if (action === "bob") {{

@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -851,6 +851,24 @@ CREATE INDEX IF NOT EXISTS idx_publication_auth_project
 """
 
 
+SCHEMA_V18 = r"""
+CREATE TABLE IF NOT EXISTS shot_references (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    artifact_id TEXT REFERENCES artifacts(id) ON DELETE CASCADE,
+    element_id TEXT REFERENCES creative_elements(id) ON DELETE CASCADE,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(shot_id, role)
+);
+CREATE INDEX IF NOT EXISTS idx_shot_references_project
+    ON shot_references(project_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -869,4 +887,5 @@ MIGRATIONS = {
     15: SCHEMA_V15,
     16: SCHEMA_V16,
     17: SCHEMA_V17,
+    18: SCHEMA_V18,
 }

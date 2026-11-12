@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from pinaka.adapters.burned_captions import BurnedVideo
 from pinaka.adapters.captions import CaptionedVideo
 from pinaka.captions import build_srt
 from pinaka.composition import build_composition
@@ -184,6 +185,118 @@ def test_burn_captions_rejects_a_non_srt(controller):
             captions_artifact_id=video["id"],
             adapter=FakeCaptionMux(),
         )
+
+
+class FakeHardBurn:
+    def burn(self, *, video_path, srt_path, output_path):
+        content = b"HARD-BURNED"
+        return BurnedVideo(
+            content=content,
+            content_hash=sha256_bytes(content),
+            metadata={"burned_captions": True},
+            command_hash="b" * 64,
+            encoder_version="fake/1",
+            subtitle_hash="c" * 64,
+        )
+
+
+def test_hard_burn_records_the_mode(controller):
+    project = create_project(controller, budget="10.00")
+    controller.plan_from_text(
+        project.id, TextBriefRequest(text="Make a 10 second rhyme for kids")
+    )
+    srt = controller.export_captions(project.id)["artifact"]
+    video = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/silent.mp4",
+        content=b"SILENT",
+        operation={"type": "composition_render", "duration_seconds": "10"},
+    )
+    result = controller.burn_captions(
+        project.id,
+        video_artifact_id=video["id"],
+        captions_artifact_id=srt["id"],
+        adapter=FakeHardBurn(),
+        mode="hard",
+    )
+    assert result["video"]["operation"]["mode"] == "hard"
+    assert result["metadata"]["burned_captions"] is True
+
+
+def test_unknown_caption_mode_is_refused(controller):
+    project = create_project(controller, budget="10.00")
+    video = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/silent.mp4",
+        content=b"SILENT",
+        operation={"type": "composition_render"},
+    )
+    srt = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.DERIVATIVE,
+        relative_path="captions/x.srt",
+        content=b"1\n00:00:00,000 --> 00:00:01,000\nhi\n",
+        operation={"type": "captions"},
+    )
+    with pytest.raises(IntegrityError, match="soft.*hard"):
+        controller.burn_captions(
+            project.id,
+            video_artifact_id=video["id"],
+            captions_artifact_id=srt["id"],
+            adapter=FakeHardBurn(),
+            mode="both",
+        )
+
+
+def test_subject_path_overrides_the_action_curve():
+    shots = [
+        {
+            "stable_key": "shot-01",
+            "duration_seconds": "5",
+            "beat": "establish",
+            "narrative": "Duck crosses the pond",
+            "requirements": {
+                "subject": {
+                    "action": "swim",
+                    "count": 1,
+                    "path": [
+                        {"t": 0.0, "x": 0, "y": 0},
+                        {"t": 0.5, "x": -20, "y": -8},
+                        {"t": 1.0, "x": 25, "y": 0},
+                    ],
+                }
+            },
+        }
+    ]
+    layers = {"shot-01": [_layer()]}
+    html = build_composition(
+        title="x", width=540, height=960, shots=shots, layers=layers
+    )
+    assert "data-path='" in html
+    assert '"x": -20' in html or '"x":-20' in html
+    assert "translate(-20%, -8%)" in html
+    assert "var track = [{" in html
+
+
+def test_subject_path_ignores_malformed_points():
+    shots = [
+        {
+            "stable_key": "shot-01",
+            "duration_seconds": "5",
+            "beat": "establish",
+            "narrative": "x",
+            "requirements": {
+                "subject": {"action": "bob", "path": [{"t": 0.5}, "nonsense"]}
+            },
+        }
+    ]
+    html = build_composition(
+        title="x", width=540, height=960, shots=shots, layers={"shot-01": [_layer()]}
+    )
+    assert "data-path=" not in html
+    assert 'data-action="bob"' in html
 
 
 def test_scene_durations_still_sum_to_the_deliverable():

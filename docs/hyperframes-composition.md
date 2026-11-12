@@ -133,6 +133,23 @@ Each shot declares a subject behaviour, so scenes differ instead of repeating on
 | `enter` | slides in from the left |
 | `still` | no motion |
 
+A shot may also supply an explicit `path` of waypoints, which overrides the built-in curve:
+
+```json
+"subject": {
+  "action": "swim",
+  "count": 1,
+  "path": [
+    { "t": 0.0, "x": 0, "y": 0 },
+    { "t": 0.5, "x": -20, "y": -8 },
+    { "t": 1.0, "x": 25, "y": 0 }
+  ]
+}
+```
+
+`t` is progress through the shot; `x` and `y` are percentages of the stage. Malformed points are
+ignored rather than failing the render.
+
 The planner assigns one action per shot (`swim`, `bob`, `count`, …) and derives `count` from the
 spoken copy (“three little ducks” → 3). Multiple copies are scaled down and spaced so they read as
 separate characters rather than a single blob.
@@ -145,12 +162,13 @@ the same frame.
 
 ```powershell
 pinaka export-captions <project-id>
-pinaka burn-captions <project-id> --video <mp4-artifact> --captions <srt-artifact>
+pinaka burn-captions <project-id> --video <mp4-artifact> --captions <srt-artifact> [--hard]
 ```
 
 - The SRT is derived deterministically from shot durations and narratives — no ASR needed for
   supplied copy.
-- Burning attaches a soft `mov_text` track; it never re-encodes the video.
+- Burning attaches a soft `mov_text` track by default; `--hard` burns the text into the picture with
+  a re-encode (H.264 + AAC, outlined white text, bottom margin).
 - Both artifacts are hash-verified and linked as dependencies.
 
 ## Narration budget

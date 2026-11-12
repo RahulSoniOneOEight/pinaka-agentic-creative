@@ -87,6 +87,7 @@ from .models import (
     PublicationAuthorizationCreate,
     SegmentCreate,
     ShotElementBindingCreate,
+    ShotReferenceCreate,
     StudioReadinessReport,
     StudioResultPacketImport,
     StudioSpendApprovalCreate,
@@ -850,6 +851,19 @@ def cmd_bind_elements(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).bind_elements_to_slots(args.project_id)
 
 
+def cmd_bind_reference(args: argparse.Namespace) -> dict[str, Any]:
+    request = ShotReferenceCreate.model_validate(_load_json(args.file))
+    return _controller(args).bind_shot_reference(args.project_id, request)
+
+
+def cmd_list_references(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "references": _controller(args).shot_references(
+            args.project_id, shot_id=args.shot_id
+        )
+    }
+
+
 def cmd_prepare_studio_work_packet(args: argparse.Namespace) -> dict[str, Any]:
     request = StudioWorkPacketRequest.model_validate(_load_json(args.file))
     if args.spend_approval:
@@ -986,6 +1000,7 @@ def cmd_burn_captions(args: argparse.Namespace) -> dict[str, Any]:
         args.project_id,
         video_artifact_id=args.video,
         captions_artifact_id=args.captions,
+        mode="hard" if args.hard else "soft",
     )
 
 
@@ -2263,6 +2278,21 @@ def build_parser() -> argparse.ArgumentParser:
     element_apply_parser.add_argument("project_id")
     element_apply_parser.set_defaults(handler=cmd_bind_elements)
 
+    reference_bind_parser = subparsers.add_parser(
+        "bind-reference",
+        help="Attach a governed reference image to a shot role",
+    )
+    reference_bind_parser.add_argument("project_id")
+    reference_bind_parser.add_argument("--file", required=True)
+    reference_bind_parser.set_defaults(handler=cmd_bind_reference)
+
+    reference_list_parser = subparsers.add_parser(
+        "list-references", help="List shot references"
+    )
+    reference_list_parser.add_argument("project_id")
+    reference_list_parser.add_argument("--shot-id")
+    reference_list_parser.set_defaults(handler=cmd_list_references)
+
     studio_prepare_parser = subparsers.add_parser(
         "prepare-studio-work-packet",
         help="Authorize a governed OpenMontage work packet",
@@ -2472,6 +2502,9 @@ def build_parser() -> argparse.ArgumentParser:
     captions_burn_parser.add_argument("project_id")
     captions_burn_parser.add_argument("--video", required=True)
     captions_burn_parser.add_argument("--captions", required=True)
+    captions_burn_parser.add_argument(
+        "--hard", action="store_true", help="Burn captions into the picture"
+    )
     captions_burn_parser.set_defaults(handler=cmd_burn_captions)
 
     qa_render_parser = subparsers.add_parser(

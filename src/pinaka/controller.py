@@ -10,6 +10,7 @@ from typing import Any
 
 from .adapters.animatic import DeterministicAnimaticAdapter
 from .adapters.base import GenerationAdapter
+from .adapters.burned_captions import BurnedCaptionAdapter
 from .adapters.captions import CaptionMuxAdapter
 from .adapters.encode import FFmpegEncodeAdapter, VideoEncodeAdapter
 from .adapters.frames import ChromeFrameCapture, FrameCaptureAdapter
@@ -103,6 +104,7 @@ from .models import (
     SegmentCreate,
     ShotCreate,
     ShotElementBindingCreate,
+    ShotReferenceCreate,
     SlotCreate,
     StudioReadinessReport,
     StudioResultOutputImport,
@@ -126,6 +128,11 @@ from .planning import (
 )
 from .publication import PublicationAuthorization
 from .qa import build_report, run_animatic_qa, run_voiced_animatic_qa
+from .references import (
+    SUPPORTED_PROVIDERS,
+    provider_reference_payload,
+    reference_summary,
+)
 from .repository import Repository
 from .review_policy import CampaignRisk, ReviewPolicy, decide_review
 from .sourcing import clear_resolved_uncertainty, evaluate_asset_candidate
@@ -491,6 +498,26 @@ class CreativeController:
                 f"Cannot bind creative elements for a {project.status.value} project"
             )
         return self.repository.bind_element_to_shot(project_id, request)
+
+    def bind_shot_reference(
+        self, project_id: str, request: ShotReferenceCreate
+    ) -> dict[str, Any]:
+        """Attach a governed reference image to a shot role."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot bind references for a {project.status.value} project"
+            )
+        self._reject_sensitive_payload(
+            request.model_dump(mode="json"), "shot_reference"
+        )
+        return self.repository.upsert_shot_reference(project_id, request)
+
+    def shot_references(
+        self, project_id: str, *, shot_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.repository.list_shot_references(project_id, shot_id=shot_id)
 
     def bind_elements_to_slots(self, project_id: str) -> dict[str, Any]:
         """Assign element artwork to matching slots so compositions pick it up."""
@@ -2545,6 +2572,33 @@ class CreativeController:
             if binding["shot_id"] in selected_shot_ids
             and binding["element_id"] in selected_element_ids
         ]
+        references = []
+        for reference in self.repository.list_shot_references(project_id):
+            if reference["shot_id"] not in selected_shot_ids:
+                continue
+            artifact_id = reference["artifact_id"]
+            if not artifact_id and reference["element_id"]:
+                element = elements_by_id.get(reference["element_id"])
+                artifact_id = element.get("source_artifact_id") if element else None
+            if not artifact_id:
+                references.append({**reference, "artifact": None})
+                continue
+            artifact = self.repository.get_artifact(artifact_id)
+            references.append(
+                {
+                    **reference,
+                    "artifact": {
+                        "id": artifact["id"],
+                        "relative_path": artifact["relative_path"],
+                        "content_hash": artifact["content_hash"],
+                    },
+                }
+            )
+        reference_ids = [
+            reference["artifact"]["id"]
+            for reference in references
+            if reference.get("artifact")
+        ]
         slots = [
             slot
             for slot in self.repository.list_slots(project_id)
@@ -2586,6 +2640,7 @@ class CreativeController:
             if element["source_artifact_id"]
         )
         input_ids.extend(assignment["artifact_id"] for assignment in slot_assets)
+        input_ids.extend(reference_ids)
         input_ids.extend(bed["artifact_id"] for bed in audio_beds)
         input_ids = list(dict.fromkeys(input_ids))
         input_artifacts = []
@@ -2625,6 +2680,12 @@ class CreativeController:
             "shots": shots,
             "elements": elements,
             "shot_element_bindings": bindings,
+            "references": references,
+            "reference_summary": reference_summary(references),
+            "provider_reference_hints": {
+                provider: provider_reference_payload(references, provider)
+                for provider in SUPPORTED_PROVIDERS
+            },
             "slots": slots,
             "slot_asset_assignments": slot_assets,
             "treatment_decisions": treatment_decisions,
@@ -3326,6 +3387,7 @@ class CreativeController:
         video_artifact_id: str,
         captions_artifact_id: str,
         adapter: Any | None = None,
+        mode: str = "soft",
     ) -> dict[str, Any]:
         """Attach the SRT as a soft subtitle track on the rendered video."""
 
@@ -3339,13 +3401,20 @@ class CreativeController:
                 raise ConflictError("Artifact belongs to a different project")
         if not subtitles["relative_path"].endswith(".srt"):
             raise IntegrityError("Caption artifact must be an SRT")
+        if mode not in {"soft", "hard"}:
+            raise IntegrityError("Caption mode must be 'soft' or 'hard'")
         video_path = self.artifact_store.resolve(project_id, video["relative_path"])
         srt_path = self.artifact_store.resolve(project_id, subtitles["relative_path"])
         with tempfile.TemporaryDirectory(prefix="pinaka-captions-") as temp:
             output = _Path(temp) / "captioned.mp4"
-            result = (adapter or CaptionMuxAdapter()).mux(
-                video_path=video_path, srt_path=srt_path, output_path=output
-            )
+            if mode == "hard":
+                result = (adapter or BurnedCaptionAdapter()).burn(
+                    video_path=video_path, srt_path=srt_path, output_path=output
+                )
+            else:
+                result = (adapter or CaptionMuxAdapter()).mux(
+                    video_path=video_path, srt_path=srt_path, output_path=output
+                )
         artifact = self.write_artifact(
             project_id,
             kind=ArtifactKind.RENDER,
@@ -3353,6 +3422,7 @@ class CreativeController:
             content=result.content,
             operation={
                 "type": "caption_burn",
+                "mode": mode,
                 "video_artifact_id": video["id"],
                 "captions_artifact_id": subtitles["id"],
                 "subtitle_hash": result.subtitle_hash,
