@@ -416,6 +416,7 @@ class BudgetUseCases:
                 )
             self._enforce_generation_routing(project_id, item["slot_id"])
             self.require_generated_decision(project_id, item["slot_id"])
+            self.require_production_contract(project_id)
         elif item["slot_id"]:
             self._enforce_generation_routing(project_id, item["slot_id"])
         job = self.reserve_job(project_id, request)

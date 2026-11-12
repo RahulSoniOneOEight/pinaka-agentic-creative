@@ -1,6 +1,8 @@
 """Compatibility exports. New contracts belong in contracts/<aggregate>.py."""
 # ruff: noqa: PLC0414 -- these aliases declare intentional compatibility re-exports
 
+from .contracts import ABExperimentCreate as ABExperimentCreate
+from .contracts import ABVariantBind as ABVariantBind
 from .contracts import AgentResult as AgentResult
 from .contracts import ApprovalRequest as ApprovalRequest
 from .contracts import ArtifactCreate as ArtifactCreate
@@ -21,6 +23,8 @@ from .contracts import CreativeElementCreate as CreativeElementCreate
 from .contracts import DeliverableCreate as DeliverableCreate
 from .contracts import DeliverableRecord as DeliverableRecord
 from .contracts import DependencyRef as DependencyRef
+from .contracts import EffectCueCreate as EffectCueCreate
+from .contracts import EffectsPlanCreate as EffectsPlanCreate
 from .contracts import ExecutionReceiptCreate as ExecutionReceiptCreate
 from .contracts import FactSetCreate as FactSetCreate
 from .contracts import FlowStepCreate as FlowStepCreate
@@ -28,6 +32,7 @@ from .contracts import GroundingBundleCreate as GroundingBundleCreate
 from .contracts import JobRecord as JobRecord
 from .contracts import JobRequest as JobRequest
 from .contracts import Money as Money
+from .contracts import MotionLevelCreate as MotionLevelCreate
 from .contracts import OverageReconcileCreate as OverageReconcileCreate
 from .contracts import PilotContract as PilotContract
 from .contracts import PilotDeliverablePlan as PilotDeliverablePlan

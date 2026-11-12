@@ -262,12 +262,17 @@ def test_final_approval_accepts_a_qa_checked_render(controller):
     from pinaka.enums import ApprovalStage, ProjectStatus
     from pinaka.models import ApprovalRequest
 
-    from .conftest import advance_to_sourcing, complete_flow_ledger
+    from .conftest import (
+        advance_to_sourcing,
+        complete_flow_ledger,
+        complete_motion_levels,
+    )
 
     project, _, _ = advance_to_sourcing(controller)
     controller.plan_from_text(
         project.id, TextBriefRequest(text="Make a 10 second rhyme for kids")
     )
+    complete_motion_levels(controller, project.id)
     controller.transition_project(
         project.id, ProjectStatus.ANIMATIC_READY, reason="Animatic ready"
     )

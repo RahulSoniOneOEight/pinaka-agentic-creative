@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from pinaka.contracts.flow import FlowStepCreate
+from pinaka.contracts.flow import FlowStepCreate, MotionLevelCreate
 from pinaka.controller import CreativeController
 from pinaka.enums import (
     ApprovalStage,
@@ -76,6 +76,23 @@ def complete_flow_ledger(controller: CreativeController, project_id: str) -> Non
                 status="done",
                 actor="test",
                 evidence=(f"evidence://{step}",),
+            ),
+        )
+
+
+def complete_motion_levels(
+    controller: CreativeController, project_id: str, *, level: str = "M3"
+) -> None:
+    """Give every shot a passing motion level before animatic approval."""
+
+    for shot in controller.repository.list_shots(project_id):
+        controller.record_motion_level(
+            project_id,
+            MotionLevelCreate(
+                shot_id=shot["id"],
+                level=level,
+                source="composition",
+                evidence=(f"evidence://motion/{shot['stable_key']}",),
             ),
         )
 

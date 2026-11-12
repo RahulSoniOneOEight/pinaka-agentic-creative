@@ -64,6 +64,8 @@ from .freesound import FreesoundClient
 from .internet_archive import InternetArchiveClient
 from .localization import plan_localization
 from .models import (
+    ABExperimentCreate,
+    ABVariantBind,
     ApprovalRequest,
     AssetCandidate,
     AssetUseContext,
@@ -73,12 +75,14 @@ from .models import (
     BudgetRaiseCreate,
     CreativeElementCreate,
     DeliverableCreate,
+    EffectsPlanCreate,
     ExecutionReceiptCreate,
     FactSetCreate,
     FlowStepCreate,
     GroundingBundleCreate,
     JobRequest,
     Money,
+    MotionLevelCreate,
     OverageReconcileCreate,
     PilotContract,
     ProjectCreate,
@@ -1435,6 +1439,58 @@ def cmd_record_sourcing_candidate(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).record_sourcing_candidate(
         args.project_id, SourcingCandidateCreate.model_validate(payload)
     )
+
+
+def cmd_record_effects_plan(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_effects_plan(
+        args.project_id, EffectsPlanCreate.model_validate(payload)
+    )
+
+
+def cmd_effects_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return {"plan": _controller(args).current_effects_plan(args.project_id)}
+
+
+def cmd_quality_bar(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).quality_bar(args.project_id, artifact_id=args.artifact_id)
+
+
+def cmd_production_record(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).production_record(args.project_id)
+
+
+def cmd_change_request(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).change_request(args.project_id, output_dir=args.output)
+
+
+def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).create_ab_experiment(
+        args.project_id, ABExperimentCreate.model_validate(payload)
+    )
+
+
+def cmd_bind_ab_variant(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).bind_ab_variant(
+        args.project_id, ABVariantBind.model_validate(payload)
+    )
+
+
+def cmd_ab_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).ab_status(args.project_id)
+
+
+def cmd_record_motion_level(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_motion_level(
+        args.project_id, MotionLevelCreate.model_validate(payload)
+    )
+
+
+def cmd_motion_levels(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).motion_levels(args.project_id)
 
 
 def cmd_sourcing_manifest(args: argparse.Namespace) -> dict[str, Any]:
@@ -2954,6 +3010,80 @@ def build_parser() -> argparse.ArgumentParser:
     flow_parser.add_argument("project_id")
     flow_parser.add_argument("--file", required=True)
     flow_parser.set_defaults(handler=cmd_record_flow_step)
+
+    effects_parser = subparsers.add_parser(
+        "record-effects-plan",
+        help="Record camera, transition, light, particle and sound cues with rights",
+    )
+    effects_parser.add_argument("project_id")
+    effects_parser.add_argument("--file", required=True)
+    effects_parser.set_defaults(handler=cmd_record_effects_plan)
+
+    effects_show_parser = subparsers.add_parser(
+        "effects-plan", help="Show the current effects and sound-design plan"
+    )
+    effects_show_parser.add_argument("project_id")
+    effects_show_parser.set_defaults(handler=cmd_effects_plan)
+
+    quality_parser = subparsers.add_parser(
+        "quality-bar",
+        help="Check brief, sourcing, two-pick, motion, flow, A/B and delivery gates",
+    )
+    quality_parser.add_argument("project_id")
+    quality_parser.add_argument("--artifact-id")
+    quality_parser.set_defaults(handler=cmd_quality_bar)
+
+    record_parser = subparsers.add_parser(
+        "production-record",
+        help="Export the production record as hashed JSON and Markdown",
+    )
+    record_parser.add_argument("project_id")
+    record_parser.set_defaults(handler=cmd_production_record)
+
+    change_request_parser = subparsers.add_parser(
+        "change-request",
+        help="Generate CHANGE-REQUEST.md and YAML for every element and hash",
+    )
+    change_request_parser.add_argument("project_id")
+    change_request_parser.add_argument("--output")
+    change_request_parser.set_defaults(handler=cmd_change_request)
+
+    ab_declare_parser = subparsers.add_parser(
+        "declare-ab",
+        help="Declare the A/B axis, hypothesis, metric, split and sample plan",
+    )
+    ab_declare_parser.add_argument("project_id")
+    ab_declare_parser.add_argument("--file", required=True)
+    ab_declare_parser.set_defaults(handler=cmd_declare_ab)
+
+    ab_bind_parser = subparsers.add_parser(
+        "bind-ab-variant",
+        help="Bind an A or B render to the declared experiment",
+    )
+    ab_bind_parser.add_argument("project_id")
+    ab_bind_parser.add_argument("--file", required=True)
+    ab_bind_parser.set_defaults(handler=cmd_bind_ab_variant)
+
+    ab_status_parser = subparsers.add_parser(
+        "ab-status", help="Show the A/B experiment and variant coverage"
+    )
+    ab_status_parser.add_argument("project_id")
+    ab_status_parser.set_defaults(handler=cmd_ab_status)
+
+    motion_parser = subparsers.add_parser(
+        "record-motion-level",
+        help="Record the motion level (M0-M5) for one shot",
+    )
+    motion_parser.add_argument("project_id")
+    motion_parser.add_argument("--file", required=True)
+    motion_parser.set_defaults(handler=cmd_record_motion_level)
+
+    motion_list_parser = subparsers.add_parser(
+        "motion-levels",
+        help="Show motion-level coverage and the M1 character minimum",
+    )
+    motion_list_parser.add_argument("project_id")
+    motion_list_parser.set_defaults(handler=cmd_motion_levels)
 
     flow_log_parser = subparsers.add_parser(
         "flow-log",

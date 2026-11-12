@@ -14,6 +14,7 @@ from .models import (
     Money,
     ProjectRecord,
 )
+from .store.ab import ExperimentsStore
 from .store.approvals import ApprovalsStore
 from .store.artifacts import ArtifactsStore
 from .store.assets import AssetsStore
@@ -45,6 +46,7 @@ class Repository(
     ElementsStore,
     FlowStore,
     CandidatesStore,
+    ExperimentsStore,
     ApprovalsStore,
     ArtifactsStore,
     AssetsStore,

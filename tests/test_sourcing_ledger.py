@@ -5,11 +5,13 @@ from decimal import Decimal
 import pytest
 
 from pinaka.contracts.flow import (
+    ABExperimentCreate,
+    ABVariantBind,
     SlotPickCreate,
     SourcingCandidateCreate,
     SourcingDecisionCreate,
 )
-from pinaka.enums import ApprovalStage, ProjectStatus
+from pinaka.enums import ApprovalStage, ArtifactKind, ProjectStatus
 from pinaka.errors import ConflictError, IntegrityError, NotFoundError
 from pinaka.models import (
     ApprovalRequest,
@@ -22,6 +24,7 @@ from pinaka.models import (
 from .conftest import (
     advance_to_sourcing,
     complete_flow_ledger,
+    complete_motion_levels,
     create_project,
     record_final_candidate,
 )
@@ -180,6 +183,7 @@ def _to_final_candidate_with_slot(controller):
             approved_sources=("owned", "pexels"),
         ),
     )
+    complete_motion_levels(controller, project.id)
     controller.transition_project(
         project.id, ProjectStatus.ANIMATIC_READY, reason="Animatic ready"
     )
@@ -286,3 +290,65 @@ def test_elements_derive_slots_across_bound_shots(controller):
     assert slot["role"] == "subject"
     assert slot["approved_sources"][-1] == "generated"
     assert controller.derive_element_slots(project.id)["created_count"] == 0
+
+
+def test_ab_requires_two_distinct_hashed_variants(controller):
+    project = create_project(controller)
+    with pytest.raises(ConflictError, match="No A/B experiment"):
+        controller.require_ab_complete(project.id)
+    experiment = controller.create_ab_experiment(
+        project.id,
+        ABExperimentCreate(
+            axis="opening shot",
+            hypothesis="A character-first opening holds longer than a pond-first opening",
+            primary_metric="3-second view rate",
+            traffic_split="50/50",
+            sample_plan="1,000 impressions per variant",
+        ),
+    )
+
+    variant_a = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/ab-a.mp4",
+        content=b"variant-a",
+        operation={"type": "ab_render", "label": "A"},
+    )
+    variant_b = controller.write_artifact(
+        project.id,
+        kind=ArtifactKind.RENDER,
+        relative_path="renders/ab-b.mp4",
+        content=b"variant-b",
+        operation={"type": "ab_render", "label": "B"},
+    )
+    controller.bind_ab_variant(
+        project.id,
+        ABVariantBind(
+            experiment_id=experiment["id"],
+            label="A",
+            artifact_id=variant_a["id"],
+        ),
+    )
+    with pytest.raises(IntegrityError, match="must be different renders"):
+        controller.bind_ab_variant(
+            project.id,
+            ABVariantBind(
+                experiment_id=experiment["id"],
+                label="B",
+                artifact_id=variant_a["id"],
+            ),
+        )
+    controller.bind_ab_variant(
+        project.id,
+        ABVariantBind(
+            experiment_id=experiment["id"],
+            label="B",
+            artifact_id=variant_b["id"],
+        ),
+    )
+    status = controller.require_ab_complete(project.id)
+    assert status["complete"] is True
+    assert {variant["label"] for variant in status["experiments"][0]["variants"]} == {
+        "A",
+        "B",
+    }

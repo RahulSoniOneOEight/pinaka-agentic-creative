@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 23
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -957,6 +957,49 @@ CREATE INDEX IF NOT EXISTS idx_sourcing_candidates_slot
 """
 
 
+SCHEMA_V22 = r"""
+CREATE TABLE IF NOT EXISTS motion_levels (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    source TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_motion_levels_shot
+    ON motion_levels(project_id, shot_id, created_at);
+"""
+
+
+SCHEMA_V23 = r"""
+CREATE TABLE IF NOT EXISTS ab_experiments (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    axis TEXT NOT NULL,
+    hypothesis TEXT NOT NULL,
+    primary_metric TEXT NOT NULL,
+    traffic_split TEXT NOT NULL,
+    sample_plan TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'declared',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ab_variants (
+    id TEXT PRIMARY KEY,
+    experiment_id TEXT NOT NULL REFERENCES ab_experiments(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+    artifact_hash TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(experiment_id, label)
+);
+CREATE INDEX IF NOT EXISTS idx_ab_experiments_project
+    ON ab_experiments(project_id, created_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -979,4 +1022,6 @@ MIGRATIONS = {
     19: SCHEMA_V19,
     20: SCHEMA_V20,
     21: SCHEMA_V21,
+    22: SCHEMA_V22,
+    23: SCHEMA_V23,
 }

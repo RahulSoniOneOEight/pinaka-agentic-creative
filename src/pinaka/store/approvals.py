@@ -30,6 +30,15 @@ class ApprovalsStore:
             ).fetchone()
             return self._approval_dict(connection, row) if row else None
 
+    def list_approvals(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                "SELECT * FROM approvals WHERE project_id = ? ORDER BY approved_at",
+                (project_id,),
+            ).fetchall()
+            return [self._approval_dict(connection, row) for row in rows]
+
     @staticmethod
     def _approval_dict(
         connection: sqlite3.Connection, row: sqlite3.Row

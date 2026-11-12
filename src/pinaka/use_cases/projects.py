@@ -322,6 +322,10 @@ class ProjectsUseCases:
                         entity_hash=fact_set["content_hash"],
                     )
                 )
+        if request.stage == ApprovalStage.ANIMATIC and self.repository.list_shots(
+            project_id
+        ):
+            self.require_motion_levels(project_id)
         if request.stage == ApprovalStage.FINAL and not request.output_hash:
             raise IntegrityError("Final approval must bind to an exact output hash")
         if request.stage == ApprovalStage.FINAL:
@@ -357,6 +361,8 @@ class ProjectsUseCases:
                 )
             )
             self.require_flow_complete(project_id)
+            if self.repository.list_ab_experiments(project_id):
+                self.require_ab_complete(project_id)
             if self.repository.list_slots(project_id):
                 self.require_slot_picks(project_id)
             sourcing_manifest = self.current_sourcing_manifest(project_id)

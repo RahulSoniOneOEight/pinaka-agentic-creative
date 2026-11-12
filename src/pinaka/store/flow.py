@@ -4,7 +4,7 @@ import json
 import sqlite3
 from typing import Any
 
-from ..contracts.flow import FlowStepCreate, SourcingDecisionCreate
+from ..contracts.flow import FlowStepCreate, MotionLevelCreate, SourcingDecisionCreate
 from ..errors import NotFoundError
 from ..utils import canonical_json, new_id, utc_now
 
@@ -217,3 +217,75 @@ class FlowStore:
                     (project_id, step),
                 ).fetchall()
             return [self._step_from_row(row) for row in rows]
+
+    def record_motion_level(
+        self, project_id: str, request: MotionLevelCreate
+    ) -> dict[str, Any]:
+        level_id = new_id("mot")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            shot = connection.execute(
+                "SELECT id FROM shots WHERE id = ? AND project_id = ?",
+                (request.shot_id, project_id),
+            ).fetchone()
+            if not shot:
+                raise NotFoundError(f"Shot not found in project: {request.shot_id}")
+            connection.execute(
+                """
+                INSERT INTO motion_levels(
+                    id, project_id, shot_id, level, source, evidence_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    level_id,
+                    project_id,
+                    request.shot_id,
+                    request.level,
+                    request.source,
+                    canonical_json(request.evidence),
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="motion_level",
+                entity_id=level_id,
+                event_type="motion.level_recorded",
+                payload={
+                    "shot_id": request.shot_id,
+                    "level": request.level,
+                    "source": request.source,
+                },
+            )
+            return {
+                "id": level_id,
+                "project_id": project_id,
+                **request.model_dump(mode="json"),
+                "created_at": now,
+            }
+
+    def list_motion_levels(self, project_id: str) -> list[dict[str, Any]]:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            rows = connection.execute(
+                """
+                SELECT * FROM motion_levels
+                WHERE project_id = ?
+                ORDER BY created_at DESC, rowid DESC
+                """,
+                (project_id,),
+            ).fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "project_id": row["project_id"],
+                    "shot_id": row["shot_id"],
+                    "level": row["level"],
+                    "source": row["source"],
+                    "evidence": json.loads(row["evidence_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            ]

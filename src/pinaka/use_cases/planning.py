@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..enums import (
@@ -30,7 +31,7 @@ from ..policy.guards import (
     require_active_project,
 )
 from ..scripts import SuppliedScriptAdapter, script_prompt
-from ..utils import sha256_bytes
+from ..utils import canonical_json, sha256_bytes
 
 
 class PlanningUseCases:
@@ -148,6 +149,9 @@ class PlanningUseCases:
         if request.persist_slots:
             for spec in proposed_slots:
                 recorded_slots.append(self.add_slot(project_id, SlotCreate(**spec)))
+        production_contract = (
+            self.record_production_contract(project_id) if request.create_plan else None
+        )
         proposed_elements = propose_elements(request.text)
         recorded_elements: list[dict[str, Any]] = []
         if request.persist_elements:
@@ -170,6 +174,7 @@ class PlanningUseCases:
             "plan_skipped_reason": skipped_reason,
             "proposed_slots": proposed_slots,
             "slots": recorded_slots,
+            "production_contract": production_contract,
             "proposed_elements": proposed_elements,
             "recorded_elements": recorded_elements,
         }
@@ -262,3 +267,94 @@ class PlanningUseCases:
             "max_words": words,
             "requires_approval": True,
         }
+
+    def record_production_contract(self, project_id: str) -> dict[str, Any]:
+        """Freeze the approved brief, shots and slots as the production contract."""
+
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            raise IntegrityError("A production contract requires a workable brief")
+        shots = self.repository.list_shots(project_id)
+        slots = self.repository.list_slots(project_id)
+        package = brief["package"]
+        body = {
+            "schema": "production-contract/v1",
+            "project_id": project_id,
+            "brief_id": brief["id"],
+            "brief_content_hash": brief["content_hash"],
+            "source_artifact_id": brief["source_artifact_id"],
+            "source_content_hash": brief["source_content_hash"],
+            "objective": package["objective"],
+            "audience": package["audience"],
+            "deliverable": package["deliverable"],
+            "beats": package["beats"],
+            "acceptance": package["acceptance"],
+            "shots": shots,
+            "slots": slots,
+            "policies": {
+                "sourcing_order": [
+                    "owned",
+                    "stock",
+                    "manual_import",
+                    "deterministic",
+                    "generated",
+                ],
+                "generation_last": True,
+                "two_pick_required": True,
+                "stills_to_motion_minimum": "M1",
+                "ab_required": True,
+                "flow_ledger_required": True,
+            },
+        }
+        content = canonical_json(body).encode("utf-8")
+        content_hash = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"contracts/production-contract-{content_hash[:12]}.json",
+            content=content,
+            operation={
+                "type": "production_contract",
+                "brief_content_hash": brief["content_hash"],
+                "shot_count": len(shots),
+                "slot_count": len(slots),
+            },
+        )
+        return {
+            "artifact": artifact,
+            "contract": body,
+            "contract_hash": content_hash,
+        }
+
+    def current_production_contract(self, project_id: str) -> dict[str, Any] | None:
+        contracts = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if artifact["relative_path"].startswith("contracts/production-contract-")
+        ]
+        if not contracts:
+            return None
+        artifact = max(contracts, key=lambda item: item["created_at"])
+        return {
+            "artifact": artifact,
+            "contract": json.loads(self.read_artifact_text(artifact["id"])),
+        }
+
+    def require_production_contract(self, project_id: str) -> dict[str, Any] | None:
+        """Paid work must match the frozen brief. No brief means no extra gate."""
+
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            return None
+        current = self.current_production_contract(project_id)
+        if not current:
+            raise IntegrityError(
+                "A workable brief exists but no production contract was frozen. "
+                "Run plan-from-text / record the production contract before spending."
+            )
+        if current["contract"]["brief_content_hash"] != brief["content_hash"]:
+            raise IntegrityError(
+                "The workable brief changed after the production contract was "
+                "frozen; re-approve the brief and freeze a new contract"
+            )
+        return current

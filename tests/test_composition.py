@@ -113,3 +113,28 @@ def test_composition_records_the_deliverable_duration(controller):
     html = controller.read_artifact_text(result["artifact"]["id"])
     assert 'data-duration="5"' in html
     assert Decimal(result["shot_count"]) >= 1
+
+
+def test_still_camera_move_and_no_baked_text():
+    shots = [
+        {
+            **SHOTS[0],
+            "requirements": {"camera": "push_in", "text": "none"},
+        }
+    ]
+    html = build_composition(title="x", width=1080, height=1920, shots=shots)
+    assert "@keyframes camera-1" in html
+    assert 'class="narrative"' not in html
+    assert 'class="beat"' not in html
+    assert validate_composition(html)["valid"] is True
+
+
+def test_baked_text_is_rejected_by_validation():
+    html = build_composition(title="x", width=10, height=10, shots=SHOTS)
+    tampered = html.replace(
+        '<div class="layers"',
+        '<p class="narrative">Baked caption</p><div class="layers"',
+    )
+    report = validate_composition(tampered)
+    assert report["valid"] is False
+    assert any("baked text" in problem for problem in report["problems"])

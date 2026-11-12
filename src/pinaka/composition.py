@@ -232,8 +232,7 @@ def build_composition(
             f"}}"
         )
         labels = "".join(
-            f'<span class="element" data-element="{_escape(item["stable_key"])}">'
-            f"{_escape(item.get('name', item['stable_key']))}</span>"
+            f'<span class="element" data-element="{_escape(item["stable_key"])}"></span>'
             for item in (elements or ())
             if item.get("kind") in {"character", "prop", "location"}
         )
@@ -294,16 +293,32 @@ def build_composition(
                     f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
                 )
         image_layers_html = "".join(video_layers + image_layers)
+        camera = str((shot.get("requirements") or {}).get("camera", "")).lower()
+        camera_animation = ""
+        camera_moves = {
+            "push_in": ("scale(1)", "scale(1.08)"),
+            "pull_out": ("scale(1.08)", "scale(1)"),
+            "pan_left": ("translateX(2%) scale(1.04)", "translateX(-2%) scale(1.04)"),
+            "pan_right": ("translateX(-2%) scale(1.04)", "translateX(2%) scale(1.04)"),
+            "parallax": ("translateY(0) scale(1.04)", "translateY(-1.5%) scale(1.04)"),
+        }
+        if camera in camera_moves:
+            start_transform, end_transform = camera_moves[camera]
+            keyframes.append(
+                f"@keyframes camera-{index} {{\n"
+                f"  from {{ transform: {start_transform}; }}\n"
+                f"  to {{ transform: {end_transform}; }}\n"
+                f"}}"
+            )
+            camera_animation = (
+                f"animation: camera-{index} {duration}s ease-in-out infinite alternate"
+            )
         scenes.append(
             f'  <section class="scene" data-shot="{_escape(shot["stable_key"])}" '
             f'data-start="{start}" data-end="{end}" data-duration="{duration}" '
             f'style="animation: scene-{index} {total}s linear infinite">\n'
-            f'    <div class="layers">{image_layers_html}</div>\n'
-            f'    <div class="content"><div>\n'
-            f'      <p class="beat">{_escape(str(shot.get("beat", "")))}</p>\n'
-            f'      <p class="narrative">{_escape(str(shot.get("narrative", "")))}</p>\n'
-            f'      <div class="elements">{labels}</div>\n'
-            f"    </div></div>\n"
+            f'    <div class="layers" style="{camera_animation}">{image_layers_html}</div>\n'
+            f'    <div class="elements" aria-hidden="true">{labels}</div>\n'
             f"  </section>"
         )
 
@@ -355,7 +370,7 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   position: absolute;
   inset: 0;
   margin: auto;
-  object-fit: contain;
+  object-fit: cover;
 }}
 .layer.background {{
   width: 100%;
@@ -380,13 +395,7 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   font-size: {max(14, round(height * 0.014))}px;
 }}
 .narrative {{ font-size: {max(20, round(height * 0.028))}px; line-height: 1.35; }}
-.elements {{ display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; }}
-.element {{
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  padding: 0.15rem 0.6rem;
-  font-size: {max(12, round(height * 0.013))}px;
-}}
+.elements {{ display: none; }}
 {"".join(keyframes)}
 </style>
 </head>
@@ -506,6 +515,10 @@ def validate_composition(html: str) -> dict[str, Any]:
         problems.append("external resource reference (must render offline)")
     if "data-duration=" not in html:
         problems.append("missing duration marker")
+    if 'class="narrative"' in html or 'class="beat"' in html:
+        problems.append("baked text layer (captions must stay separate)")
+    if "object-fit: contain" in html:
+        problems.append("letterboxed layer (full-bleed required)")
     return {
         "valid": not problems,
         "problems": problems,

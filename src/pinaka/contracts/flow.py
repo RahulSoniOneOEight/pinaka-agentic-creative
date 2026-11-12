@@ -17,6 +17,7 @@ SourcingDecision = Literal[
 FlowStatus = Literal["done", "skipped", "not_applicable", "blocked", "failed"]
 Treatment = Literal["as_is", "correct", "ai_enhance", "composite", "generate"]
 CandidateRole = Literal["primary", "backup", "variant_a", "variant_b"]
+MotionLevel = Literal["M0", "M1", "M2", "M3", "M4", "M5"]
 
 
 class SourcingDecisionCreate(StrictModel):
@@ -125,3 +126,32 @@ class SlotPickCreate(StrictModel):
     backup_candidate_id: str = Field(min_length=1, max_length=120)
     decided_by: str = Field(min_length=1, max_length=200)
     reason: str = Field(min_length=1, max_length=2000)
+
+
+class MotionLevelCreate(StrictModel):
+    """The motion level of one shot, recorded before animatic approval."""
+
+    shot_id: str = Field(min_length=1, max_length=120)
+    level: MotionLevel
+    source: Literal["composition", "generated_video", "stock_clip", "avatar", "manual"]
+    evidence: tuple[str, ...] = Field(min_length=1)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ABExperimentCreate(StrictModel):
+    """The A/B contract declared before production."""
+
+    axis: str = Field(min_length=1, max_length=200)
+    hypothesis: str = Field(min_length=1, max_length=1000)
+    primary_metric: str = Field(min_length=1, max_length=300)
+    traffic_split: str = Field(min_length=1, max_length=100)
+    sample_plan: str = Field(min_length=1, max_length=1000)
+
+
+class ABVariantBind(StrictModel):
+    """Bind one rendered variant to an experiment."""
+
+    experiment_id: str = Field(min_length=1, max_length=120)
+    label: Literal["A", "B"]
+    artifact_id: str = Field(min_length=1, max_length=120)
+    notes: str | None = Field(default=None, max_length=1000)

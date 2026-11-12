@@ -5,9 +5,13 @@ from decimal import Decimal
 import pytest
 
 from pinaka.adapters.mock import MockGenerationAdapter
-from pinaka.contracts.flow import FlowStepCreate, SourcingDecisionCreate
+from pinaka.contracts.flow import (
+    FlowStepCreate,
+    MotionLevelCreate,
+    SourcingDecisionCreate,
+)
 from pinaka.enums import BudgetCategory
-from pinaka.errors import IntegrityError
+from pinaka.errors import ConflictError, IntegrityError
 from pinaka.models import (
     BudgetPlanCreate,
     BudgetPlanItemCreate,
@@ -16,6 +20,7 @@ from pinaka.models import (
     ShotCreate,
     SlotCreate,
     TextBriefRequest,
+    WorkableBriefCreate,
 )
 from pinaka.recipes import build_plan
 
@@ -218,3 +223,96 @@ def test_flow_completeness_needs_every_gate(controller):
             ),
         )
     assert controller.flow_completeness(project.id)["complete"] is True
+
+
+def test_production_contract_freezes_the_brief(controller):
+    project = create_project(controller)
+    result = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(text="Make a five second rhyme about a duck on a pond"),
+    )
+    contract = result["production_contract"]["contract"]
+    assert contract["policies"]["generation_last"] is True
+    assert contract["policies"]["two_pick_required"] is True
+    current = controller.require_production_contract(project.id)
+    assert current["contract"]["brief_content_hash"] == contract["brief_content_hash"]
+
+    brief = controller.repository.latest_workable_brief(project.id)
+    package = brief["package"]
+    payload = {
+        key: package[key]
+        for key in (
+            "source_artifact_id",
+            "source_content_hash",
+            "objective",
+            "audience",
+            "deliverable",
+            "destination",
+            "classification",
+            "treatment",
+            "beats",
+            "audio_plan",
+            "acceptance",
+            "decisions",
+        )
+    }
+    payload["decisions"] = [
+        {
+            key: decision[key]
+            for key in (
+                "field",
+                "value",
+                "state",
+                "basis",
+                "risk",
+                "reversible",
+                "alternatives_considered",
+                "affected_shot_keys",
+                "review_gate",
+                "blocked_work",
+            )
+            if key in decision
+        }
+        for decision in package["decisions"]
+    ]
+    payload["acceptance"] = {**package["acceptance"], "duration_seconds": "9"}
+    controller.record_workable_brief(
+        project.id, WorkableBriefCreate.model_validate(payload)
+    )
+    with pytest.raises(IntegrityError, match="changed after the production contract"):
+        controller.require_production_contract(project.id)
+
+
+def test_character_shots_cannot_stay_at_m0(controller):
+    project = create_project(controller)
+    result = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(text="Make a five second rhyme about a duck on a pond"),
+    )
+    shot = result["shots"][0]
+    for entry in result["shots"]:
+        controller.record_motion_level(
+            project.id,
+            MotionLevelCreate(
+                shot_id=entry["id"],
+                level="M0" if entry["id"] == shot["id"] else "M1",
+                source="composition",
+                evidence=("evidence://static-still",),
+            ),
+        )
+    summary = controller.motion_levels(project.id)
+    assert summary["complete"] is False
+    assert shot["stable_key"] in summary["below_minimum"]
+    with pytest.raises(ConflictError, match="Stills must become motion"):
+        controller.require_motion_levels(project.id)
+
+    controller.record_motion_level(
+        project.id,
+        MotionLevelCreate(
+            shot_id=shot["id"],
+            level="M1",
+            source="composition",
+            evidence=("evidence://animated-still",),
+        ),
+    )
+    assert controller.require_motion_levels(project.id)["complete"] is True
