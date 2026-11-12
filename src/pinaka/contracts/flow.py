@@ -15,6 +15,8 @@ SourcingDecision = Literal[
     "not_applicable",
 ]
 FlowStatus = Literal["done", "skipped", "not_applicable", "blocked", "failed"]
+Treatment = Literal["as_is", "correct", "ai_enhance", "composite", "generate"]
+CandidateRole = Literal["primary", "backup", "variant_a", "variant_b"]
 
 
 class SourcingDecisionCreate(StrictModel):
@@ -86,3 +88,40 @@ class FlowStepCreate(StrictModel):
         if self.status == "done" and not self.evidence:
             raise ValueError("A done step requires evidence")
         return self
+
+
+class SourcingCandidateCreate(StrictModel):
+    """One searched candidate in the slot ledger, before the 2-pick."""
+
+    slot_id: str = Field(min_length=1, max_length=120)
+    provider: str = Field(min_length=1, max_length=100)
+    provider_asset_id: str = Field(min_length=1, max_length=200)
+    media_type: Literal["image", "video", "audio"]
+    source_url: str = Field(min_length=1, max_length=2000)
+    creator: str | None = Field(default=None, max_length=300)
+    licence: str = Field(min_length=1, max_length=300)
+    licence_url: str | None = Field(default=None, max_length=2000)
+    eligibility: Literal["eligible", "ineligible"]
+    eligibility_reason: str | None = Field(default=None, max_length=1000)
+    treatment: Treatment
+    evidence: tuple[str, ...] = ()
+    metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def ineligible_needs_a_reason(self) -> SourcingCandidateCreate:
+        if (
+            self.eligibility == "ineligible"
+            and not (self.eligibility_reason or "").strip()
+        ):
+            raise ValueError("An ineligible candidate requires a reason")
+        return self
+
+
+class SlotPickCreate(StrictModel):
+    """The two-pick: one primary and one independent backup per slot."""
+
+    slot_id: str = Field(min_length=1, max_length=120)
+    primary_candidate_id: str = Field(min_length=1, max_length=120)
+    backup_candidate_id: str = Field(min_length=1, max_length=120)
+    decided_by: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)

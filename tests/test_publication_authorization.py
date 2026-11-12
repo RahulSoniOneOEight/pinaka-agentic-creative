@@ -12,11 +12,16 @@ from pinaka.models import (
 )
 from pinaka.publication import PublicationRequest, check_publication
 
-from .conftest import advance_to_sourcing, record_final_candidate
+from .conftest import (
+    advance_to_sourcing,
+    complete_flow_ledger,
+    record_final_candidate,
+)
 
 
 def _finalised(controller):
     project, _, _ = advance_to_sourcing(controller)
+    complete_flow_ledger(controller, project.id)
     controller.transition_project(
         project.id, ProjectStatus.ANIMATIC_READY, reason="Animatic ready"
     )

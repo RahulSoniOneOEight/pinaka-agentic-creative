@@ -89,6 +89,8 @@ from .models import (
     ShotMotionRequest,
     ShotReferenceCreate,
     SlotCreate,
+    SlotPickCreate,
+    SourcingCandidateCreate,
     SourcingDecisionCreate,
     StudioReadinessReport,
     StudioResultPacketImport,
@@ -885,6 +887,10 @@ def cmd_bind_elements(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).bind_elements_to_slots(args.project_id)
 
 
+def cmd_derive_element_slots(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).derive_element_slots(args.project_id)
+
+
 def cmd_bind_reference(args: argparse.Namespace) -> dict[str, Any]:
     request = ShotReferenceCreate.model_validate(_load_json(args.file))
     return _controller(args).bind_shot_reference(args.project_id, request)
@@ -1421,6 +1427,32 @@ def cmd_record_sourcing_decision(args: argparse.Namespace) -> dict[str, Any]:
     payload = _load_json(args.file)
     return _controller(args).record_sourcing_decision(
         args.project_id, SourcingDecisionCreate.model_validate(payload)
+    )
+
+
+def cmd_record_sourcing_candidate(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_sourcing_candidate(
+        args.project_id, SourcingCandidateCreate.model_validate(payload)
+    )
+
+
+def cmd_sourcing_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).write_sourcing_manifest(args.project_id)
+
+
+def cmd_sourcing_candidates(args: argparse.Namespace) -> dict[str, Any]:
+    controller = _controller(args)
+    return {
+        "candidates": controller.sourcing_candidates(args.project_id, args.slot_id),
+        "picks": controller.slot_pick_summary(args.project_id),
+    }
+
+
+def cmd_pick_slot_assets(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).pick_slot_assets(
+        args.project_id, SlotPickCreate.model_validate(payload)
     )
 
 
@@ -2409,6 +2441,13 @@ def build_parser() -> argparse.ArgumentParser:
     element_bind_parser.add_argument("--file", required=True)
     element_bind_parser.set_defaults(handler=cmd_bind_creative_element)
 
+    element_slots_parser = subparsers.add_parser(
+        "derive-element-slots",
+        help="Create visual slots for every element bound to a shot",
+    )
+    element_slots_parser.add_argument("project_id")
+    element_slots_parser.set_defaults(handler=cmd_derive_element_slots)
+
     element_apply_parser = subparsers.add_parser(
         "bind-elements",
         help="Assign element artwork to matching slots across bound shots",
@@ -2868,6 +2907,37 @@ def build_parser() -> argparse.ArgumentParser:
     sourcing_parser.add_argument("project_id")
     sourcing_parser.add_argument("--file", required=True)
     sourcing_parser.set_defaults(handler=cmd_record_sourcing_decision)
+
+    candidate_parser = subparsers.add_parser(
+        "record-sourcing-candidate",
+        help="Add one searched candidate to a slot's candidate ledger",
+    )
+    candidate_parser.add_argument("project_id")
+    candidate_parser.add_argument("--file", required=True)
+    candidate_parser.set_defaults(handler=cmd_record_sourcing_candidate)
+
+    manifest_parser = subparsers.add_parser(
+        "sourcing-manifest",
+        help="Write and hash the project sourcing manifest",
+    )
+    manifest_parser.add_argument("project_id")
+    manifest_parser.set_defaults(handler=cmd_sourcing_manifest)
+
+    candidates_parser = subparsers.add_parser(
+        "sourcing-candidates",
+        help="List the candidate ledger and the two-pick summary",
+    )
+    candidates_parser.add_argument("project_id")
+    candidates_parser.add_argument("--slot")
+    candidates_parser.set_defaults(handler=cmd_sourcing_candidates)
+
+    pick_parser = subparsers.add_parser(
+        "pick-slot-assets",
+        help="Record the primary and independent backup for a slot",
+    )
+    pick_parser.add_argument("project_id")
+    pick_parser.add_argument("--file", required=True)
+    pick_parser.set_defaults(handler=cmd_pick_slot_assets)
 
     sourcing_list_parser = subparsers.add_parser(
         "sourcing-decisions",

@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -928,6 +928,35 @@ CREATE INDEX IF NOT EXISTS idx_flow_steps_project
 """
 
 
+SCHEMA_V21 = r"""
+ALTER TABLE slots ADD COLUMN treatment_ceiling TEXT NOT NULL DEFAULT 'ai_created';
+ALTER TABLE slots ADD COLUMN exactness TEXT NOT NULL DEFAULT 'generic';
+CREATE TABLE IF NOT EXISTS sourcing_candidates (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_asset_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    creator TEXT,
+    licence TEXT NOT NULL,
+    licence_url TEXT,
+    eligibility TEXT NOT NULL,
+    eligibility_reason TEXT,
+    treatment TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    selected_role TEXT,
+    evidence_json TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, slot_id, provider, provider_asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sourcing_candidates_slot
+    ON sourcing_candidates(project_id, slot_id, created_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -949,4 +978,5 @@ MIGRATIONS = {
     18: SCHEMA_V18,
     19: SCHEMA_V19,
     20: SCHEMA_V20,
+    21: SCHEMA_V21,
 }

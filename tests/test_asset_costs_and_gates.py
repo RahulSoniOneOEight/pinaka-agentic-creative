@@ -17,7 +17,12 @@ from pinaka.models import (
     SlotCreate,
 )
 
-from .conftest import advance_to_sourcing, create_project, record_final_candidate
+from .conftest import (
+    advance_to_sourcing,
+    complete_flow_ledger,
+    create_project,
+    record_final_candidate,
+)
 
 
 def _amount(payload: dict) -> Decimal:
@@ -141,6 +146,7 @@ def test_asset_cost_ledger_is_idempotent_per_job(controller):
 
 def _to_final_candidate(controller):
     project, _, _ = advance_to_sourcing(controller)
+    complete_flow_ledger(controller, project.id)
     controller.transition_project(
         project.id, ProjectStatus.ANIMATIC_READY, reason="Animatic ready"
     )

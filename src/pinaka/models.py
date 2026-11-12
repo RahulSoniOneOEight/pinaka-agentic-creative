@@ -49,6 +49,8 @@ from .contracts import ShotElementBindingCreate as ShotElementBindingCreate
 from .contracts import ShotMotionRequest as ShotMotionRequest
 from .contracts import ShotReferenceCreate as ShotReferenceCreate
 from .contracts import SlotCreate as SlotCreate
+from .contracts import SlotPickCreate as SlotPickCreate
+from .contracts import SourcingCandidateCreate as SourcingCandidateCreate
 from .contracts import SourcingDecisionCreate as SourcingDecisionCreate
 from .contracts import StrictModel as StrictModel
 from .contracts import StudioReadinessReport as StudioReadinessReport

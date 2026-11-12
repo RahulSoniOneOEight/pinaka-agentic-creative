@@ -19,6 +19,7 @@ from .store.artifacts import ArtifactsStore
 from .store.assets import AssetsStore
 from .store.audio import AudioStore
 from .store.budget import BudgetStore
+from .store.candidates import CandidatesStore
 from .store.costs import CostsStore
 from .store.elements import ElementsStore
 from .store.flow import FlowStore
@@ -43,6 +44,7 @@ class Repository(
     ShotsStore,
     ElementsStore,
     FlowStore,
+    CandidatesStore,
     ApprovalsStore,
     ArtifactsStore,
     AssetsStore,

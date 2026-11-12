@@ -262,7 +262,7 @@ def test_final_approval_accepts_a_qa_checked_render(controller):
     from pinaka.enums import ApprovalStage, ProjectStatus
     from pinaka.models import ApprovalRequest
 
-    from .conftest import advance_to_sourcing
+    from .conftest import advance_to_sourcing, complete_flow_ledger
 
     project, _, _ = advance_to_sourcing(controller)
     controller.plan_from_text(
@@ -287,6 +287,7 @@ def test_final_approval_accepts_a_qa_checked_render(controller):
         project.id, artifact_id=artifact["id"], probe=_probe(), measure_loudness=_loud
     )
     assert qa["overall"] == QAStatus.PASS.value
+    complete_flow_ledger(controller, project.id)
     approval = controller.approve(
         project.id,
         ApprovalRequest(

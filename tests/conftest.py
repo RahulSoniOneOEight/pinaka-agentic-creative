@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pytest
 
+from pinaka.contracts.flow import FlowStepCreate
 from pinaka.controller import CreativeController
 from pinaka.enums import (
     ApprovalStage,
@@ -60,6 +61,23 @@ def controller(tmp_path, migrated_runtime):
     root = tmp_path / "runtime"
     shutil.copytree(migrated_runtime, root)
     return CreativeController.open(root)
+
+
+def complete_flow_ledger(controller: CreativeController, project_id: str) -> None:
+    """Record every G0-G7 gate as done so final approval can pass its ledger gate."""
+
+    from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
+
+    for step in REQUIRED_FLOW_STEPS:
+        controller.record_flow_step(
+            project_id,
+            FlowStepCreate(
+                step=step,
+                status="done",
+                actor="test",
+                evidence=(f"evidence://{step}",),
+            ),
+        )
 
 
 def create_project(

@@ -9,11 +9,17 @@ from pinaka.judge import VisualJudgement, VisualScores
 from pinaka.models import ApprovalRequest
 from pinaka.review_policy import CampaignRisk, ReviewPolicy, decide_review
 
-from .conftest import advance_to_sourcing, create_project, record_final_candidate
+from .conftest import (
+    advance_to_sourcing,
+    complete_flow_ledger,
+    create_project,
+    record_final_candidate,
+)
 
 
 def _archived_project(controller: CreativeController):
     project, _, _ = advance_to_sourcing(controller)
+    complete_flow_ledger(controller, project.id)
     controller.transition_project(
         project.id, ProjectStatus.ANIMATIC_READY, reason="Animatic ready"
     )

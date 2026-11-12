@@ -35,6 +35,14 @@ class SlotCreate(StrictModel):
     transformation_permission: str = Field(min_length=1, max_length=500)
     text_zone: str | None = Field(default=None, max_length=500)
     approved_sources: tuple[str, ...] = ()
+    treatment_ceiling: str = Field(
+        default="ai_created",
+        pattern=r"^(as_is|match|effects|ai_enhance|composite|ai_created)$",
+    )
+    exactness: str = Field(
+        default="generic",
+        pattern=r"^(exact|faithful|generic)$",
+    )
 
 
 class BriefDecisionCreate(StrictModel):

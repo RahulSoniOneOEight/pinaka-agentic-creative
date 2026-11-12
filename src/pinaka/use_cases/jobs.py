@@ -22,7 +22,7 @@ from ..models import (
 from ..operations import operation as catalog_operation
 from ..policy.guards import require_one_take
 from ..policy.secrets import reject_sensitive_payload
-from ..utils import sha256_json
+from ..utils import sha256_bytes, sha256_json
 
 
 class JobsUseCases:
@@ -214,6 +214,40 @@ class JobsUseCases:
             raise ConflictError(
                 "Single-pass adapter did not return a complete successful result"
             )
+        operation_record: dict[str, Any] = {
+            "type": "generation",
+            "provider": request.provider,
+            "job_id": job.id,
+            "model": request.parameters.get("model") or request.endpoint,
+        }
+        prompt = request.parameters.get("prompt")
+        if isinstance(prompt, str) and prompt:
+            operation_record["prompt_hash"] = sha256_bytes(prompt.encode("utf-8"))
+        if budget_plan_item:
+            plan = self.repository.get_budget_plan(budget_plan_item[0])
+            item = next(
+                (
+                    entry
+                    for entry in plan["items"]
+                    if entry["stable_key"] == budget_plan_item[1]
+                ),
+                None,
+            )
+            if item and item.get("slot_id"):
+                decision = self.repository.current_sourcing_decision(
+                    project_id, item["slot_id"]
+                )
+                operation_record["slot_id"] = item["slot_id"]
+                operation_record["sourcing_decision_id"] = (
+                    decision["id"] if decision else None
+                )
+                operation_record["rights"] = {
+                    "basis": "generated",
+                    "provider": request.provider,
+                    "model": operation_record["model"],
+                    "synthetic": True,
+                    "sourcing_decision_id": (decision["id"] if decision else None),
+                }
         artifact = self.write_artifact(
             project_id,
             kind=ArtifactKind.DERIVATIVE
@@ -221,11 +255,7 @@ class JobsUseCases:
             else ArtifactKind.GENERATED,
             relative_path=artifact_path,
             content=result.output_bytes,
-            operation={
-                "type": "generation",
-                "provider": request.provider,
-                "job_id": job.id,
-            },
+            operation=operation_record,
             parent_artifact_id=parent_artifact_id,
             dependencies=(
                 DependencyRef(entity_type="job", entity_id=job.id),

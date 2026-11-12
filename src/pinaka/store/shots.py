@@ -108,8 +108,9 @@ class ShotsStore:
                     INSERT INTO slots(
                         id, project_id, shot_id, stable_key, role, identity_requirement,
                         fact_requirement, transformation_permission, text_zone,
-                        approved_sources_json, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        approved_sources_json, treatment_ceiling, exactness,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         slot_id,
@@ -122,6 +123,8 @@ class ShotsStore:
                         request.transformation_permission,
                         request.text_zone,
                         canonical_json(request.approved_sources),
+                        request.treatment_ceiling,
+                        request.exactness,
                         now,
                         now,
                     ),
@@ -163,6 +166,8 @@ class ShotsStore:
                 "transformation_permission": row["transformation_permission"],
                 "text_zone": row["text_zone"],
                 "approved_sources": json.loads(row["approved_sources_json"]),
+                "treatment_ceiling": row["treatment_ceiling"],
+                "exactness": row["exactness"],
                 "version": row["version"],
             }
 
@@ -185,6 +190,8 @@ class ShotsStore:
                     "transformation_permission": row["transformation_permission"],
                     "text_zone": row["text_zone"],
                     "approved_sources": json.loads(row["approved_sources_json"]),
+                    "treatment_ceiling": row["treatment_ceiling"],
+                    "exactness": row["exactness"],
                     "version": row["version"],
                 }
                 for row in rows

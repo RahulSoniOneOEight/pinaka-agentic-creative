@@ -356,6 +356,18 @@ class ProjectsUseCases:
                     entity_hash=candidate["content_hash"],
                 )
             )
+            self.require_flow_complete(project_id)
+            if self.repository.list_slots(project_id):
+                self.require_slot_picks(project_id)
+            sourcing_manifest = self.current_sourcing_manifest(project_id)
+            if sourcing_manifest:
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=sourcing_manifest["artifact"]["id"],
+                        entity_hash=sourcing_manifest["manifest_hash"],
+                    )
+                )
 
         unique_dependencies = self._deduplicate_dependencies(dependencies)
         subject_hash = sha256_json(
