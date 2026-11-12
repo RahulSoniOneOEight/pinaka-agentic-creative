@@ -160,6 +160,33 @@ type in `contracts/`, with compatible controller/repository/model imports. See
 [architecture](docs/architecture.md), [audio layers](docs/audio-layers.md), and
 [the delivery ledger](docs/implementation/remaining-items.md).
 
+## Production policy gates
+
+The controller now enforces the gap-register policies in code, not only in documentation.
+
+- **Brief as contract**: `plan-from-text` freezes the workable brief, shots and slots into a hashed
+  production contract. Paid work is refused if the brief changes afterwards.
+- **Generation last**: `add-slot`, `record-sourcing-decision` and `record-sourcing-candidate` record
+  the owned/stock/manual/deterministic/generated cascade. A paid `image.generate`,
+  `video.generate` or `avatar.generate` item needs a `slot_id`, an approved generated source and a
+  decision with providers, candidates considered and a rejection reason.
+- **Two-pick**: `pick-slot-assets` requires an eligible primary and an independent backup. Final
+  approval refuses a visual slot without both.
+- **Motion**: `record-motion-level` records M0-M5 per shot; character shots must reach M1 before
+  animatic approval.
+- **Flow ledger**: `record-flow-step` and `flow-log` keep the append-only G0-G7 record. Skipped and
+  not-applicable steps need a reason and approver; blocked steps need a next action.
+- **A/B**: `declare-ab`, `bind-ab-variant` and `ab-status` enforce a declared experiment with two
+  distinct hashed renders.
+- **Effects and sound**: `record-effects-plan` validates camera, transition, light, particle and SFX
+  cues, their rights and the kids flash-rate limit.
+- **Delivery**: `production-record` exports hashed JSON and Markdown; `change-request` writes
+  `CHANGE-REQUEST.md` and YAML for every element, slot and artifact hash; `quality-bar` checks all
+  gates, not only technical QA.
+
+`quality-bar` is the release gate: it reports each gate as pass/fail and lists the failures. A
+technical QA pass alone does not pass the bar.
+
 The archived 10-second pilot remains the verified production baseline.
 
 Local tools now include FFmpeg, ImageMagick, Playwright/Chromium, Blender, Inkscape, GIMP, Krita,
