@@ -435,6 +435,50 @@ def test_approving_a_variance_cannot_exceed_the_project_budget(controller):
     assert controller.repository.get_project(project.id).reserved.minor == 40
 
 
+def test_pending_variance_freezes_new_paid_reservations(controller):
+    project = create_project(controller, budget="10.00")
+    plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]
+    first = controller.reserve_budget_item(project.id, plan["id"], "hero-image", _job())
+    pending = controller.settle_budget_item(
+        project.id,
+        first["job"]["id"],
+        actual_cost=Money(amount=Decimal("0.70"), currency="USD"),
+    )["request"]
+
+    second = JobRequest(
+        provider="elevenlabs",
+        endpoint="https://api.elevenlabs.io",
+        operation="speech",
+        idempotency_key="narration-run",
+        estimated_cost=Money(amount=Decimal("0.30"), currency="USD"),
+    )
+    with pytest.raises(ApprovalRequiredError, match="awaiting approval"):
+        controller.reserve_budget_item(project.id, plan["id"], "narration", second)
+
+    free = JobRequest(
+        provider="local",
+        endpoint="local:kokoro",
+        operation="speech.synthesize",
+        idempotency_key="free-local",
+        estimated_cost=Money(amount=Decimal(0), currency="USD"),
+    )
+    assert controller.reserve_job(project.id, free).status == JobStatus.BUDGET_RESERVED
+
+    controller.decide_variance(
+        project.id,
+        VarianceDecisionCreate(
+            request_id=pending["id"],
+            decision="approve",
+            decided_by="producer",
+            reason="Higher resolution was worth the extra spend",
+        ),
+    )
+    allowed = controller.reserve_budget_item(
+        project.id, plan["id"], "narration", second
+    )
+    assert allowed["job"]["status"] == JobStatus.BUDGET_RESERVED.value
+
+
 def test_raise_budget_unblocks_work(controller):
     project = create_project(controller, budget="0.30")
     plan = controller.plan_creative_budget(project.id, _within_plan())["plan"]

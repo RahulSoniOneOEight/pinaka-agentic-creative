@@ -29,6 +29,13 @@ from ._shared import (
 class JobsUseCases:
     def reserve_job(self, project_id: str, request: JobRequest) -> JobRecord:
         self._reject_sensitive_payload(request.model_dump(mode="json"))
+        if request.estimated_cost.minor > 0:
+            pending = self.repository.pending_variance_requests(project_id)
+            if pending:
+                raise ApprovalRequiredError(
+                    "A cost variance is awaiting approval; decide it before new paid "
+                    "work: " + ", ".join(item["id"] for item in pending)
+                )
         if request.required_approval_stage:
             approval = self.repository.active_approval(
                 project_id, request.required_approval_stage.value
