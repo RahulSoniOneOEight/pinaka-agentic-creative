@@ -23,8 +23,8 @@
 | C4 metadata drafting | Closed | Deterministic title/description/hashtags within channel limits; `draft-metadata`; `tests/test_metadata_draft.py` |
 | C5 finishing grade/key/speed | Closed | `grade-asset`, `key-asset`, `change-speed` adapters with hashed receipts; `tests/test_finishing.py` |
 | C6 reference-conditioned stills | Closed (code) | Existing image-edit path now accepts ordered reference images (`image_urls`); live consistency unproven; `tests/test_image_references.py` |
-| C7 beat detection and cuts | Closed | `detect-beats` (local FFmpeg + numpy), `assemble-film --beat-grid` quantization, song-fit planner; `tests/test_beats.py` |
-| C8 avatar / lip sync | Closed (code) | OmniHuman 1.5 and Sync 3 schemas verified from fal's published OpenAPI; adapter, budget route and likeness-consent gate; live call not yet made |
+| C7 beat detection and cuts | Closed | `detect-beats` (local FFmpeg + numpy), `assemble-film --beat-grid` quantization, song-fit planner; closure and non-claims in [implementation/capability-closures.md](implementation/capability-closures.md) |
+| C8 avatar / lip sync | Closed (code) | OmniHuman 1.5 and Sync 3 schemas verified from fal's published OpenAPI; adapter, budget route and likeness-consent gate; live call not yet made; see [implementation/capability-closures.md](implementation/capability-closures.md) |
 | P1 live fal image | **Open — credential unblocked** | `pinaka fal-check` → `authenticated: true`, 200, `id:secret`; no funded still has run yet |
 | P2 live Studio image-to-video/import/assembly | **Blocked, not closed** | Same admission refusal; no accepted paid job exists |
 

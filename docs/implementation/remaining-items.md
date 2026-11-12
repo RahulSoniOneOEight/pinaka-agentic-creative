@@ -111,6 +111,7 @@ ratio. Actual final-mix loudness and true peak remain measured QA; a listening r
   quantization. Song-fit remains a planner.
 - Avatar/lip-sync is implemented against fal's published schemas with a likeness-consent gate and a
   funded `avatar.generate` route. **No live avatar call has been made.**
+- Closure evidence and explicit non-claims for both: [capability-closures.md](capability-closures.md).
 
 ### Final local verification
 
