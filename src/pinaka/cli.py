@@ -1025,6 +1025,36 @@ def cmd_author_composition(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def cmd_assemble_film(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).assemble_film(
+        args.project_id,
+        transition=args.transition,
+        dissolve_seconds=Decimal(args.dissolve),
+        fps=args.fps,
+        width=args.width,
+        height=args.height,
+    )
+
+
+def cmd_motion_takes(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).plan_motion_takes(
+        args.project_id,
+        family=args.model,
+        seconds=args.seconds,
+        resolution=args.resolution,
+        max_takes=args.max_takes,
+    )
+
+
+def cmd_draft_script(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).draft_script(
+        args.project_id,
+        duration_seconds=args.duration,
+        max_words=args.max_words,
+        model=args.model,
+    )
+
+
 def cmd_plan_shot_motion(args: argparse.Namespace) -> dict[str, Any]:
     request = ShotMotionRequest.model_validate(_load_json(args.file))
     return _controller(args).plan_shot_motion(args.project_id, request)
@@ -2505,6 +2535,41 @@ def build_parser() -> argparse.ArgumentParser:
     motion_import_parser.add_argument("project_id")
     motion_import_parser.add_argument("--file", required=True)
     motion_import_parser.set_defaults(handler=cmd_import_shot_motion)
+
+    assembly_parser = subparsers.add_parser(
+        "assemble-film",
+        help="Trim every shot clip to its duration and join the film",
+    )
+    assembly_parser.add_argument("project_id")
+    assembly_parser.add_argument(
+        "--transition", choices=["cut", "dissolve"], default="cut"
+    )
+    assembly_parser.add_argument("--dissolve", default="0.4")
+    assembly_parser.add_argument("--fps", type=int, default=24)
+    assembly_parser.add_argument("--width", type=int, default=1080)
+    assembly_parser.add_argument("--height", type=int, default=1920)
+    assembly_parser.set_defaults(handler=cmd_assemble_film)
+
+    takes_parser = subparsers.add_parser(
+        "motion-takes",
+        help="Plan how many takes fit the remaining budget",
+    )
+    takes_parser.add_argument("project_id")
+    takes_parser.add_argument("--model", default="minimax/h3")
+    takes_parser.add_argument("--seconds", type=float, default=5.0)
+    takes_parser.add_argument("--resolution", default="768p")
+    takes_parser.add_argument("--max-takes", type=int, default=3)
+    takes_parser.set_defaults(handler=cmd_motion_takes)
+
+    script_parser = subparsers.add_parser(
+        "draft-script",
+        help="Draft a short script from the brief with Vertex Gemini",
+    )
+    script_parser.add_argument("project_id")
+    script_parser.add_argument("--duration", type=float)
+    script_parser.add_argument("--max-words", type=int)
+    script_parser.add_argument("--model")
+    script_parser.set_defaults(handler=cmd_draft_script)
 
     composition_parser = subparsers.add_parser(
         "author-composition",

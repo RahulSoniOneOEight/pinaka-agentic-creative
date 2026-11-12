@@ -56,6 +56,19 @@ planning and visual work can continue.
 Proposed slots deliberately exclude paid generation. Widening a slot to allow generation is an
 explicit routing decision.
 
+## Script drafting
+
+```powershell
+pinaka draft-script <project> [--duration 10] [--max-words 24]
+```
+
+`draft-script` asks Vertex Gemini for a short script using the brief's objective, audience, duration
+and any supplied copy, then stores it as an artifact and reports `requires_approval: true`. The draft
+is a proposal: the controller records it as a design artifact, and a human still approves the brief
+that uses it.
+
+Verified in tests with an injected adapter; the live call is untested.
+
 ## CLI
 
 ```powershell

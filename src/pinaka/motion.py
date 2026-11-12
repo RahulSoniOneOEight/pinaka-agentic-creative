@@ -152,3 +152,31 @@ def plan_preview(
         "max_seconds": model(family).max_seconds,
         "modes": list(model(family).modes),
     }
+
+
+def affordable_takes(
+    *,
+    family: str,
+    seconds: float,
+    resolution: str,
+    available_minor: int,
+    max_takes: int = 3,
+) -> dict[str, object]:
+    """How many takes fit the remaining budget, without spending anything."""
+
+    if max_takes < 1:
+        raise ValueError("max_takes must be at least 1")
+    per_take = estimate_minor(family, seconds=seconds, resolution=resolution)
+    affordable = max(0, available_minor // per_take)
+    takes = min(max_takes, affordable)
+    return {
+        "model": family,
+        "resolution": resolution,
+        "seconds": seconds,
+        "per_take_minor": per_take,
+        "available_minor": available_minor,
+        "affordable_takes": takes,
+        "planned_takes": takes,
+        "total_minor": per_take * takes,
+        "max_takes": max_takes,
+    }

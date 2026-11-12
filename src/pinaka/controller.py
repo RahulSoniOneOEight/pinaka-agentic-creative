@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Any
 
 from .adapters.animatic import DeterministicAnimaticAdapter
+from .adapters.assembly import FFmpegAssemblyAdapter
 from .adapters.base import GenerationAdapter
 from .adapters.burned_captions import BurnedCaptionAdapter
 from .adapters.captions import CaptionMuxAdapter
@@ -122,6 +123,7 @@ from .models import (
     VarianceDecisionCreate,
     WorkableBriefCreate,
 )
+from .motion import affordable_takes
 from .motion import estimate_minor as estimate_motion_minor
 from .motion import supports as motion_supports
 from .planning import (
@@ -153,9 +155,12 @@ from .utils import canonical_json, sha256_bytes, sha256_file, sha256_json, utc_n
 from .vertex import (
     DEFAULT_LOCATION,
     DEFAULT_PROJECT,
+    SCRIPT_MODEL,
     TTS_MODEL,
+    VertexScriptAdapter,
     VertexTTSAdapter,
     estimate_tts_cost_minor,
+    script_prompt,
     verify_models,
     vertex_provider_profile,
 )
@@ -3666,6 +3671,202 @@ class CreativeController:
                 else None
             ),
         )
+
+    def assemble_film(
+        self,
+        project_id: str,
+        *,
+        transition: str = "cut",
+        dissolve_seconds: Decimal = Decimal("0.4"),
+        fps: int = 24,
+        width: int = 1080,
+        height: int = 1920,
+        adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        """Trim every shot clip to its planned duration and join the film."""
+
+        if transition not in {"cut", "dissolve"}:
+            raise IntegrityError("transition must be 'cut' or 'dissolve'")
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(f"Cannot assemble a {project.status.value} project")
+        shots = self.repository.list_shots(project_id)
+        if not shots:
+            raise IntegrityError("Assembly requires a shot plan")
+        slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
+        assignments = self.repository.list_slot_assets(project_id)
+        segments: list[tuple[Any, Decimal]] = []
+        used: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for shot in shots:
+            clip = None
+            for assignment in assignments:
+                slot = slots.get(assignment["slot_id"])
+                if not slot or slot["shot_id"] != shot["id"]:
+                    continue
+                if slot["role"].lower() != "motion":
+                    continue
+                if assignment["role"] != SlotAssetRole.PRIMARY.value:
+                    continue
+                clip = self.repository.get_artifact(assignment["artifact_id"])
+                break
+            if clip is None:
+                missing.append(shot["stable_key"])
+                continue
+            path = self.artifact_store.resolve(project_id, clip["relative_path"])
+            if not path.is_file():
+                raise NotFoundError(f"Clip file missing: {path.name}")
+            segments.append((path, Decimal(str(shot["duration_seconds"]))))
+            used.append(
+                {
+                    "shot": shot["stable_key"],
+                    "artifact_id": clip["id"],
+                    "content_hash": clip["content_hash"],
+                }
+            )
+        if missing:
+            raise IntegrityError(
+                "Every shot needs an attached clip before assembly: "
+                + ", ".join(missing)
+            )
+        import tempfile
+        from pathlib import Path as _Path
+
+        with tempfile.TemporaryDirectory(prefix="pinaka-assembly-") as temp:
+            output = _Path(temp) / "film.mp4"
+            result = (adapter or FFmpegAssemblyAdapter()).assemble(
+                segments=segments,
+                output_path=output,
+                transition=transition,
+                dissolve_seconds=dissolve_seconds,
+                fps=fps,
+                width=width,
+                height=height,
+            )
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.RENDER,
+            relative_path=f"renders/film-{result.content_hash[:12]}.mp4",
+            content=result.content,
+            operation={
+                "type": "film_assembly",
+                "transition": transition,
+                "dissolve_seconds": str(dissolve_seconds),
+                "fps": fps,
+                "shots": [item["shot"] for item in used],
+                "command_hash": result.command_hash,
+                "encoder_version": result.encoder_version,
+            },
+            dependencies=tuple(
+                DependencyRef(
+                    entity_type="artifact",
+                    entity_id=item["artifact_id"],
+                    entity_hash=item["content_hash"],
+                )
+                for item in used
+            ),
+        )
+        return {
+            "video": artifact,
+            "transition": transition,
+            "total_seconds": str(result.total_seconds),
+            "segments": used,
+            "metadata": result.metadata,
+        }
+
+    def draft_script(
+        self,
+        project_id: str,
+        *,
+        duration_seconds: float | None = None,
+        max_words: int | None = None,
+        adapter: Any | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Draft a short script from the brief; the human still approves it."""
+
+        project = self.repository.get_project(project_id)
+        if project.status in {ProjectStatus.ARCHIVED, ProjectStatus.CANCELLED}:
+            raise ConflictError(
+                f"Cannot draft a script for a {project.status.value} project"
+            )
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            raise IntegrityError("A current workable brief is required")
+        package = brief["package"]
+        seconds = float(duration_seconds or project.duration_seconds)
+        words = int(max_words or max(12, round(seconds * 2.4)))
+        supplied = next(
+            (
+                decision["value"]
+                for decision in package["decisions"]
+                if decision["field"] == "script.spoken_copy"
+                and isinstance(decision["value"], str)
+            ),
+            None,
+        )
+        prompt = script_prompt(
+            objective=package.get("objective", project.objective),
+            audience=package.get("audience", project.audience),
+            duration_seconds=seconds,
+            max_words=words,
+            supplied_copy=supplied,
+        )
+        text = (adapter or VertexScriptAdapter(model=model or SCRIPT_MODEL)).draft(
+            prompt=prompt, max_words=words
+        )
+        content = text.encode("utf-8")
+        digest = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"inputs/script-draft-{digest[:12]}.md",
+            content=content,
+            operation={
+                "type": "script_draft",
+                "model": model or SCRIPT_MODEL,
+                "duration_seconds": seconds,
+                "max_words": words,
+                "words": len(text.split()),
+                "provider": "google-vertex",
+            },
+            dependencies=(
+                DependencyRef(entity_type="workable_brief", entity_id=brief["id"]),
+            ),
+        )
+        return {
+            "text": text,
+            "artifact": artifact,
+            "words": len(text.split()),
+            "max_words": words,
+            "requires_approval": True,
+        }
+
+    def plan_motion_takes(
+        self,
+        project_id: str,
+        *,
+        family: str,
+        seconds: float,
+        resolution: str,
+        max_takes: int = 3,
+    ) -> dict[str, Any]:
+        """Plan how many takes fit the remaining budget; never spends."""
+
+        project = self.repository.get_project(project_id)
+        available = (
+            project.max_budget.minor - project.spent.minor - project.reserved.minor
+        )
+        plan = affordable_takes(
+            family=family,
+            seconds=seconds,
+            resolution=resolution,
+            available_minor=available,
+            max_takes=max_takes,
+        )
+        plan["project_id"] = project_id
+        plan["currency"] = project.max_budget.currency
+        return plan
 
     def plan_shot_motion(
         self, project_id: str, request: ShotMotionRequest

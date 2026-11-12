@@ -254,6 +254,81 @@ class VertexTranscriptionAdapter:
         )
 
 
+SCRIPT_MODEL = "gemini-2.5-flash"
+
+
+@dataclass
+class VertexScriptAdapter:
+    """Draft a short script with Gemini text on Vertex AI (ADC)."""
+
+    profile_key: str = "google-vertex-script"
+    model: str = SCRIPT_MODEL
+    client: Any | None = None
+    project: str | None = None
+    location: str | None = None
+
+    def _client(self) -> Any:
+        if self.client is not None:
+            return self.client
+        try:
+            from google import genai
+        except ImportError as error:
+            raise ConfigurationError(
+                "google-genai is not installed; install the gcp-image extra"
+            ) from error
+        self.client = genai.Client(
+            vertexai=True,
+            project=self.project or DEFAULT_PROJECT,
+            location=self.location or DEFAULT_LOCATION,
+        )
+        return self.client
+
+    def draft(self, *, prompt: str, max_words: int) -> str:
+        if max_words < 5:
+            raise ValueError("max_words is too small for a script")
+        client = self._client()
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config={"temperature": 0.7, "max_output_tokens": 512},
+            )
+        except Exception as error:  # noqa: BLE001 - provider SDK raises broadly
+            raise RuntimeError(
+                f"Vertex script request failed: {type(error).__name__}"
+            ) from None
+        text = str(getattr(response, "text", "") or "").strip()
+        if not text:
+            raise RuntimeError("Vertex returned no script text")
+        words = text.split()
+        if len(words) > max_words:
+            text = " ".join(words[:max_words]).rstrip(" ,;:") + "."
+        return text
+
+
+def script_prompt(
+    *,
+    objective: str,
+    audience: str,
+    duration_seconds: float,
+    max_words: int,
+    supplied_copy: str | None = None,
+) -> str:
+    """Deterministic instruction used for a script draft."""
+
+    lines = [
+        f"Write a short, gentle script for {audience}.",
+        f"Objective: {objective}",
+        f"It must read aloud in about {duration_seconds:g} seconds.",
+        f"Use at most {max_words} words, in short lines that scan easily.",
+        "Plain words only: no brands, no claims, no prices, no protected characters.",
+        "Return the script text only, with no headings or commentary.",
+    ]
+    if supplied_copy:
+        lines.append(f"Keep this supplied copy verbatim where it fits: {supplied_copy}")
+    return "\n".join(lines)
+
+
 def verify_models(
     models: tuple[str, ...] = VERIFIABLE_MODELS,
     *,

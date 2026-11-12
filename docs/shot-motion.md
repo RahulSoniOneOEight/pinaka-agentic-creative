@@ -87,6 +87,31 @@ clip's own timecode at 2 with the beat text on top.
 The packet records `one_take_per_request: true` and `auto_retry: false` so a host cannot silently
 re-roll.
 
+## Take planning
+
+```powershell
+pinaka motion-takes <project> --model minimax/h3 --seconds 5 --resolution 768p
+```
+
+Returns how many takes fit the **remaining** budget without spending anything. Three takes of
+`minimax/h3` at 768p cost 90 minor against a $10 balance; a $0.20 balance reports zero. The take count
+is planned, not automatic: each take is still a separate authorized request, because Studio never
+silently re-rolls.
+
+## Assembly
+
+```powershell
+pinaka assemble-film <project> [--transition cut|dissolve] [--dissolve 0.4] [--fps 24]
+```
+
+- Every shot must have an attached clip; assembly refuses with the missing shot keys otherwise.
+- Each clip is trimmed to its planned shot duration, scaled, padded to the target frame, and joined.
+- `cut` concatenates; `dissolve` overlaps shots by `--dissolve` seconds with an `xfade`, so the film
+  shortens by that amount per join.
+- The result is a silent H.264 master (`renders/film-<hash>.mp4`) depending on every clip used.
+
+Verified locally with two synthetic clips: cut produced 10.2 s, dissolve 9.3 s for the same shots.
+
 ## Choosing a model
 
 | Need | Use |
