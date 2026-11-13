@@ -326,6 +326,8 @@ class AudioUseCases:
                 "audio_artifact_id": audio["id"],
                 "loudness": muxed.loudness,
                 "audio_layers": layers["summary"],
+                "execution_owner": "local",
+                "studio_role": "none",
             },
             dependencies=(
                 DependencyRef(

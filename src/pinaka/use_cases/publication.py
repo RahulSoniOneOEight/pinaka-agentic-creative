@@ -115,7 +115,7 @@ class PublicationUseCases:
         if not final_approval or not final_approval["output_hash"]:
             raise ApprovalRequiredError("Active exact-hash final approval is required")
         manifest = {
-            "schema_version": 2,
+            "schema_version": 3,
             "project": project.model_dump(mode="json"),
             "final_approval": final_approval,
             "approvals": {
@@ -137,6 +137,8 @@ class PublicationUseCases:
                 for item in self.repository.list_deliverables(project_id)
             ],
             "segments": self.repository.list_segments(project_id),
+            "ab": self.ab_status(project_id),
+            "ab_delivery": self.repository.latest_ab_delivery(project_id),
             "artifacts": self.repository.list_artifacts(project_id),
             "tool_operations": self.repository.list_tool_operations(project_id),
             "qa_results": self.repository.list_qa_results(project_id),

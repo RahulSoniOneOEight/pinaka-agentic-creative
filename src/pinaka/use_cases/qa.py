@@ -45,6 +45,7 @@ class QaUseCases:
         expected_fps: float | None = None,
         expect_audio: bool = True,
         captions_artifact_id: str | None = None,
+        max_true_peak_dbtp: float = -1.0,
         probe: Any | None = None,
         measure_loudness: Any | None = None,
     ) -> dict[str, Any]:
@@ -173,13 +174,20 @@ class QaUseCases:
                 )
                 if peak is not None:
                     peak_status = (
-                        "pass" if peak <= -1.0 else "warn" if peak <= 0.0 else "fail"
+                        "pass"
+                        if peak <= max_true_peak_dbtp
+                        else "warn"
+                        if peak <= max_true_peak_dbtp + 1.0
+                        else "fail"
                     )
                     record(
                         "audio.true_peak",
                         peak_status,
-                        f"true peak {peak:.1f} dBTP",
-                        {"true_peak_dbtp": peak},
+                        f"true peak {peak:.1f} dBTP (limit {max_true_peak_dbtp:.1f})",
+                        {
+                            "true_peak_dbtp": peak,
+                            "limit_dbtp": max_true_peak_dbtp,
+                        },
                     )
         if captions_artifact_id:
             captions = self.repository.get_artifact(captions_artifact_id)

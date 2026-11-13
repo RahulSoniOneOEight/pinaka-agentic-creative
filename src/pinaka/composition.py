@@ -305,6 +305,8 @@ def build_composition(
     foreground: str = "#f5f1e8",
     accent: str = "#f2b544",
     gsap_script: str = "",
+    effects: list[dict[str, Any]] | None = None,
+    target_duration: float | None = None,
 ) -> str:
     """Build one editable HTML/CSS composition from the governed shot plan."""
 
@@ -312,20 +314,51 @@ def build_composition(
         raise CompositionError("A composition needs at least one shot")
     if width <= 0 or height <= 0:
         raise CompositionError("Composition size must be positive")
-    total = sum((_seconds(shot["duration_seconds"]) for shot in shots), Decimal(0))
-    if total <= 0:
+    source_total = sum(
+        (_seconds(shot["duration_seconds"]) for shot in shots), Decimal(0)
+    )
+    if source_total <= 0:
         raise CompositionError("Composition duration must be positive")
+    total = (
+        Decimal(str(target_duration)) if target_duration is not None else source_total
+    )
+    if total <= 0:
+        raise CompositionError("Target duration must be positive")
+    scale = total / source_total
+    effects_by_shot: dict[str, list[dict[str, Any]]] = {}
+    for cue in effects or ():
+        effects_by_shot.setdefault(str(cue.get("shot_key")), []).append(cue)
+    rendered_effects: dict[str, list[str]] = {}
 
     scenes = []
     keyframes = []
+    effect_css: list[str] = []
     timeline = ['  tl.set(".scene", { opacity: 0 }, 0);']
     cursor = Decimal(0)
     for index, shot in enumerate(shots, start=1):
-        duration = _seconds(shot["duration_seconds"])
+        duration = _seconds(shot["duration_seconds"]) * scale
         start, end = cursor, cursor + duration
         cursor = end
+        shot_effects = effects_by_shot.get(str(shot["stable_key"]), [])
+        kinds = [str(cue.get("kind")) for cue in shot_effects]
+        if kinds:
+            rendered_effects[str(shot["stable_key"])] = sorted(set(kinds))
         fade_in = min(Decimal(6), duration / Decimal(4))
         fade_out = min(Decimal(6), duration / Decimal(4))
+        transition = next(
+            (
+                cue
+                for cue in shot_effects
+                if str(cue.get("kind")) in {"transition_fade", "transition_dissolve"}
+            ),
+            None,
+        )
+        if transition is not None:
+            transition_seconds = Decimal(str(transition.get("duration_seconds", 0.5)))
+            if str(transition.get("kind")) == "transition_dissolve":
+                fade_in = min(duration / 2, max(fade_in, transition_seconds))
+            else:
+                fade_in = min(duration / 2, max(fade_in, transition_seconds))
         from_pct = _pct(start + fade_in, total)
         to_pct = _pct(end - fade_out, total)
         opening = (
@@ -417,7 +450,20 @@ def build_composition(
                     )
                 )
         image_layers_html = "".join(layer_html)
-        camera = str((shot.get("requirements") or {}).get("camera", "")).lower()
+        requirements = shot.get("requirements") or {}
+        camera = str(requirements.get("camera") or "").lower()
+        if not camera:
+            camera = str((requirements.get("motion") or {}).get("camera") or "").lower()
+        effect_camera = {
+            "camera_push_in": "push_in",
+            "camera_pull_out": "pull_out",
+            "camera_pan_left": "pan_left",
+            "camera_pan_right": "pan_right",
+        }
+        for cue in shot_effects:
+            mapped = effect_camera.get(str(cue.get("kind")))
+            if mapped:
+                camera = mapped
         camera_animation = ""
         camera_moves = {
             "push_in": ("scale(1)", "scale(1.08)"),
@@ -474,6 +520,83 @@ def build_composition(
                 f'  tl.fromTo("#camera-{index}", {start_state}, '
                 f"{end_state.replace('DUR', _js(duration))}, {_js(start)});"
             )
+        effect_html: list[str] = []
+        for effect_index, cue in enumerate(shot_effects, start=1):
+            kind = str(cue.get("kind"))
+            if kind in {
+                "camera_push_in",
+                "camera_pull_out",
+                "camera_pan_left",
+                "camera_pan_right",
+                "parallax",
+                "sfx",
+                "music_bed",
+            }:
+                continue
+            name = f"fx-{index}-{effect_index}"
+            cue_start = max(0.0, float(cue.get("start_seconds", 0)) - float(start))
+            cue_duration = max(0.2, float(cue.get("duration_seconds", 1.0)))
+            if kind == "light_glow":
+                effect_css.append(
+                    f"@keyframes {name} {{ from {{ opacity: .15; transform: scale(.94); }}"
+                    f" to {{ opacity: .72; transform: scale(1.06); }} }}"
+                )
+                effect_html.append(
+                    f'<div class="fx fx-glow" data-effect="light_glow" '
+                    f'style="animation:{name} {cue_duration}s ease-in-out '
+                    f'{cue_start}s infinite alternate"></div>'
+                )
+            elif kind == "blur":
+                effect_css.append(
+                    f"@keyframes {name} {{ from {{ opacity: .65; }}"
+                    f" to {{ opacity: .2; }} }}"
+                )
+                effect_html.append(
+                    f'<div class="fx fx-blur" data-effect="blur" '
+                    f'style="animation:{name} {cue_duration}s ease-in-out '
+                    f'{cue_start}s infinite alternate"></div>'
+                )
+            elif kind == "particles":
+                dots = []
+                for dot in range(8):
+                    left = 12 + (dot * 11 + index * 7) % 76
+                    top = 18 + (dot * 17 + index * 13) % 64
+                    delay = round((dot % 4) * 0.35 + cue_start, 2)
+                    dots.append(
+                        f'<span style="left:{left}%;top:{top}%;'
+                        f'animation-delay:{delay}s"></span>'
+                    )
+                effect_css.append(
+                    f"@keyframes {name} {{ 0% {{ transform: translateY(12px);"
+                    f" opacity: 0; }} 25% {{ opacity: .8; }}"
+                    f" 100% {{ transform: translateY(-26px); opacity: 0; }} }}"
+                )
+                effect_html.append(
+                    f'<div class="fx fx-particles" data-effect="particles" '
+                    f'style="animation:{name} {cue_duration}s linear {cue_start}s infinite">'
+                    f"{''.join(dots)}</div>"
+                )
+            elif kind == "flash":
+                effect_css.append(
+                    f"@keyframes {name} {{ 0%, 100% {{ opacity: 0; }}"
+                    f" 8% {{ opacity: .85; }} 20% {{ opacity: 0; }} }}"
+                )
+                effect_html.append(
+                    f'<div class="fx fx-flash" data-effect="flash" '
+                    f'style="animation:{name} {cue_duration}s ease-out '
+                    f'{cue_start}s 1"></div>'
+                )
+            elif kind in {"transition_fade", "transition_dissolve"}:
+                effect_css.append(
+                    f"@keyframes {name} {{ from {{ opacity: .35; }}"
+                    f" to {{ opacity: 0; }} }}"
+                )
+                effect_html.append(
+                    f'<div class="fx fx-transition" data-effect="{kind}" '
+                    f'style="animation:{name} {cue_duration}s ease-out '
+                    f'{cue_start}s 1 forwards"></div>'
+                )
+        effects_markup = "".join(effect_html)
         scene_timing = (
             ""
             if gsap_script
@@ -487,6 +610,7 @@ def build_composition(
             f"{scene_timing} "
             f'style="animation: scene-{index} {total}s linear infinite">\n'
             f'    <div id="camera-{index}" class="layers" style="{camera_animation}">{image_layers_html}</div>\n'
+            f"    {effects_markup}\n"
             f'    <div class="elements" aria-hidden="true">{labels}</div>\n'
             f"  </section>"
         )
@@ -570,10 +694,36 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
 }}
 .narrative {{ font-size: {max(20, round(height * 0.028))}px; line-height: 1.35; }}
 .elements {{ display: none; }}
+.fx {{
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}}
+.fx-glow {{
+  background: radial-gradient(circle at 50% 42%, rgba(255, 224, 160, 0.7), transparent 62%);
+  mix-blend-mode: screen;
+}}
+.fx-blur {{
+  inset: 28% 18%;
+  border-radius: 50%;
+  backdrop-filter: blur(7px);
+}}
+.fx-particles span {{
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+}}
+.fx-flash {{ background: #ffffff; }}
+.fx-transition {{ background: #000000; }}
 .gsap .scene, .gsap .layer.subject, .gsap .layers {{
   animation: none !important;
 }}
 {"".join(keyframes)}
+{"".join(effect_css)}
 </style>
 </head>
 <body>
@@ -719,12 +869,25 @@ def validate_composition(html: str) -> dict[str, Any]:
         problems.append("baked text layer (captions must stay separate)")
     if "object-fit: contain" in html:
         problems.append("letterboxed layer (full-bleed required)")
+    known_effects = {
+        "light_glow",
+        "blur",
+        "particles",
+        "flash",
+        "transition_fade",
+        "transition_dissolve",
+    }
+    effects = sorted(set(re.findall(r'data-effect="([^"]+)"', html)))
+    unknown_effects = sorted(set(effects) - known_effects)
+    if unknown_effects:
+        problems.append("unknown effect markers: " + ", ".join(unknown_effects))
     return {
         "valid": not problems,
         "problems": problems,
         "shot_count": len(shots),
         "shots": shots,
         "layer_count": layer_count,
+        "effects": effects,
         "bytes": len(html.encode("utf-8")),
     }
 

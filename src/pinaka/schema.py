@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -1040,6 +1040,75 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_scripts_current
 """
 
 
+SCHEMA_V25 = r"""
+CREATE TABLE IF NOT EXISTS change_requests (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    document_schema TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    current_hash TEXT,
+    requested_change TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    deadline TEXT,
+    approver TEXT NOT NULL,
+    approval_reference TEXT,
+    version_scope TEXT NOT NULL DEFAULT 'none',
+    document_hash TEXT,
+    impact_json TEXT,
+    classification TEXT,
+    revision_project_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_change_requests_project
+    ON change_requests(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_change_requests_status
+    ON change_requests(project_id, status);
+
+CREATE TABLE IF NOT EXISTS change_request_events (
+    id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL REFERENCES change_requests(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    reason TEXT,
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_change_request_events_request
+    ON change_request_events(request_id, created_at);
+
+ALTER TABLE projects ADD COLUMN change_request_id TEXT REFERENCES change_requests(id);
+ALTER TABLE budget_plan_items ADD COLUMN variant_label TEXT;
+ALTER TABLE budget_plan_items ADD COLUMN ab_experiment_id TEXT REFERENCES ab_experiments(id);
+CREATE INDEX IF NOT EXISTS idx_budget_plan_items_variant
+    ON budget_plan_items(plan_id, variant_label);
+
+ALTER TABLE flow_steps ADD COLUMN execution_owner TEXT;
+ALTER TABLE flow_steps ADD COLUMN studio_role TEXT;
+ALTER TABLE flow_steps ADD COLUMN fallback_of TEXT;
+
+CREATE TABLE IF NOT EXISTS ab_deliveries (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    experiment_id TEXT NOT NULL REFERENCES ab_experiments(id) ON DELETE CASCADE,
+    output_dir TEXT NOT NULL,
+    manifest_artifact_id TEXT NOT NULL,
+    manifest_hash TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, experiment_id, manifest_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_ab_deliveries_project
+    ON ab_deliveries(project_id, created_at);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -1065,4 +1134,5 @@ MIGRATIONS = {
     22: SCHEMA_V22,
     23: SCHEMA_V23,
     24: SCHEMA_V24,
+    25: SCHEMA_V25,
 }

@@ -162,6 +162,7 @@ class CompositionUseCases:
         height: int = 1920,
         title: str | None = None,
         embed_layers: bool = True,
+        target_duration: float | None = None,
     ) -> dict[str, Any]:
         """Author one editable HyperFrames composition from the governed plan."""
         project = self.repository.get_project(project_id)
@@ -179,6 +180,8 @@ class CompositionUseCases:
         layers, skipped = (
             self._composition_layers(project_id, shots) if embed_layers else ({}, [])
         )
+        effects_plan = self.current_effects_plan(project_id)
+        effects = list(effects_plan["plan"].get("cues", ())) if effects_plan else []
         html = build_composition(
             title=title or project.name,
             width=width,
@@ -187,6 +190,8 @@ class CompositionUseCases:
             elements=elements,
             layers=layers,
             gsap_script=self._gsap_source(),
+            effects=effects,
+            target_duration=target_duration,
         )
         report = validate_composition(html)
         if not report["valid"]:
@@ -206,9 +211,37 @@ class CompositionUseCases:
                 "shots": report["shot_count"],
                 "width": width,
                 "height": height,
+                "effects": report.get("effects", []),
+                "effects_by_shot": {
+                    shot["stable_key"]: sorted(
+                        {
+                            str(cue.get("kind"))
+                            for cue in effects
+                            if cue.get("shot_key") == shot["stable_key"]
+                        }
+                    )
+                    for shot in shots
+                },
+                "effects_plan_hash": (
+                    effects_plan["artifact"]["content_hash"] if effects_plan else None
+                ),
+                "target_duration": target_duration,
+                "execution_owner": "local",
+                "studio_role": "none",
             },
             dependencies=(
                 DependencyRef(entity_type="workable_brief", entity_id=brief["id"]),
+                *(
+                    (
+                        DependencyRef(
+                            entity_type="artifact",
+                            entity_id=effects_plan["artifact"]["id"],
+                            entity_hash=effects_plan["artifact"]["content_hash"],
+                        ),
+                    )
+                    if effects_plan
+                    else ()
+                ),
                 *(
                     DependencyRef(entity_type="shot", entity_id=shot["id"])
                     for shot in shots

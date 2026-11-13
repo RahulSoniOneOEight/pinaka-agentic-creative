@@ -50,6 +50,8 @@ class PexelsSearchResult:
     page: int
     response_hash: str
     durations: tuple[float | None, ...] = ()
+    raw: bytes = b""
+    request_url: str | None = None
 
 
 def dedupe_candidates(
@@ -348,6 +350,8 @@ class PexelsClient:
             page=max(1, page),
             response_hash=response_hash,
             durations=tuple(duration for _, duration in unique),
+            raw=raw,
+            request_url=url,
         )
 
     def search_with_eligibility(

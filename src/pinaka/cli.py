@@ -846,6 +846,9 @@ def cmd_create_revision(args: argparse.Namespace) -> dict[str, Any]:
         language=payload.get("language"),
         duration_seconds=duration,
         max_budget=budget,
+        change_request_id=payload.get("change_request_id"),
+        change_list=tuple(payload.get("change_list", ())),
+        requested_by=payload.get("requested_by", "system"),
     )
     return revision.model_dump(mode="json")
 
@@ -1055,7 +1058,13 @@ def cmd_mux_narration(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def cmd_export_captions(args: argparse.Namespace) -> dict[str, Any]:
-    return _controller(args).export_captions(args.project_id)
+    return _controller(args).export_captions(
+        args.project_id,
+        locale=args.locale,
+        source=args.source,
+        narration_artifact_id=args.narration,
+        pad_to_seconds=args.pad_to,
+    )
 
 
 def cmd_qa_render(args: argparse.Namespace) -> dict[str, Any]:
@@ -1067,6 +1076,8 @@ def cmd_qa_render(args: argparse.Namespace) -> dict[str, Any]:
         expected_height=args.height,
         expected_fps=args.fps,
         expect_audio=not args.no_audio,
+        captions_artifact_id=args.captions,
+        max_true_peak_dbtp=args.max_true_peak,
     )
 
 
@@ -1506,6 +1517,25 @@ def cmd_change_request(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).change_request(args.project_id, output_dir=args.output)
 
 
+def cmd_submit_change_request(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).submit_change_request(
+        args.project_id, path=args.file, submitted_by=args.submitted_by
+    )
+
+
+def cmd_decide_change_request(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).decide_change_request(
+        args.request_id,
+        decision=args.decision,
+        decided_by=args.by,
+        reason=args.reason,
+    )
+
+
+def cmd_change_request_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).change_request_status(args.project_id, args.request)
+
+
 def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
     payload = _load_json(args.file)
     return _controller(args).create_ab_experiment(
@@ -1522,6 +1552,12 @@ def cmd_bind_ab_variant(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_ab_status(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).ab_status(args.project_id)
+
+
+def cmd_ab_delivery(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).build_ab_delivery_package(
+        args.project_id, args.output, experiment_id=args.experiment
+    )
 
 
 def cmd_record_motion_level(args: argparse.Namespace) -> dict[str, Any]:
@@ -2892,9 +2928,20 @@ def build_parser() -> argparse.ArgumentParser:
     composition_parser.set_defaults(handler=cmd_author_composition, embed_layers=True)
 
     captions_export_parser = subparsers.add_parser(
-        "export-captions", help="Write a deterministic SRT from the shot plan"
+        "export-captions",
+        help="Write an SRT from narration ASR when present, else the shot plan",
     )
     captions_export_parser.add_argument("project_id")
+    captions_export_parser.add_argument(
+        "--source", choices=("auto", "asr", "plan"), default="auto"
+    )
+    captions_export_parser.add_argument("--locale")
+    captions_export_parser.add_argument("--narration")
+    captions_export_parser.add_argument(
+        "--pad-to",
+        type=float,
+        help="Extend the final cue to this runtime so coverage passes",
+    )
     captions_export_parser.set_defaults(handler=cmd_export_captions)
 
     captions_burn_parser = subparsers.add_parser(
@@ -2919,6 +2966,15 @@ def build_parser() -> argparse.ArgumentParser:
     qa_render_parser.add_argument("--height", type=int)
     qa_render_parser.add_argument("--fps", type=float)
     qa_render_parser.add_argument("--no-audio", action="store_true")
+    qa_render_parser.add_argument(
+        "--captions", help="Caption artifact to score for coverage and timing"
+    )
+    qa_render_parser.add_argument(
+        "--max-true-peak",
+        type=float,
+        default=-1.0,
+        help="True-peak ceiling in dBTP (kids profiles use -2.0)",
+    )
     qa_render_parser.set_defaults(handler=cmd_qa_render)
 
     mux_parser = subparsers.add_parser(
@@ -3145,6 +3201,35 @@ def build_parser() -> argparse.ArgumentParser:
     change_request_parser.add_argument("--output")
     change_request_parser.set_defaults(handler=cmd_change_request)
 
+    change_submit_parser = subparsers.add_parser(
+        "submit-change-request",
+        help="Parse, validate and score a filled change-request template",
+    )
+    change_submit_parser.add_argument("project_id")
+    change_submit_parser.add_argument("--file", required=True)
+    change_submit_parser.add_argument("--submitted-by")
+    change_submit_parser.set_defaults(handler=cmd_submit_change_request)
+
+    change_decide_parser = subparsers.add_parser(
+        "decide-change-request",
+        help="Approve or reject an analysed change request",
+    )
+    change_decide_parser.add_argument("request_id")
+    change_decide_parser.add_argument(
+        "--decision", choices=("approve", "reject"), required=True
+    )
+    change_decide_parser.add_argument("--by", required=True)
+    change_decide_parser.add_argument("--reason", required=True)
+    change_decide_parser.set_defaults(handler=cmd_decide_change_request)
+
+    change_status_parser = subparsers.add_parser(
+        "change-request-status",
+        help="Show one request with its events and revisions, or list requests",
+    )
+    change_status_parser.add_argument("project_id")
+    change_status_parser.add_argument("--request")
+    change_status_parser.set_defaults(handler=cmd_change_request_status)
+
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",
         help="Declare the A/B axis, hypothesis, metric, split and sample plan",
@@ -3166,6 +3251,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ab_status_parser.add_argument("project_id")
     ab_status_parser.set_defaults(handler=cmd_ab_status)
+
+    ab_delivery_parser = subparsers.add_parser(
+        "ab-delivery",
+        help="Package A/, B/, experiment.json and metrics-plan.json",
+    )
+    ab_delivery_parser.add_argument("project_id")
+    ab_delivery_parser.add_argument("--output", required=True)
+    ab_delivery_parser.add_argument("--experiment")
+    ab_delivery_parser.set_defaults(handler=cmd_ab_delivery)
 
     motion_parser = subparsers.add_parser(
         "record-motion-level",

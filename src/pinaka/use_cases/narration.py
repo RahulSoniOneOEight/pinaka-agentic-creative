@@ -276,6 +276,8 @@ class NarrationUseCases:
                 "speed": result.speed,
                 "model": result.model_name,
                 "sample_rate": result.sample_rate,
+                "execution_owner": "local",
+                "studio_role": "none",
             },
             dependencies=(
                 DependencyRef(

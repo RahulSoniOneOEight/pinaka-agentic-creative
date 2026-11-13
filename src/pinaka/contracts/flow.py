@@ -18,6 +18,8 @@ FlowStatus = Literal["done", "skipped", "not_applicable", "blocked", "failed"]
 Treatment = Literal["as_is", "correct", "ai_enhance", "composite", "generate"]
 CandidateRole = Literal["primary", "backup", "variant_a", "variant_b"]
 MotionLevel = Literal["M0", "M1", "M2", "M3", "M4", "M5"]
+ExecutionOwner = Literal["studio", "local", "hybrid", "external", "none"]
+StudioRole = Literal["owner", "primary", "fallback", "advisory", "library", "none"]
 
 
 class SourcingDecisionCreate(StrictModel):
@@ -68,6 +70,22 @@ class FlowStepCreate(StrictModel):
     approved_by: str | None = Field(default=None, max_length=200)
     next_action: str | None = Field(default=None, max_length=500)
     trade_off: str | None = Field(default=None, max_length=1000)
+    execution_owner: ExecutionOwner | None = None
+    studio_role: StudioRole | None = None
+    fallback_of: ExecutionOwner | None = None
+
+    @model_validator(mode="after")
+    def studio_fallback_is_recorded(self) -> FlowStepCreate:
+        if (
+            self.studio_role in {"owner", "primary", "fallback"}
+            and not (self.trade_off or "").strip()
+        ):
+            raise ValueError(
+                f"A Studio {self.studio_role} step requires a quality trade_off"
+            )
+        if self.studio_role == "fallback" and self.fallback_of is None:
+            raise ValueError("A Studio fallback step requires fallback_of")
+        return self
 
     @model_validator(mode="after")
     def status_requires_evidence_or_reason(self) -> FlowStepCreate:

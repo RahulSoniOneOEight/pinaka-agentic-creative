@@ -25,6 +25,8 @@ class BudgetPlanItemCreate(StrictModel):
     priority: BudgetPriority = BudgetPriority.REQUIRED
     shot_id: str | None = Field(default=None, max_length=120)
     slot_id: str | None = Field(default=None, max_length=120)
+    variant_label: Literal["A", "B"] | None = None
+    ab_experiment_id: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=1000)
 
 
@@ -48,6 +50,11 @@ class BudgetPlanCreate(StrictModel):
         currencies = {item.estimated_cost.currency for item in self.items}
         if len(currencies) != 1:
             raise ValueError("All budget items must share one currency")
+        for item in self.items:
+            if item.ab_experiment_id and not item.variant_label:
+                raise ValueError(
+                    "A budget item bound to an A/B experiment needs a variant_label"
+                )
         return self
 
     @property

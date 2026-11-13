@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 
 from ..assets import (
     AssetCriteria,
@@ -12,6 +14,7 @@ from ..assets import (
 from ..enums import (
     ArtifactKind,
     AssetEligibilityStatus,
+    CapabilityStatus,
 )
 from ..errors import (
     ConflictError,
@@ -25,9 +28,10 @@ from ..models import (
     AssetEligibilityResult,
     AssetRightsRecord,
     AssetUseContext,
+    CapabilityResult,
 )
 from ..sourcing import clear_resolved_uncertainty, evaluate_asset_candidate
-from ..utils import sha256_bytes, sha256_json
+from ..utils import sha256_bytes, sha256_json, utc_now
 
 
 class SourcingUseCases:
@@ -93,6 +97,44 @@ class SourcingUseCases:
             ),
         )
 
+    def archive_search_evidence(
+        self,
+        project_id: str,
+        *,
+        provider: str,
+        request_url: str,
+        content: bytes,
+        response_hash: str,
+        media_type: str = "image",
+    ) -> dict[str, Any]:
+        """Archive a provider API response as immutable licence evidence."""
+
+        self.repository.get_project(project_id)
+        relative = f"references/evidence/{provider}-search-{response_hash[:12]}.json"
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.REFERENCE,
+            relative_path=relative,
+            content=content,
+            operation={
+                "type": "api_response_evidence",
+                "provider": provider,
+                "request_url": request_url,
+                "response_hash": response_hash,
+                "media_type": media_type,
+                "fetched_at": utc_now(),
+                "execution_owner": "external",
+                "studio_role": "none",
+            },
+        )
+        return {
+            "artifact": artifact,
+            "provider": provider,
+            "request_url": request_url,
+            "response_hash": response_hash,
+            "media_type": media_type,
+        }
+
     def capture_asset_evidence(
         self,
         project_id: str,
@@ -115,7 +157,60 @@ class SourcingUseCases:
         pages.append(("licence_page", str(candidate.rights.license_url)))
         documents: list[dict[str, Any]] = []
         for kind, url in pages:
-            document = capture_document(kind, url, fetcher=fetcher, timeout=timeout)
+            try:
+                document = capture_document(kind, url, fetcher=fetcher, timeout=timeout)
+            except (HTTPError, URLError) as error:
+                status_code = getattr(error, "code", None)
+                detail = (
+                    f"{provider} {kind} page returned HTTP {status_code}"
+                    if status_code
+                    else f"{provider} {kind} page is unreachable: {error}"
+                )
+                blocked = json.dumps(
+                    {
+                        "schema": "provider-blocked/v1",
+                        "provider": provider,
+                        "asset_id": candidate.source.provider_asset_id,
+                        "kind": kind,
+                        "url": url,
+                        "status": status_code,
+                        "detail": detail,
+                        "observed_at": utc_now(),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ).encode("utf-8")
+                digest = sha256_bytes(blocked)
+                artifact = self.write_artifact(
+                    project_id,
+                    kind=ArtifactKind.REFERENCE,
+                    relative_path=(
+                        f"references/evidence/{provider}-{asset_key}-blocked-"
+                        f"{digest[:12]}.json"
+                    ),
+                    content=blocked,
+                    operation={
+                        "type": "provider_blocked",
+                        "provider": provider,
+                        "kind": kind,
+                        "url": url,
+                        "status": status_code,
+                        "detail": detail,
+                        "observed_at": utc_now(),
+                    },
+                )
+                self.repository.record_capability(
+                    CapabilityResult(
+                        name=f"asset-provider:{provider}",
+                        status=CapabilityStatus.UNAVAILABLE,
+                        detail=detail,
+                        checked_at=utc_now(),
+                    )
+                )
+                raise RightsEligibilityError(
+                    f"{detail}; blocked evidence archived as "
+                    f"{artifact['relative_path']}"
+                ) from error
             evidence = document.evidence
             relative = (
                 f"references/licence/{provider}-{asset_key}-{kind}-"

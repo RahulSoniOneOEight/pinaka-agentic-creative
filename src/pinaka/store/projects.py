@@ -34,8 +34,8 @@ class ProjectsStore:
                     INSERT INTO projects(
                         id, slug, name, objective, mode, audience, output_format, language,
                         duration_seconds, status, max_budget_minor, currency, parent_project_id,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        change_request_id, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         project_id,
@@ -51,6 +51,7 @@ class ProjectsStore:
                         request.max_budget.minor,
                         request.max_budget.currency,
                         request.parent_project_id,
+                        request.change_request_id,
                         now,
                         now,
                     ),
@@ -65,7 +66,12 @@ class ProjectsStore:
                 entity_type="project",
                 entity_id=project_id,
                 event_type="project.created",
-                payload={"slug": slug, "status": ProjectStatus.DRAFT.value},
+                payload={
+                    "slug": slug,
+                    "status": ProjectStatus.DRAFT.value,
+                    "parent_project_id": request.parent_project_id,
+                    "change_request_id": request.change_request_id,
+                },
             )
             return self._project_from_row(self._require_project(connection, project_id))
 

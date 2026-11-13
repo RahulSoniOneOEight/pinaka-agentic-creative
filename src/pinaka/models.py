@@ -18,6 +18,10 @@ from .contracts import BudgetPlanCreate as BudgetPlanCreate
 from .contracts import BudgetPlanItemCreate as BudgetPlanItemCreate
 from .contracts import BudgetRaiseCreate as BudgetRaiseCreate
 from .contracts import CapabilityResult as CapabilityResult
+from .contracts import ChangeRequestCreate as ChangeRequestCreate
+from .contracts import ChangeRequestDecision as ChangeRequestDecision
+from .contracts import ChangeRequestItemCreate as ChangeRequestItemCreate
+from .contracts import ChangeRequestRecord as ChangeRequestRecord
 from .contracts import ClientProfile as ClientProfile
 from .contracts import CreativeElementCreate as CreativeElementCreate
 from .contracts import DeliverableCreate as DeliverableCreate

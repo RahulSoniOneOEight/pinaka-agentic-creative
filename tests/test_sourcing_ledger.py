@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 
+from pinaka.assets import AssetCriteria
 from pinaka.contracts.flow import (
     ABExperimentCreate,
     ABVariantBind,
@@ -11,7 +12,12 @@ from pinaka.contracts.flow import (
     SourcingCandidateCreate,
     SourcingDecisionCreate,
 )
-from pinaka.enums import ApprovalStage, ArtifactKind, ProjectStatus
+from pinaka.enums import (
+    ApprovalStage,
+    ArtifactKind,
+    ProjectStatus,
+    SlotAssetRole,
+)
 from pinaka.errors import ConflictError, IntegrityError, NotFoundError
 from pinaka.models import (
     ApprovalRequest,
@@ -230,6 +236,26 @@ def test_final_approval_requires_two_picks_for_visual_slots(controller):
             reason="Two independent pond clips",
         ),
     )
+    for role, name in (
+        (SlotAssetRole.PRIMARY, "primary"),
+        (SlotAssetRole.BACKUP, "backup"),
+    ):
+        artifact = controller.write_artifact(
+            project.id,
+            kind=ArtifactKind.DERIVATIVE,
+            relative_path=f"assets/derived/{slot['stable_key']}-{name}.png",
+            content=f"{slot['stable_key']}:{name}".encode(),
+            operation={"type": "owned_cutout", "slot_id": slot["id"]},
+        )
+        controller.assign_slot_asset(
+            project.id,
+            slot["id"],
+            artifact_id=artifact["id"],
+            role=role,
+            criteria=AssetCriteria(),
+            decided_by="producer",
+        )
+    controller.write_delivery_metadata(project.id)
     approval = controller.approve(
         project.id,
         ApprovalRequest(

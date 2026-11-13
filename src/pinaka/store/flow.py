@@ -44,6 +44,9 @@ class FlowStore:
             "approved_by": row["approved_by"],
             "next_action": row["next_action"],
             "trade_off": row["trade_off"],
+            "execution_owner": row["execution_owner"],
+            "studio_role": row["studio_role"],
+            "fallback_of": row["fallback_of"],
             "created_at": row["created_at"],
         }
 
@@ -154,8 +157,9 @@ class FlowStore:
                 INSERT INTO flow_steps(
                     id, project_id, step, status, reason, actor, tool,
                     tool_version, evidence_json, approval_id, approved_by,
-                    next_action, trade_off, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    next_action, trade_off, execution_owner, studio_role,
+                    fallback_of, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     step_id,
@@ -171,6 +175,9 @@ class FlowStore:
                     request.approved_by,
                     request.next_action,
                     request.trade_off,
+                    request.execution_owner,
+                    request.studio_role,
+                    request.fallback_of,
                     now,
                 ),
             )

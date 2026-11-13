@@ -22,6 +22,7 @@ from ..models import (
     DeliverableRecord,
     DependencyRef,
     FactSetCreate,
+    FlowStepCreate,
     GroundingBundleCreate,
     Money,
     PilotContract,
@@ -60,6 +61,9 @@ class ProjectsUseCases:
         language: str | None = None,
         duration_seconds: Any | None = None,
         max_budget: Money | None = None,
+        change_request_id: str | None = None,
+        change_list: tuple[str, ...] = (),
+        requested_by: str = "system",
     ) -> ProjectRecord:
         """Create a child revision whose parent archive stays untouched."""
 
@@ -68,6 +72,16 @@ class ProjectsUseCases:
             raise InvalidTransitionError(
                 "A revision requires an archived or finally approved parent"
             )
+        change_request = None
+        if change_request_id:
+            change_request = self.repository.get_change_request(change_request_id)
+            if change_request.project_id != parent_project_id:
+                raise ConflictError("The change request belongs to a different project")
+            if change_request.status not in {"approved", "analysed"}:
+                raise ConflictError(
+                    "A revision needs an approved change request; "
+                    f"observed {change_request.status}"
+                )
         request = ProjectCreate(
             name=name,
             objective=objective,
@@ -78,8 +92,66 @@ class ProjectsUseCases:
             duration_seconds=duration_seconds or parent.duration_seconds,
             max_budget=max_budget or parent.max_budget,
             parent_project_id=parent_project_id,
+            change_request_id=change_request_id,
         )
         child = self.create_project(request)
+        if change_request_id:
+            link_body = {
+                "parent_project_id": parent_project_id,
+                "change_request_id": change_request_id,
+                "change_request_document_hash": (
+                    change_request.document_hash if change_request else None
+                ),
+                "version_scope": (
+                    change_request.version_scope if change_request else "none"
+                ),
+                "changes": list(change_list),
+            }
+            payload = canonical_json(link_body).encode("utf-8")
+            link_hash = sha256_json(link_body)
+            artifact = self.write_artifact(
+                child.id,
+                kind=ArtifactKind.CONTRACT,
+                relative_path=f"inputs/revision-link-{link_hash[:12]}.json",
+                content=payload,
+                operation={
+                    "type": "revision_change_list",
+                    "parent_project_id": parent_project_id,
+                    "change_request_id": change_request_id,
+                    "change_count": len(change_list),
+                },
+            )
+            self.record_flow_step(
+                child.id,
+                FlowStepCreate(
+                    step="g0_intake",
+                    status="done",
+                    actor=requested_by,
+                    tool="pinaka.create-revision",
+                    tool_version="1",
+                    evidence=(
+                        f"parent_project:{parent_project_id}",
+                        f"change_request:{change_request_id}",
+                        f"change_list_artifact:{artifact['id']}",
+                        f"change_list_hash:{artifact['content_hash']}",
+                    ),
+                    reason="Child revision linked to an approved change request",
+                    execution_owner="local",
+                    studio_role="none",
+                ),
+            )
+            if change_request and change_request.status == "approved":
+                self.repository.record_change_request_status(
+                    change_request_id,
+                    status="applied",
+                    actor=requested_by,
+                    reason="Revision created from the approved change request",
+                    evidence=(
+                        f"revision_project:{child.id}",
+                        f"revision_link:{artifact['id']}",
+                    ),
+                    revision_project_id=child.id,
+                )
         return child
 
     def revision_lineage(self, project_id: str) -> list[str]:
@@ -391,6 +463,7 @@ class ProjectsUseCases:
                 self.require_ab_complete(project_id)
             if self.repository.list_slots(project_id):
                 self.require_slot_picks(project_id)
+                self.require_slot_coverage(project_id)
             sourcing_manifest = self.current_sourcing_manifest(project_id)
             if sourcing_manifest:
                 dependencies.append(

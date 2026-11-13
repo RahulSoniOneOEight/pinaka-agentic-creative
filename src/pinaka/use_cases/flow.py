@@ -101,7 +101,54 @@ class FlowUseCases:
     def record_flow_step(
         self, project_id: str, request: FlowStepCreate
     ) -> dict[str, Any]:
+        if request.execution_owner is None and request.studio_role is None:
+            derived = self._derive_execution_owner(project_id, request.evidence)
+            if derived:
+                request = request.model_copy(update=derived)
         return self.repository.record_flow_step(project_id, request)
+
+    def _derive_execution_owner(
+        self, project_id: str, evidence: tuple[str, ...]
+    ) -> dict[str, Any] | None:
+        """Link a flow step to the Studio/local artifact it actually used."""
+
+        haystack = " ".join(evidence)
+        artifacts = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if artifact["id"] in haystack
+            or artifact["relative_path"] in haystack
+            or artifact["content_hash"] in haystack
+        ]
+        for artifact in artifacts:
+            operation = artifact.get("operation") or {}
+            if operation.get("execution_owner") == "studio":
+                return {
+                    "execution_owner": "studio",
+                    "studio_role": "owner",
+                    "trade_off": operation.get("trade_off")
+                    or "Studio owns the step; no local fallback was taken",
+                }
+            if operation.get("execution_owner") == "local":
+                return {"execution_owner": "local", "studio_role": "none"}
+            if operation.get("type") == "openmontage_result":
+                if operation.get("simulated"):
+                    return {"execution_owner": "local", "studio_role": "none"}
+                return {
+                    "execution_owner": "studio",
+                    "studio_role": "owner",
+                    "trade_off": "Studio owns the step; no local fallback was taken",
+                }
+            if operation.get("type") in {
+                "composition_render",
+                "composition",
+                "caption_burn",
+                "kokoro_narration",
+                "tts",
+                "narration_mux",
+            }:
+                return {"execution_owner": "local", "studio_role": "none"}
+        return None
 
     def flow_log(
         self, project_id: str, step: str | None = None
@@ -630,6 +677,15 @@ class FlowUseCases:
             if picks["missing"]
             else "primary and backup for every visual slot",
         )
+        coverage = self.slot_coverage(project_id, visual_only=True)
+        gate(
+            "slot_coverage",
+            coverage["coverage"] == "complete",
+            "every visual slot has a bound primary and backup"
+            if coverage["coverage"] == "complete"
+            else "unresolved: "
+            + ", ".join(row["stable_key"] for row in coverage["unresolved"]),
+        )
         motion = self.motion_levels(project_id)
         gate(
             "motion",
@@ -660,6 +716,19 @@ class FlowUseCases:
             if flow["complete"]
             else f"missing {flow['missing']}, incomplete {flow['incomplete']}",
         )
+        ownership_required = {"g4_storyboard", "g5_production", "g6_qa", "g7_delivery"}
+        missing_ownership = [
+            step["step"]
+            for step in flow["steps"]
+            if step["step"] in ownership_required and not step.get("execution_owner")
+        ]
+        gate(
+            "studio_ownership",
+            not missing_ownership,
+            "every production step names its execution owner"
+            if not missing_ownership
+            else "missing owner: " + ", ".join(missing_ownership),
+        )
         ab = self.ab_status(project_id)
         gate(
             "ab",
@@ -667,6 +736,12 @@ class FlowUseCases:
             "A and B bound"
             if ab["complete"]
             else f"declared {ab['declared']} experiments",
+        )
+        ab_delivery = self.repository.latest_ab_delivery(project_id)
+        gate(
+            "ab_delivery",
+            ab["declared"] == 0 or ab_delivery is not None,
+            "A/B packet packaged" if ab_delivery else "no A/B delivery packet",
         )
         effects = self.current_effects_plan(project_id)
         gate(
@@ -678,27 +753,34 @@ class FlowUseCases:
         )
         productions = self.repository.list_shot_productions(project_id)
         secondary_kinds = {"particles", "light_glow", "blur", "parallax"}
-        secondary_by_shot: dict[str, int] = {}
-        if effects:
-            for cue in effects["plan"].get("cues", ()):
-                if cue["kind"] in secondary_kinds:
-                    key = cue["shot_key"]
-                    secondary_by_shot[key] = secondary_by_shot.get(key, 0) + 1
+        compositions = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if (artifact.get("operation") or {}).get("type")
+            == "hyperframes_composition"
+        ]
+        authored = (
+            (compositions[-1].get("operation") or {}).get("effects_by_shot", {})
+            if compositions
+            else {}
+        )
         shot_rows = self.repository.list_shots(project_id)
         shots_by_id = {shot["id"]: shot for shot in shot_rows}
         missing_secondary = [
             shots_by_id[item["shot_id"]]["stable_key"]
             for item in productions
             if item["shot_id"] in shots_by_id
-            and secondary_by_shot.get(shots_by_id[item["shot_id"]]["stable_key"], 0)
-            == 0
+            and not (
+                set(authored.get(shots_by_id[item["shot_id"]]["stable_key"], ()))
+                & secondary_kinds
+            )
         ]
         gate(
             "secondary_motion",
             not missing_secondary,
-            "secondary motion per shot"
+            "authored secondary-motion markers per shot"
             if not missing_secondary
-            else "missing: " + ", ".join(missing_secondary),
+            else "missing authored markers: " + ", ".join(missing_secondary),
         )
         try:
             creative = self.require_creative_plan(project_id)

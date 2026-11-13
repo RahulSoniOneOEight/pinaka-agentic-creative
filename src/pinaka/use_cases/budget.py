@@ -310,6 +310,12 @@ class BudgetUseCases:
                 "reserved": len(reserved),
                 "settled": len(settled),
                 "outstanding_required": len(outstanding_required),
+                "variant_a": sum(
+                    1 for item in plan["items"] if item.get("variant_label") == "A"
+                ),
+                "variant_b": sum(
+                    1 for item in plan["items"] if item.get("variant_label") == "B"
+                ),
             },
             "execution": {
                 "settled_estimated": Money.from_minor(

@@ -21,6 +21,7 @@ from .store.assets import AssetsStore
 from .store.audio import AudioStore
 from .store.budget import BudgetStore
 from .store.candidates import CandidatesStore
+from .store.change_requests import ChangeRequestsStore
 from .store.costs import CostsStore
 from .store.elements import ElementsStore
 from .store.flow import FlowStore
@@ -46,6 +47,7 @@ class Repository(
     ShotsStore,
     ElementsStore,
     FlowStore,
+    ChangeRequestsStore,
     CandidatesStore,
     ExperimentsStore,
     ProductionStore,
@@ -100,6 +102,7 @@ class Repository(
         return ProjectRecord(
             id=row["id"],
             parent_project_id=row["parent_project_id"],
+            change_request_id=row["change_request_id"],
             slug=row["slug"],
             name=row["name"],
             objective=row["objective"],

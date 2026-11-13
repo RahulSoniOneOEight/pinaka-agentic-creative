@@ -28,11 +28,13 @@ class ProjectCreate(StrictModel):
     duration_seconds: Decimal = Field(default=Decimal(25), gt=0, le=300)
     max_budget: Money
     parent_project_id: str | None = None
+    change_request_id: str | None = Field(default=None, max_length=120)
 
 
 class ProjectRecord(StrictModel):
     id: str
     parent_project_id: str | None = None
+    change_request_id: str | None = None
     slug: str
     name: str
     objective: str

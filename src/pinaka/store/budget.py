@@ -38,6 +38,8 @@ class BudgetStore:
             "priority": row["priority"],
             "shot_id": row["shot_id"],
             "slot_id": row["slot_id"],
+            "variant_label": row["variant_label"],
+            "ab_experiment_id": row["ab_experiment_id"],
             "notes": row["notes"],
             "status": row["status"],
             "job_id": row["job_id"],
@@ -159,8 +161,9 @@ class BudgetStore:
                     INSERT INTO budget_plan_items(
                         id, plan_id, project_id, stable_key, ordinal, category,
                         provider, operation, estimated_minor, priority, shot_id,
-                        slot_id, notes, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        slot_id, variant_label, ab_experiment_id, notes, status,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         new_id("budgetitem"),
@@ -175,6 +178,8 @@ class BudgetStore:
                         item.priority.value,
                         item.shot_id,
                         item.slot_id,
+                        item.variant_label,
+                        item.ab_experiment_id,
                         item.notes,
                         BudgetItemStatus.PLANNED.value,
                         now,

@@ -123,10 +123,26 @@ class AssetsUseCases:
         )
         return {**result, "decided_by": decided_by, "reason": reason}
 
-    def slot_coverage(self, project_id: str) -> dict[str, Any]:
+    def slot_coverage(
+        self, project_id: str, *, visual_only: bool = False
+    ) -> dict[str, Any]:
         """Report primary, backup and A/B coverage for every declared slot."""
 
         slots = self.repository.list_slots(project_id)
+        if visual_only:
+            slots = [
+                slot
+                for slot in slots
+                if slot["role"]
+                not in {
+                    "captions",
+                    "narration",
+                    "music",
+                    "cta",
+                    "hook",
+                    "claim_or_proof",
+                }
+            ]
         assignments = self.repository.list_slot_assets(project_id)
         by_slot: dict[str, dict[str, dict[str, Any]]] = {}
         for assignment in assignments:
@@ -187,6 +203,21 @@ class AssetsUseCases:
             "unresolved": [row for row in rows if not row["resolved"]],
             "coverage": "complete" if resolved == len(rows) else "incomplete",
         }
+
+    def require_slot_coverage(self, project_id: str) -> dict[str, Any]:
+        """Fail closed when a visual slot lacks a bound primary or backup."""
+
+        coverage = self.slot_coverage(project_id, visual_only=True)
+        if coverage["coverage"] != "complete":
+            detail = "; ".join(
+                f"{row['stable_key']}: {', '.join(row['problems'])}"
+                for row in coverage["unresolved"]
+            )
+            raise ApprovalRequiredError(
+                "Every visual slot needs a bound primary and backup before "
+                f"final approval; unresolved: {detail}"
+            )
+        return coverage
 
     def asset_use_context(self, project_id: str) -> AssetUseContext:
         """Return the recorded use context, or a conservative default for the project."""

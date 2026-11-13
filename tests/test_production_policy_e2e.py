@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pinaka.assets import AssetCriteria
 from pinaka.contracts.effects import EffectCueCreate, EffectsPlanCreate
 from pinaka.contracts.flow import (
     ABExperimentCreate,
@@ -10,7 +11,7 @@ from pinaka.contracts.flow import (
     SourcingCandidateCreate,
     SourcingDecisionCreate,
 )
-from pinaka.enums import ArtifactKind
+from pinaka.enums import ArtifactKind, SlotAssetRole
 from pinaka.models import ScriptApproval, ScriptCreate, TextBriefRequest
 from pinaka.production import ReuseDecisionCreate, ReuseItem
 from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
@@ -18,7 +19,7 @@ from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
 from .conftest import create_project, record_motion_evidence_stub
 
 
-def test_the_full_policy_chain_passes_the_quality_bar(controller):
+def test_the_full_policy_chain_passes_the_quality_bar(controller, tmp_path):
     project = create_project(controller, budget="10.00")
     plan = controller.plan_from_text(
         project.id,
@@ -120,6 +121,29 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
                 reason="Primary matches the beat; backup is an independent source",
             ),
         )
+        for role, name in (
+            (SlotAssetRole.PRIMARY, "primary"),
+            (SlotAssetRole.BACKUP, "backup"),
+        ):
+            artifact = controller.write_artifact(
+                project.id,
+                kind=ArtifactKind.DERIVATIVE,
+                relative_path=f"assets/derived/{slot['stable_key']}-{name}.png",
+                content=f"{slot['stable_key']}:{name}".encode(),
+                operation={
+                    "type": "sourced_download",
+                    "slot_id": slot["id"],
+                    "shot_id": slot["shot_id"],
+                },
+            )
+            controller.assign_slot_asset(
+                project.id,
+                slot["id"],
+                artifact_id=artifact["id"],
+                role=role,
+                criteria=AssetCriteria(),
+                decided_by="producer",
+            )
 
     for shot in plan["shots"]:
         evidence_id = record_motion_evidence_stub(
@@ -143,6 +167,18 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
                 status="done",
                 actor="producer",
                 evidence=(f"evidence://{step}",),
+                execution_owner=(
+                    "local"
+                    if step
+                    in {"g4_storyboard", "g5_production", "g6_qa", "g7_delivery"}
+                    else None
+                ),
+                studio_role=(
+                    "none"
+                    if step
+                    in {"g4_storyboard", "g5_production", "g6_qa", "g7_delivery"}
+                    else None
+                ),
             ),
         )
 
@@ -207,6 +243,8 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
             sound_design_notes="Soft pond ambience under the narration.",
         ),
     )
+    controller.author_composition(project.id, embed_layers=False)
+    controller.build_ab_delivery_package(project.id, str(tmp_path / "ab-delivery"))
 
     script = controller.record_script(
         project.id,

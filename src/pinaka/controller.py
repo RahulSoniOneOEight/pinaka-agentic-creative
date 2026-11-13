@@ -35,6 +35,7 @@ from .use_cases._shared import _as_float as _as_float
 from .use_cases._shared import _caption_coverage as _caption_coverage
 from .use_cases._shared import _image_mime as _image_mime
 from .use_cases._shared import _slot_accepts_element as _slot_accepts_element
+from .use_cases.ab_delivery import ABDeliveryUseCases
 from .use_cases.animatic import AnimaticUseCases
 from .use_cases.artifacts import ArtifactsUseCases
 from .use_cases.assets import AssetsUseCases
@@ -68,6 +69,7 @@ class CreativeController(
     ElementsUseCases,
     FlowUseCases,
     ChangeRequestUseCases,
+    ABDeliveryUseCases,
     ProductionUseCases,
     SourcingUseCases,
     AssetsUseCases,

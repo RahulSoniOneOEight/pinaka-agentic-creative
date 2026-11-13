@@ -238,6 +238,7 @@ def cues_from_words(
     locale: str | None = None,
     max_gap_seconds: float = 0.6,
     max_cue_seconds: float = 6.0,
+    pad_to_seconds: float | None = None,
 ) -> list[dict[str, Any]]:
     """Group spoken words into readable cues from real word timings."""
 
@@ -276,6 +277,19 @@ def cues_from_words(
                 "chars_per_second": round(len(text) / (end - start), 3),
             }
         )
+    if pad_to_seconds and cues:
+        target = max(float(pad_to_seconds), cues[-1]["end_seconds"])
+        if target > cues[-1]["end_seconds"]:
+            last = cues[-1]
+            speech_end = last["end_seconds"]
+            last["end_seconds"] = round(target, 3)
+            last["duration_seconds"] = round(
+                last["end_seconds"] - last["start_seconds"], 3
+            )
+            last["chars_per_second"] = round(
+                len(last["text"]) / last["duration_seconds"], 3
+            )
+            last["tail_hold_seconds"] = round(target - speech_end, 3)
     return cues
 
 
@@ -287,6 +301,7 @@ def build_srt_from_words(
     max_gap_seconds: float = 0.6,
     max_cue_seconds: float = 6.0,
     strict: bool = False,
+    pad_to_seconds: float | None = None,
 ) -> str:
     """SRT from ASR word timings, wrapped to the same locale rules."""
 
@@ -296,6 +311,7 @@ def build_srt_from_words(
         profile=active,
         max_gap_seconds=max_gap_seconds,
         max_cue_seconds=max_cue_seconds,
+        pad_to_seconds=pad_to_seconds,
     )
     violations = legibility_violations(cues, active)
     if strict and violations:

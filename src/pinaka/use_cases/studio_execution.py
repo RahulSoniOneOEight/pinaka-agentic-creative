@@ -110,6 +110,8 @@ class StudioExecutionUseCases:
                         "work_packet_hash": handoff["work_packet_hash"],
                         "result_packet_hash": result_hash,
                         "role": output.role,
+                        "execution_owner": "studio",
+                        "studio_role": "owner",
                     },
                     parent_artifact_id=output.parent_artifact_id,
                     dependencies=(
@@ -231,6 +233,8 @@ class StudioExecutionUseCases:
                             "work_packet_hash": handoff["work_packet_hash"],
                             "role": output.role,
                             "simulated": True,
+                            "execution_owner": "local",
+                            "studio_role": "none",
                         },
                         parent_artifact_id=output.parent_artifact_id,
                         dependencies=(

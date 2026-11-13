@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
 from ..contracts.flow import ABExperimentCreate, ABVariantBind
 from ..errors import ConflictError, IntegrityError, NotFoundError
-from ..utils import new_id, utc_now
+from ..utils import canonical_json, new_id, utc_now
 
 
 class ExperimentsStore:
@@ -188,4 +189,95 @@ class ExperimentsStore:
                 **request.model_dump(mode="json"),
                 "artifact_hash": artifact["content_hash"],
                 "created_at": now,
+            }
+
+    def record_ab_delivery(
+        self,
+        project_id: str,
+        *,
+        experiment_id: str,
+        output_dir: str,
+        manifest_artifact_id: str,
+        manifest_hash: str,
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        delivery_id = new_id("abdel")
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            connection.execute(
+                """
+                INSERT INTO ab_deliveries(
+                    id, project_id, experiment_id, output_dir,
+                    manifest_artifact_id, manifest_hash, manifest_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    delivery_id,
+                    project_id,
+                    experiment_id,
+                    output_dir,
+                    manifest_artifact_id,
+                    manifest_hash,
+                    canonical_json(manifest),
+                    now,
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="ab_delivery",
+                entity_id=delivery_id,
+                event_type="ab.delivery_packaged",
+                payload={
+                    "experiment_id": experiment_id,
+                    "manifest_hash": manifest_hash,
+                    "manifest_artifact_id": manifest_artifact_id,
+                },
+            )
+            return {
+                "id": delivery_id,
+                "project_id": project_id,
+                "experiment_id": experiment_id,
+                "output_dir": output_dir,
+                "manifest_artifact_id": manifest_artifact_id,
+                "manifest_hash": manifest_hash,
+                "manifest": manifest,
+                "created_at": now,
+            }
+
+    def latest_ab_delivery(
+        self, project_id: str, experiment_id: str | None = None
+    ) -> dict[str, Any] | None:
+        with self.database.read() as connection:
+            self._require_project(connection, project_id)
+            if experiment_id:
+                row = connection.execute(
+                    """
+                    SELECT * FROM ab_deliveries
+                    WHERE project_id = ? AND experiment_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (project_id, experiment_id),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT * FROM ab_deliveries
+                    WHERE project_id = ?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (project_id,),
+                ).fetchone()
+            if not row:
+                return None
+            return {
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "experiment_id": row["experiment_id"],
+                "output_dir": row["output_dir"],
+                "manifest_artifact_id": row["manifest_artifact_id"],
+                "manifest_hash": row["manifest_hash"],
+                "manifest": json.loads(row["manifest_json"]),
+                "created_at": row["created_at"],
             }
