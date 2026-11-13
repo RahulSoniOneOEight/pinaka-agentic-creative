@@ -1,10 +1,10 @@
-# Pinaka — creative-quality fixes
+﻿# Pinaka â€” creative-quality fixes
 
 **Date:** 2026-11-13  
-**Updated:** 2026-11-14 — stage-critique layer implemented; latest run status  
-**Reviewed with:** GPT‑5.6 Sol (OpenAI)  
+**Updated:** 2026-11-14 â€” stage-critique layer implemented; latest run status  
+**Reviewed with:** GPTâ€‘5.6 Sol (OpenAI)  
 **Scope:** the 8-second rhyme fixture: the original 30/30 run
-(`prj_75ad612d53a9490ca81a13a389755c64`) and the latest 1080×1920 / 24 fps
+(`prj_75ad612d53a9490ca81a13a389755c64`) and the latest 1080Ã—1920 / 24 fps
 run (`prj_71319ead9d694e6f8baed2e6ece5160d`,
 `renders/captioned-2916d6fc01ca.mp4`).
 
@@ -25,40 +25,41 @@ The defects below are not polish; they are release blockers for a kids channel.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 696 tests |
+| Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 698 tests |
 | Executable production plan | **Implemented** | `ProductionPlanCreate` contract: format/style/delivery/method, seven-pass payload, shot directions, asset routes, rough cut; `production_plan` quality-bar gate |
 | Beat-to-delivery intent matrix | **Implemented** | `IntentMatrixCreate` with delivered/blocked beats and evidence; `intent-matrix` CLI; readiness gate |
 | Quality contract + creative review | **Implemented** | `QualityContractCreate` / `CreativeReviewCreate`; fixture versus production purpose; human-review gate; `quality-readiness` gate |
 | Publication gate | **Implemented** | Fixture contract sets `publication_allowed=false`; publication authorization refuses it and requires readiness |
 | Explicit delivery contract for QA | **Implemented** | `qa_render` checks contract resolution, fps, LUFS and true peak |
-| Plan generator from a 50–100-word idea | **Open** | The contract accepts a complete plan; the planning agent that turns a raw idea into every field is not built |
+| Plan generator from a 50â€“100-word idea | **Implemented (rule-based)** | `generate-production-plan` builds the contract from the brief/shot plan; LLM-assisted generation is optional |
 | Exact counts / product / claim binding | **Open** | Structural fields exist; automatic verification against approved copy/data is not wired |
-| Black cut | **Fixed** | Latest 10 s run: luma 141–184, zero dark runs, 1080×1920/24 |
+| Black cut | **Fixed** | Latest 10 s run: luma 141â€“184, zero dark runs, 1080Ã—1920/24 |
 | Character/world | **Partial** | Fixture now has mother + five ducklings and a layered pond; still procedural, not final art |
 | Motion / captions / audio | **Partial** | Motion and captions pass on the 10 s fixture; no music/SFX yet |
-| 10-second counting rhyme run | **Pass** | 33/33 gates, QA 13/13, quality readiness true, USD 0.00 spent |
+| 10-second counting rhyme run | **Pass** | `prj_93ab2414â€¦`, 33/33 gates, QA 13/13, quality readiness true, USD 0.00 spent |
+| Review packet | **Implemented** | Contact sheet + luma/motion/QA/caption evidence packet for the exact hash |
 | Reference-independent quality model | **Implemented** | Contract + intent matrix + review + planning framework |
 
 ## Defect classification
 
-The original 30/30 run used 540×960 / 12 fps. The latest fixture uses
-1080×1920 / 24 fps and a crossfade; the remaining creative findings are
+The original 30/30 run used 540Ã—960 / 12 fps. The latest fixture uses
+1080Ã—1920 / 24 fps and a crossfade; the remaining creative findings are
 motion continuity/coverage and caption speed.
 
 | Observation | Class | Why |
 |---|---|---|
 | Procedural OpenCV duck and gradient background | Fixture artifact | Acceptable for a deterministic USD 0 flow test, but must be marked non-publishable. |
-| 540×960 at 12 fps | Fixture artifact **and** product defect | Too slow to render at delivery quality; also below the 1080×1920 / 24 fps delivery profile. |
+| 540Ã—960 at 12 fps | Fixture artifact **and** product defect | Too slow to render at delivery quality; also below the 1080Ã—1920 / 24 fps delivery profile. |
 | No music bed, SFX, title or end card | Fixture shortcut **and** product defect | A kids rhyme needs sound design and a finished opening/closing. |
 | Weak character, world, composition and shot variety | Product defect | No character sheet, expression, silhouette craft, depth or location storytelling. |
-| One duck despite “two little ducks”; no mother duck or hill | Product defect | The picture contradicts the lyric. |
+| One duck despite â€œtwo little ducksâ€; no mother duck or hill | Product defect | The picture contradicts the lyric. |
 | Centered bob with camera push doing most of the movement | Product defect | Technically M2, visually not a performance. |
 | ~1 s near-black cut from 3.25 s to 4.25 s | **P0 renderer defect** | 13 frames below mean brightness 60; at 4.0 s mean 19.4 and 99% of pixels dark. |
 | 4.42 s first caption cue, small default burn style | Product defect | Coverage is complete; reading load and typography are not delivery-ready. |
 | Motion gate passes residual pixels | Gate-design defect | It measures movement, not acting or subject quality. |
 | Secondary motion passes from HTML markers | Gate-design defect | It checks that effects were authored, not that they are visible or motivated. |
 | Style fit is a metadata score | Gate-design defect | `style_id` + `asset_class` + media type cannot prove the look. |
-| Technical QA accepts caller-supplied 540×960 / 12 fps | Gate-design defect | It checks conformance to the request, not the delivery contract. |
+| Technical QA accepts caller-supplied 540Ã—960 / 12 fps | Gate-design defect | It checks conformance to the request, not the delivery contract. |
 | No luma, story, composition or appeal gate | Gate-design defect | The main reason a visibly weak output can pass all 30 gates. |
 
 ## Root causes
@@ -76,27 +77,27 @@ motion continuity/coverage and caption speed.
 
 ## Corrective plan
 
-### P0 — release blockers
+### P0 â€” release blockers
 
 | Action | Implementation | Status | Acceptance | Evidence |
 |---|---|---|---|---|
-| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Done** | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` + `quality_readiness` gates; fixture contract public=false; 696 tests |
-| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6–8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | 10 s run: luma 141–184, zero dark runs, 240 frames |
-| Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | **Done** | Standard vertical delivery refuses anything below 1080×1920 or 24 fps unless explicitly classified as a fixture/proxy. | `contract.resolution`, `contract.frame_rate`, `contract.loudness` all pass |
+| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Done** | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` + `quality_readiness` gates; fixture contract public=false; 698 tests |
+| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6â€“8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | 10 s run: luma 141â€“184, zero dark runs, 240 frames |
+| Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | **Done** | Standard vertical delivery refuses anything below 1080Ã—1920 or 24 fps unless explicitly classified as a fixture/proxy. | `contract.resolution`, `contract.frame_rate`, `contract.loudness` all pass |
 | Add a publication review gate | Require named human creative approval after viewing the exact final hash with audio and captions. | **Done** | No publication when any rubric dimension is below 3/5 or a hard check fails. | Production contract requires human review; fixture contract blocks publication |
 
-### P1 — before the next creative run
+### P1 â€” before the next creative run
 
 | Workstream | Steps | Status | Acceptance |
 |---|---|---|---|
-| Story/shot contract | Convert the lyric into a beat matrix: required entities, action, setting, emotion and shot evidence. Mark **five ducklings**, **mother duck**, **pond**, **count 1–5** and **quacking** as critical. | **Done** — production plan + intent matrix | Every critical beat is visibly represented; a single duck cannot stand in for five. Human story score ≥4/5. |
-| Character/world | Build or source approved character sheets for five distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Partial** — fixture has mother + five ducklings and a layered pond; still procedural | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
-| Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, mother’s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Pass on fixture** — continuity identity 1.0006 | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects ≥0.5% of frame for ≥25% of the shot. |
-| Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1–3 s cue duration, ≤15 CPS, ≥52 px at 1080 width, safe margins, outline/backplate, contrast ≥4.5:1. | **Pass on fixture** — 2 cues, 0.994 coverage, ≤15 CPS | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
-| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** — narration only; −16.61 LUFS, −4.45 dBTP | Narration intelligible; bed at least 8 dB below speech; −16 LUFS ±1; true peak ≤−2 dBTP; no clipping or unintended silence. |
-| Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Partial** — contract/intent/review and contact sheet exist; attached review packet pending | Review packet covers every shot and transition and is attached to approval. |
+| Story/shot contract | Convert the lyric into a beat matrix: required entities, action, setting, emotion and shot evidence. Mark **five ducklings**, **mother duck**, **pond**, **count 1â€“5** and **quacking** as critical. | **Done** â€” production plan + intent matrix | Every critical beat is visibly represented; a single duck cannot stand in for five. Human story score â‰¥4/5. |
+| Character/world | Build or source approved character sheets for five distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Partial** â€” fixture has mother + five ducklings and a layered pond; still procedural | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
+| Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, motherâ€™s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Pass on fixture** â€” continuity identity 1.0006 | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects â‰¥0.5% of frame for â‰¥25% of the shot. |
+| Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1â€“3 s cue duration, â‰¤15 CPS, â‰¥52 px at 1080 width, safe margins, outline/backplate, contrast â‰¥4.5:1. | **Pass on fixture** â€” 2 cues, 0.994 coverage, â‰¤15 CPS | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
+| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** â€” narration only; âˆ’16.61 LUFS, âˆ’4.45 dBTP | Narration intelligible; bed at least 8 dB below speech; âˆ’16 LUFS Â±1; true peak â‰¤âˆ’2 dBTP; no clipping or unintended silence. |
+| Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Done** â€” contact sheet + metrics packet generated | Review packet covers every shot and transition and is attached to approval. |
 
-### P2 — polish
+### P2 â€” polish
 
 - Gentle bloom, water highlights, atmospheric particles, reflections and restrained texture.
 - Varied shot scale and composition instead of repeated centered framing.
@@ -171,7 +172,7 @@ production-plan <project>
 production-plan-status <project>
 ```
 
-- 693 tests pass.
+- 698 tests pass.
 - The end-to-end policy test records a complete plan and passes the new gate.
 - The latest fixture records a plan; the gate is structurally ready, while
   creative QC still blocks on motion and captions.
@@ -179,23 +180,23 @@ production-plan-status <project>
 ### What this framework still does not prove
 
 1. **Idea-to-plan generation.** The contract accepts a complete plan; the
-   agent that expands a 50–100-word idea into every field is the next build.
+   agent that expands a 50â€“100-word idea into every field is the next build.
 2. **Delivered intent matrix.** Beats link to shots and shots link to assets,
-   but there is no separate gate that says “this beat was actually delivered
-   on screen, in audio, and in the caption” with timestamped evidence.
+   but there is no separate gate that says â€œthis beat was actually delivered
+   on screen, in audio, and in the captionâ€ with timestamped evidence.
 3. **Exact data binding.** Counts, prices, claims, product labels and offer
    copy are structural fields; they are not yet verified against approved
    copy or data.
 4. **Rough-cut proof.** The rough cut is a timed plan, not an automatically
    validated render; reveal timing and counting pauses still need an animatic
    or render check.
-5. **Human creative review.** The 1–5 rubric and review packet are not yet a
+5. **Human creative review.** The 1â€“5 rubric and review packet are not yet a
    final-approval requirement.
 6. **Studio capability routing.** `openmontage_capability` is a planning field;
    live Studio discovery, cost quoting and automated production routing are
    not yet wired.
 
-## OpenMontage capability integration (planning → production)
+## OpenMontage capability integration (planning â†’ production)
 
 OpenMontage is not a single production method. It is a studio service with a
 capability library. Planning chooses a **capability**; production executes it
@@ -222,21 +223,21 @@ through Studio or a recorded fallback. The production method stays independent.
 
 | Capability | Planning use | Production method | Studio route | Fallback |
 |---|---|---|---|---|
-| Cinematic shots | Chases, frozen moments, scale reveals | generated / image-to-video | opening still → shot plan → clips | stock + local compositing |
-| AI presenter | Split-screen host, consistent presenter | generated image + video + TTS | reference sheet → clips → captions | human presenter or VO + stock |
+| Cinematic shots | Chases, frozen moments, scale reveals | generated / image-to-video | opening still â†’ shot plan â†’ clips | stock + local compositing |
+| AI presenter | Split-screen host, consistent presenter | generated image + video + TTS | reference sheet â†’ clips â†’ captions | human presenter or VO + stock |
 | Impossible one-take | Continuous world-change shot | image-to-video | one unbroken camera plan | layered composition / cuts |
 | 3D worlds | Character/world film, editable scene | 3d_render | Meshy + Blender | 2D layers / stock |
-| Product explode | Product photo → parts → reassemble | image-to-video | first/last frame product shot | product stills + compositing |
+| Product explode | Product photo â†’ parts â†’ reassemble | image-to-video | first/last frame product shot | product stills + compositing |
 | Motion graphics | Data, type, particles, simulations | motion_graphics / compositing | code-drawn animation | local HTML/CSS/Remotion |
-| UGC ads | Creator-style vertical ad | generated image + video + TTS | creator sheet → clips → captions/price | actor + phone footage |
+| UGC ads | Creator-style vertical ad | generated image + video + TTS | creator sheet â†’ clips â†’ captions/price | actor + phone footage |
 | Product commercials | Macro, light, end card | image-to-video + graphics | shot plan + end card | product photography + edit |
-| Narrated story | Painted storybook, narration, score | generated images + audio | images → camera moves → voice/music | illustration/stock + VO |
-| Pixar-style animation | Character short | image-to-video + audio | character consistency → clips | 2D/3D animation |
-| Documentary | Stock footage, maps, timeline | licensed_stock + compositing | script → stock → maps/timeline | archive/owned footage |
-| Explainer | Document → charts | screen_capture / motion_graphics | read document → charts → narration | manual charts / slides |
-| Hand-drawn anime | Title/sequence with on-model characters | image-to-video | character sheet → shots | 2D frame animation |
+| Narrated story | Painted storybook, narration, score | generated images + audio | images â†’ camera moves â†’ voice/music | illustration/stock + VO |
+| Pixar-style animation | Character short | image-to-video + audio | character consistency â†’ clips | 2D/3D animation |
+| Documentary | Stock footage, maps, timeline | licensed_stock + compositing | script â†’ stock â†’ maps/timeline | archive/owned footage |
+| Explainer | Document â†’ charts | screen_capture / motion_graphics | read document â†’ charts â†’ narration | manual charts / slides |
+| Hand-drawn anime | Title/sequence with on-model characters | image-to-video | character sheet â†’ shots | 2D frame animation |
 | Grade / recolour / key / swap / track | Post-production look and compositing | compositing | local Studio tools | manual VFX |
-| Voice / languages / lip-sync | Multilingual presenter or narration | TTS / avatar | translate → voice → lips | recorded VO + subtitles |
+| Voice / languages / lip-sync | Multilingual presenter or narration | TTS / avatar | translate â†’ voice â†’ lips | recorded VO + subtitles |
 | Sound / music / captions / edit | Mix, SFX, styled captions, beat cuts, reframe, upscale | audio / compositing | local Studio tools | library/owned assets + manual edit |
 
 ### Production phase
@@ -282,12 +283,12 @@ This is the critique part of the flow, now in code.
 
 | Stage | Automated critique | Blocking examples |
 |---|---|---|
-| Script | script exists, approved, ≥8 words | no script, unapproved script |
+| Script | script exists, approved, â‰¥8 words | no script, unapproved script |
 | Shots | shot count, duration, subject/action/camera, variety | no shots, shot with no subject/motion |
 | Style | preset/style IDs, style-fit per selected asset | missing preset/style, off-style picks |
 | Assets | resolution, alpha/cutout, sharpness, dark/blank, primary/backup presence | full-frame asset in a cutout slot, missing file, low resolution |
 | Motion | levels/evidence, final motion verdict, continuity, motion-area coverage | failed continuity, <0.5% motion coverage, missing evidence |
-| Visual | 1080×1920, 24 fps, luma continuity, dark/dead frames, letterbox, sharpness | any near-black gap, stale/high finding, soft render |
+| Visual | 1080Ã—1920, 24 fps, luma continuity, dark/dead frames, letterbox, sharpness | any near-black gap, stale/high finding, soft render |
 | Captions | coverage, max cue, CPS, lines | coverage <90%, cue >4 s, >15 CPS, >2 lines |
 | Audio | loudness, true peak, audio presence, warnings/fails | failed loudness/peak, no audio QA |
 | Delivery | A/B completeness, A/B packet existence | missing A/B packet |
@@ -315,17 +316,17 @@ critique-status <project> [--artifact ARTIFACT_ID]
 
 ### Current evidence
 
-- Schema v26; 693 tests pass.
-- Latest render (`prj_71319…`, `captioned-2916…`): 1080×1920, 24 fps,
-  192 frames, luma 95.9–122.6, no dark runs; visual critique **passes**.
+- Schema v26; 698 tests pass.
+- Latest render (`prj_71319â€¦`, `captioned-2916â€¦`): 1080Ã—1920, 24 fps,
+  192 frames, luma 95.9â€“122.6, no dark runs; visual critique **passes**.
 - Latest creative QC: motion **revise** (continuity, low motion coverage) and
   captions **revise** (18.33 CPS); all other stages pass.
 - The run is correctly blocked. The next step is to fix those two output
-  issues, close the actions, and re-critique — not to lower the gate.
+  issues, close the actions, and re-critique â€” not to lower the gate.
 
 ## Revised quality model
 
-### Layer 1 — Policy QC
+### Layer 1 â€” Policy QC
 
 Keep the existing 30 gates: contracts, budget, rights, sourcing, approvals,
 lineage, flow completeness, backups, effects-plan presence, motion evidence
@@ -333,27 +334,27 @@ presence, caption coverage and container integrity.
 
 A pass means **governed, reproducible, compliant and technically formed**.
 
-### Layer 2 — Creative QC
+### Layer 2 â€” Creative QC
 
 #### Automated hard minimums
 
 | Area | Minimum |
 |---|---|
-| Delivery | 1080×1920, 24 fps, correct duration/orientation, H.264-compatible master, audio when required. |
+| Delivery | 1080Ã—1920, 24 fps, correct duration/orientation, H.264-compatible master, audio when required. |
 | Luma continuity | No unintended blackout longer than two frames; cut-window rule from P0. Intentional fades are exempt but reviewed. |
 | Story | Every critical beat entity/action has timestamped visual evidence; no contradictory count, identity or setting. |
 | Character continuity | Subject-tracked colour, scale, identity and location within approved tolerances; no unexplained swaps or disappearance. |
 | Motion | Camera-compensated subject-ROI measurement; visible action plus two-part articulation for M2; quantified secondary-motion visibility. |
 | Composition | Subject inside safe area; no accidental crop, occlusion, letterboxing or persistent dead-centre repetition. |
-| Captions | 100% dialogue coverage, ≤100 ms drift, ≤15 CPS, 1–3 s cues, ≤2 lines, safe area, contrast ≥4.5:1. |
-| Audio | −16 LUFS ±1, true peak ≤−2 dBTP, intelligible narration, no clipping/dropouts; required music/cues present and rights-cleared. |
+| Captions | 100% dialogue coverage, â‰¤100 ms drift, â‰¤15 CPS, 1â€“3 s cues, â‰¤2 lines, safe area, contrast â‰¥4.5:1. |
+| Audio | âˆ’16 LUFS Â±1, true peak â‰¤âˆ’2 dBTP, intelligible narration, no clipping/dropouts; required music/cues present and rights-cleared. |
 
 Model-based story/style checks should produce findings and confidence scores,
 but must not alone approve subjective quality.
 
 #### Human/model review rubric
 
-Score 1–5 on:
+Score 1â€“5 on:
 
 1. Character appeal and expression
 2. Silhouette and composition
@@ -377,9 +378,9 @@ humour, emotional clarity and final taste.
   2. Ducklings swim toward and over a layered hill.
   3. Mother duck reacts and visibly quacks.
   4. Distant ducklings/resolution with a brief end lockup.
-- [ ] Build/source a consistent layered character set and pond world at 1080×1920.
+- [ ] Build/source a consistent layered character set and pond world at 1080Ã—1920.
 - [ ] Render at 24 fps with articulated M2 motion, water ripples, reed sway and parallax.
-- [ ] Replace independent scene fades with cuts or overlapping 6–8 frame crossfades.
+- [ ] Replace independent scene fades with cuts or overlapping 6â€“8 frame crossfades.
 - [ ] Add licensed music, ambience, splash and quack cues with narration ducking.
 - [ ] Burn the designed kids-caption preset after phrase-level timing review.
 - [ ] Run technical QA, luma continuity, story matrix, subject-ROI motion, continuity, caption, audio and rights checks.
@@ -411,21 +412,23 @@ cap and passes the policy, creative, plan and quality gates.
 
 | Item | Value |
 |---|---|
-| Project | `prj_dfd4022b2d4f4641ab894a1713f15c38` |
-| Archive | `archive_73c773b2a4c744748261f601918f004f` |
-| Final artifact | `art_fd0ff43d849d48eaaa1ee1d50930ecd7` |
-| Hash | `6d6a2f5344fc116f35ecdad2f84bfce40befc70d20557d8d4fedac66c192cc93` |
-| Video | 1080×1920, 24 fps, 10.0 s, 240 frames |
+| Project | `prj_93ab241405be456ab09eb35f16a9c32e` |
+| Archive | `archive_715774cf204f4e8582492099f7256dd2` |
+| Final artifact | `art_1b45d7a8d78a4e11a536ed2bca8cecf2` |
+| Hash | `f09140e639f6eea0ea005249d22d57be1530f4c186493ab55eebe26f3e193103` |
+| Video | 1080Ã—1920, 24 fps, 10.0 s, 240 frames |
 | Quality bar | **33/33 gates pass, 0 failed** |
 | QA | 13 checks, 0 failing |
-| Luma | 141–184, zero dark runs, zero dead frames |
+| Luma | 141â€“184, zero dark runs, zero dead frames |
 | Motion | continuity identity 1.0006, scale 1.0006, colour 0.0057, position 0.0053 |
 | Captions | ASR, 2 cues, 9.94/10 s, ratio 0.994 |
-| Audio | −16.61 LUFS, −4.45 dBTP |
+| Audio | âˆ’16.57 LUFS, âˆ’4.38 dBTP |
 | Budget | USD 1.00 cap, USD 0.00 spent; A/B labels 1/1 |
-| A/B packet | `cec37e1d1823fe88e8d95e744b40067be7e3db83a236433811ad2cd0396266a3` |
+| A/B packet | `40bcd5b7f8f3fa3a0ebef24052db39725e934075aa8e632fad8463ea6dbae304` |
 | Quality contract | `flow_fixture`; publication **not allowed**; intent beats delivered |
-| Change request | `crq_025ac29d...` → revision `prj_ccc1f7eb...` |
+| Review packet | `art_c807ba9964f34d40b11afe5940c4db41` (contact sheet + metrics) |
+| Plan | generated from the shot plan and frozen |
+| Change request | `crq_9f9fb078...` â†’ revision `prj_0e213405...` |
 | Flow / critiques | complete / complete |
 
 The output is a **flow fixture**, not a publication-quality creative. The
@@ -434,16 +437,13 @@ The remaining gaps are creative production, not software gates.
 
 ## Immediate next actions
 
-1. Build the **plan generator** that expands a 50–100-word idea into the
-   production-plan contract, and keep the intent matrix updated from the
-   generated plan.
-2. Add Studio bootstrap/orchestration discovery, a capability/cost snapshot and
+1. Add Studio bootstrap/orchestration discovery, a capability/cost snapshot and
    the capability-to-production router, with the plan's fallback enforced.
-3. Bind exact counts, prices, claims, labels and offer copy to approved data.
-4. Replace the fixture family/pond with a real character sheet and world, add
+2. Bind exact counts, prices, claims, labels and offer copy to approved data.
+3. Replace the fixture family/pond with a real character sheet and world, add
    music/SFX, and produce a 1080p24 counting rhyme that is worth publishing.
-5. Build the attached review packet (contact sheet, boundary strips, motion
-   overlay, caption safe area, luma/audio plots) and complete the human 1–5
-   rubric for a production run.
-6. Publish only from a `purpose=production` contract with human review and
+4. Complete the human 1â€“5 review for a production contract; the fixture uses a
+   model review and blocks publication.
+5. Publish only from a `purpose=production` contract with human review and
    `publication_allowed=true`.
+

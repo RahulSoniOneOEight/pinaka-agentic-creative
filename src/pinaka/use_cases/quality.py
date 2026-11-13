@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import cv2
+import numpy as np
+
 from ..contracts.quality import (
     CreativeReviewCreate,
     IntentMatrixCreate,
@@ -10,7 +13,8 @@ from ..contracts.quality import (
 )
 from ..enums import ArtifactKind
 from ..errors import ApprovalRequiredError, ConflictError, IntegrityError
-from ..utils import canonical_json, sha256_json
+from ..utils import canonical_json, sha256_json, utc_now
+from ..visual_qc import analyze_video, caption_metrics
 
 
 class QualityUseCases:
@@ -213,6 +217,128 @@ class QualityUseCases:
                 "Quality contract is not ready: " + "; ".join(readiness["issues"])
             )
         return readiness
+
+    def build_review_packet(
+        self, project_id: str, *, artifact_id: str
+    ) -> dict[str, Any]:
+        """Build a contact sheet and evidence packet for the exact final hash."""
+
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Review packet artifact belongs to another project")
+        path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        probe = analyze_video(path)
+        caption_artifact = next(
+            (
+                item
+                for item in reversed(self.repository.list_artifacts(project_id))
+                if (item.get("operation") or {}).get("type") == "captions"
+            ),
+            None,
+        )
+        captions = None
+        if caption_artifact:
+            srt = self.artifact_store.resolve(
+                project_id, caption_artifact["relative_path"]
+            ).read_text(encoding="utf-8")
+            captions = caption_metrics(srt, probe["duration_seconds"])
+        qa = [
+            result
+            for result in self.repository.list_qa_results(project_id)
+            if result["artifact_id"] == artifact_id
+        ]
+        try:
+            motion = self.motion_continuity_report(project_id, artifact_id)
+        except (ValueError, OSError):
+            motion = None
+        contact_sheet = self._contact_sheet(
+            project_id, path, artifact_id, probe["duration_seconds"]
+        )
+        packet = {
+            "schema": "review-packet/v1",
+            "created_at": utc_now(),
+            "project_id": project_id,
+            "artifact": {
+                "id": artifact["id"],
+                "hash": artifact["content_hash"],
+                "path": artifact["relative_path"],
+            },
+            "video": probe,
+            "captions": captions,
+            "qa": qa,
+            "motion": motion,
+            "contact_sheet_artifact_id": contact_sheet["id"],
+            "readiness": self.quality_readiness(project_id, artifact_id=artifact_id),
+        }
+        content = canonical_json(packet).encode("utf-8")
+        digest = sha256_json(packet)
+        packet_artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.QA,
+            relative_path=f"quality/review-packet-{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "review_packet",
+                "artifact_hash": artifact["content_hash"],
+                "contact_sheet_artifact_id": contact_sheet["id"],
+                "execution_owner": "local",
+                "studio_role": "none",
+            },
+        )
+        return {
+            "packet": packet,
+            "artifact": packet_artifact,
+            "contact_sheet": contact_sheet,
+        }
+
+    def _contact_sheet(
+        self, project_id: str, video_path: Any, artifact_id: str, duration: float
+    ) -> dict[str, Any]:
+        capture = cv2.VideoCapture(str(video_path))
+        if not capture.isOpened():
+            raise IntegrityError("Cannot open the final video for the contact sheet")
+        times = [(index + 0.5) * duration / 8 for index in range(8)]
+        frames = []
+        for timestamp in times:
+            capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
+            ok, frame = capture.read()
+            if not ok:
+                break
+            frame = cv2.resize(frame, (270, 480), interpolation=cv2.INTER_AREA)
+            cv2.rectangle(frame, (0, 0), (270, 26), (0, 0, 0), -1)
+            cv2.putText(
+                frame,
+                f"{timestamp:.1f}s",
+                (6, 18),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+            frames.append(frame)
+        capture.release()
+        if len(frames) < 8:
+            raise IntegrityError("Could not sample eight frames for the review packet")
+        rows = [np.hstack(frames[index * 4 : (index + 1) * 4]) for index in range(2)]
+        sheet = np.vstack(rows)
+        encoded, buffer = cv2.imencode(".jpg", sheet, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        if not encoded:
+            raise IntegrityError("Could not encode the contact sheet")
+        digest = sha256_json({"artifact_id": artifact_id})[:12]
+        return self.write_artifact(
+            project_id,
+            kind=ArtifactKind.PREVIEW,
+            relative_path=f"quality/contact-sheet-{digest}.jpg",
+            content=buffer.tobytes(),
+            operation={
+                "type": "review_contact_sheet",
+                "artifact_id": artifact_id,
+                "frames": 8,
+                "execution_owner": "local",
+                "studio_role": "none",
+            },
+        )
 
     def quality_status(
         self, project_id: str, *, artifact_id: str | None = None

@@ -1577,6 +1577,10 @@ def cmd_record_production_plan(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def cmd_generate_production_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).generate_production_plan(args.project_id)
+
+
 def cmd_production_plan(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).current_execution_plan(args.project_id)
 
@@ -1608,6 +1612,12 @@ def cmd_creative_review(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_quality_status(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).quality_status(args.project_id, artifact_id=args.artifact)
+
+
+def cmd_review_packet(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).build_review_packet(
+        args.project_id, artifact_id=args.artifact
+    )
 
 
 def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
@@ -3366,6 +3376,13 @@ def build_parser() -> argparse.ArgumentParser:
     record_plan_parser.add_argument("--file", required=True)
     record_plan_parser.set_defaults(handler=cmd_record_production_plan)
 
+    generate_plan_parser = subparsers.add_parser(
+        "generate-production-plan",
+        help="Generate the executable plan from the approved brief and shot plan",
+    )
+    generate_plan_parser.add_argument("project_id")
+    generate_plan_parser.set_defaults(handler=cmd_generate_production_plan)
+
     show_plan_parser = subparsers.add_parser(
         "production-plan", help="Show the current production plan"
     )
@@ -3410,6 +3427,14 @@ def build_parser() -> argparse.ArgumentParser:
     quality_status_parser.add_argument("project_id")
     quality_status_parser.add_argument("--artifact")
     quality_status_parser.set_defaults(handler=cmd_quality_status)
+
+    review_packet_parser = subparsers.add_parser(
+        "review-packet",
+        help="Build a contact sheet and evidence packet for the final artifact",
+    )
+    review_packet_parser.add_argument("project_id")
+    review_packet_parser.add_argument("--artifact", required=True)
+    review_packet_parser.set_defaults(handler=cmd_review_packet)
 
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",

@@ -66,6 +66,235 @@ class ProductionPlanUseCases:
             "status": self.production_plan_status(project_id),
         }
 
+    def generate_production_plan(self, project_id: str) -> dict[str, Any]:
+        """Turn the current brief/shot plan into the executable plan contract."""
+
+        project = self.repository.get_project(project_id)
+        shots = self.repository.list_shots(project_id)
+        if not shots:
+            raise IntegrityError("Generate a shot plan before the production plan")
+        productions = {
+            item["shot_id"]: item
+            for item in self.repository.list_shot_productions(project_id)
+        }
+        elements = self.repository.list_creative_elements(project_id)
+        slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
+        assignments: dict[str, list[str]] = {}
+        for assignment in self.repository.list_slot_assets(project_id):
+            slot = slots.get(assignment["slot_id"])
+            if slot:
+                assignments.setdefault(slot["shot_id"], []).append(
+                    assignment["artifact_id"]
+                )
+        effects = self.current_effects_plan(project_id)
+        cues_by_shot: dict[str, list[dict[str, Any]]] = {}
+        for cue in effects["plan"].get("cues", ()) if effects else ():
+            cues_by_shot.setdefault(str(cue["shot_key"]), []).append(cue)
+
+        mode = project.mode.value
+        if mode == "product":
+            production_format = "product_showcase"
+        elif mode == "entertainment":
+            production_format = "sing_along"
+        else:
+            production_format = "cinematic_story"
+        delivery_format = {
+            "9:16": "vertical_reel",
+            "16:9": "widescreen_ad",
+            "1:1": "square_social",
+        }.get(project.output_format, "episode")
+        style_map = {
+            "anime": "anime",
+            "flat-2d-cartoon": "flat_2d_cartoon",
+            "comic-watercolor": "watercolor",
+            "stylized-3d": "stylized_3d",
+            "cinematic-live-action": "cinematic_live_action",
+            "studio-product": "studio_product",
+            "graphic-led": "motion_graphics",
+        }
+        style_id = next(
+            (
+                item.get("style_id")
+                for item in productions.values()
+                if item.get("style_id")
+            ),
+            "flat-2d-cartoon",
+        )
+        visual_style = style_map.get(str(style_id), "mixed")
+        method_map = {
+            "layered_2d": "layered_2d_animation",
+            "image_to_video": "image_to_video",
+            "stock": "licensed_stock",
+            "live": "real_footage",
+            "screen_capture": "screen_capture",
+        }
+        production_method = "layered_2d_animation"
+        for production in productions.values():
+            mapped = method_map.get(str(production.get("method")))
+            if mapped:
+                production_method = mapped
+                break
+
+        asset_manifest: list[dict[str, Any]] = []
+        seen_assets: set[str] = set()
+        shot_assets: dict[str, list[str]] = {}
+        for shot in shots:
+            ids = assignments.get(shot["id"], [])
+            if not ids:
+                ids = [f"asset-{shot['stable_key']}"]
+            shot_assets[shot["id"]] = ids
+            for asset_id in ids:
+                if asset_id in seen_assets:
+                    continue
+                seen_assets.add(asset_id)
+                asset_manifest.append(
+                    {
+                        "asset_id": asset_id,
+                        "kind": "image",
+                        "description": f"visual for {shot['stable_key']}",
+                        "source": "owned"
+                        if not asset_id.startswith("asset-")
+                        else "planned",
+                        "method": production_method,
+                        "approval_status": "owned"
+                        if not asset_id.startswith("asset-")
+                        else "planned",
+                        "fallback": "owned still",
+                        "reuse": "single shot",
+                    }
+                )
+
+        beats = []
+        timings = []
+        shot_directions = []
+        cursor = 0.0
+        for index, shot in enumerate(shots, start=1):
+            duration = float(shot["duration_seconds"])
+            requirements = shot.get("requirements") or {}
+            subject = requirements.get("subject") or {}
+            motion = requirements.get("motion") or {}
+            camera = requirements.get("camera") or motion.get("camera") or "hold"
+            action = str(subject.get("action") or motion.get("action") or "hold")
+            shot_key = shot["stable_key"]
+            shot_cues = cues_by_shot.get(shot_key, [])
+            beats.append(
+                {
+                    "beat_id": f"beat-{index:02d}",
+                    "purpose": shot.get("narrative") or shot.get("beat") or shot_key,
+                    "viewer_need": "see",
+                    "script_line": shot.get("narrative") or shot_key,
+                    "visual_action": action,
+                    "duration_seconds": duration,
+                    "shot_keys": [shot_key],
+                }
+            )
+            timings.append(
+                {
+                    "beat_id": f"beat-{index:02d}",
+                    "start_seconds": cursor,
+                    "end_seconds": cursor + duration,
+                }
+            )
+            shot_directions.append(
+                {
+                    "shot_key": shot_key,
+                    "purpose": shot.get("beat") or shot_key,
+                    "timing_cue": f"{cursor:.2f}s-{cursor + duration:.2f}s",
+                    "duration_seconds": duration,
+                    "composition": {
+                        "framing": "medium",
+                        "angle": "eye level",
+                        "subject_placement": "centre",
+                        "focal_point": action,
+                        "camera_movement": str(camera),
+                        "caption_room": "lower third",
+                    },
+                    "performance": {
+                        "action_start": action,
+                        "action_end": "hold",
+                        "pause_or_reaction": "brief hold",
+                        "eyeline": "camera",
+                    },
+                    "lighting": {
+                        "direction": "soft key",
+                        "softness": "soft",
+                        "contrast": "low",
+                        "palette": ["warm", "green"],
+                        "change": "none",
+                    },
+                    "graphics": {
+                        "effects": [str(cue["kind"]) for cue in shot_cues] or ["none"],
+                        "trigger": "beat start" if shot_cues else "none",
+                        "duration_seconds": (
+                            max(float(cue["duration_seconds"]) for cue in shot_cues)
+                            if shot_cues
+                            else 0
+                        ),
+                        "intensity": "subtle" if shot_cues else "none",
+                        "placement": "around the subject" if shot_cues else "none",
+                        "editable": True,
+                    },
+                    "audio": {
+                        "narration": shot.get("narrative") or shot_key,
+                        "music": "primary bed",
+                        "ambience": "room tone",
+                        "sfx": [],
+                        "silence": None,
+                        "carry_over": None,
+                    },
+                    "asset_ids": shot_assets[shot["id"]],
+                    "method": production_method,
+                    "fallback": "owned still",
+                    "acceptance_checks": ["subject visible", "caption readable"],
+                    "reviewer_check": "Watch the beat against the approved shot",
+                }
+            )
+            cursor += duration
+
+        payload = {
+            "production_format": production_format,
+            "visual_style": visual_style,
+            "delivery_format": delivery_format,
+            "production_method": production_method,
+            "brief": {
+                "objective": project.objective,
+                "audience": project.audience,
+                "language": project.language,
+                "required_content": [item["name"] for item in elements]
+                or ["story beats"],
+                "constraints": [
+                    f"{project.max_budget.amount} {project.max_budget.currency}"
+                ],
+                "assumptions": [],
+                "missing_inputs": [],
+            },
+            "treatment": {
+                "premise": project.objective,
+                "emotional_progression": ["setup", "development", "resolve"],
+                "visual_language": f"{visual_style} with {style_id}",
+                "pacing": "one beat per shot",
+                "sound": "narration, music bed and ambience",
+            },
+            "beats": beats,
+            "shot_directions": shot_directions,
+            "asset_manifest": asset_manifest,
+            "continuity_notes": [
+                f"keep {item['stable_key']} consistent across shots"
+                for item in elements
+            ]
+            or ["keep character identity and palette consistent"],
+            "rough_cut": {
+                "duration_seconds": cursor,
+                "beat_timings": timings,
+                "audio_reference": "narration-v1",
+                "caption_notes": "phrase-level captions in the lower third",
+                "holds": ["hold the final frame"],
+            },
+        }
+        return self.record_production_plan(
+            project_id, ProductionPlanCreate.model_validate(payload)
+        )
+
     def current_execution_plan(self, project_id: str) -> dict[str, Any] | None:
         candidates = [
             artifact

@@ -1022,6 +1022,9 @@ controller.record_intent_matrix(
         )
     ),
 )
+review_packet = controller.build_review_packet(
+    project.id, artifact_id=captioned["video"]["id"]
+)
 controller.record_creative_review(
     project.id,
     CreativeReviewCreate(
@@ -1183,6 +1186,7 @@ print(
             "quality": controller.quality_status(
                 project.id, artifact_id=captioned["video"]["id"]
             )["readiness"],
+            "review_packet": review_packet["artifact"]["id"],
         },
         indent=2,
     )
