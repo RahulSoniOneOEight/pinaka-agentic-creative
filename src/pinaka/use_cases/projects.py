@@ -77,7 +77,7 @@ class ProjectsUseCases:
             change_request = self.repository.get_change_request(change_request_id)
             if change_request.project_id != parent_project_id:
                 raise ConflictError("The change request belongs to a different project")
-            if change_request.status not in {"approved", "analysed"}:
+            if change_request.status != "approved":
                 raise ConflictError(
                     "A revision needs an approved change request; "
                     f"observed {change_request.status}"
@@ -157,7 +157,7 @@ class ProjectsUseCases:
                     studio_role="none",
                 ),
             )
-            if change_request and change_request.status == "approved":
+            if change_request:
                 self.repository.record_change_request_status(
                     change_request_id,
                     status="applied",

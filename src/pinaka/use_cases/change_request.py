@@ -472,6 +472,7 @@ class ChangeRequestUseCases:
         )
         within_available = estimated_minor <= available_minor
         rights = (target_artifact or {}).get("operation", {}).get("rights") or {}
+        rights_recheck = bool(rights)
         facts_recheck = target_type == "element" and any(
             element["id"] == target_id
             and str(element.get("fact_requirement", "none")) != "none"
@@ -496,6 +497,12 @@ class ChangeRequestUseCases:
         elif request.change_type == "copy":
             classification = "re_render"
             rationale = "Copy changes invalidate narration, captions and the render"
+        elif facts_recheck and request.change_type in {"copy", "metadata"}:
+            classification = "re_approval"
+            rationale = "The target carries fact or claim requirements"
+        elif rights_recheck and request.change_type in {"visual", "motion"}:
+            classification = "re_approval"
+            rationale = "The target carries licensed rights that must be rechecked"
         elif affected_approvals:
             classification = "re_approval"
             rationale = "An active animatic or final approval depends on the target"
