@@ -391,7 +391,21 @@ class FlowUseCases:
             "below_minimum": [
                 row["stable_key"]
                 for row in rows
-                if row["level"] is not None and not row["passes"]
+                if row["level"] is not None
+                and MOTION_ORDER.index(row["level"])
+                < MOTION_ORDER.index(row["required"])
+            ],
+            "missing_evidence": [
+                row["stable_key"]
+                for row in rows
+                if row["level"] not in {None, "M0"} and not row["evidence_artifact_id"]
+            ],
+            "failed_evidence": [
+                row["stable_key"]
+                for row in rows
+                if row["level"] not in {None, "M0"}
+                and row["evidence_artifact_id"]
+                and row["evidence_verdict"] != "pass"
             ],
         }
 
@@ -403,6 +417,14 @@ class FlowUseCases:
                 problems.append("no level: " + ", ".join(summary["missing"]))
             if summary["below_minimum"]:
                 problems.append("below M1: " + ", ".join(summary["below_minimum"]))
+            if summary["missing_evidence"]:
+                problems.append(
+                    "no motion evidence: " + ", ".join(summary["missing_evidence"])
+                )
+            if summary["failed_evidence"]:
+                problems.append(
+                    "evidence failed: " + ", ".join(summary["failed_evidence"])
+                )
             raise ConflictError(
                 "Stills must become motion before animatic approval; "
                 + "; ".join(problems)
@@ -612,9 +634,14 @@ class FlowUseCases:
         gate(
             "motion",
             motion["complete"],
-            "every character shot at M1 or above"
+            "every character shot at M1 or above with passing evidence"
             if motion["complete"]
-            else f"missing {motion['missing']}, below minimum {motion['below_minimum']}",
+            else (
+                f"missing {motion['missing']}, "
+                f"below minimum {motion['below_minimum']}, "
+                f"no evidence {motion['missing_evidence']}, "
+                f"failed evidence {motion['failed_evidence']}"
+            ),
         )
         animatic = self.repository.active_approval(project_id, "animatic")
         if animatic and animatic.get("scope", {}).get("render"):

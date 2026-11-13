@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 
 from pinaka.assets import AssetCriteria
-from pinaka.contracts.flow import FlowStepCreate
+from pinaka.contracts.flow import FlowStepCreate, MotionLevelCreate
 from pinaka.contracts.planning import ScriptApproval, ScriptCreate, ShotCreate
-from pinaka.enums import ArtifactKind, SlotAssetRole
+from pinaka.enums import ApprovalStage, ArtifactKind, ProjectStatus, SlotAssetRole
 from pinaka.errors import ApprovalRequiredError, ConflictError, IntegrityError
-from pinaka.models import TextBriefRequest
+from pinaka.models import ApprovalRequest, TextBriefRequest
 from pinaka.motion_verify import verify_frames
 from pinaka.production import ReuseDecisionCreate, ReuseItem, ShotProductionCreate
 
@@ -386,3 +386,80 @@ def test_script_is_bound_to_the_current_brief(controller):
     )
     with pytest.raises(IntegrityError, match="stale brief"):
         controller.require_script_binding(project.id)
+
+
+def test_m1_without_evidence_artifacts_is_rejected(controller):
+    project = create_project(controller)
+    plan = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(
+            text="Make a five second rhyme about a duck", persist_slots=True
+        ),
+    )
+    for shot in plan["shots"]:
+        controller.record_motion_level(
+            project.id,
+            MotionLevelCreate(
+                shot_id=shot["id"],
+                level="M1",
+                source="composition",
+                evidence=("evidence://declared-only",),
+            ),
+        )
+    with pytest.raises(ConflictError, match="no motion evidence"):
+        controller.require_motion_levels(project.id)
+
+
+def test_style_required_layers_are_enforced():
+    with pytest.raises(ValueError, match="requires layers: character"):
+        ShotProductionCreate.model_validate(
+            {
+                "shot_id": "shot_1",
+                "appears": "A product pack shot",
+                "preset_id": "product-showcase",
+                "style_id": "studio-product",
+                "method": "composite",
+                "fallback": "hold the shot",
+                "layers": [
+                    {"role": "background", "media": "still", "z": 0},
+                    {"role": "effect", "media": "procedural", "z": 20},
+                ],
+            }
+        )
+
+
+def test_shot_production_requires_a_fallback():
+    with pytest.raises(ValueError, match="fallback"):
+        ShotProductionCreate.model_validate(
+            {
+                "shot_id": "shot_1",
+                "appears": "A duck",
+                "preset_id": "storybook-motion-comic",
+                "style_id": "flat-2d-cartoon",
+                "method": "cutout_rig",
+                "fallback": "",
+                "layers": [
+                    {"role": "background", "media": "still", "z": 0},
+                    {"role": "character", "media": "cutout", "z": 10},
+                ],
+            }
+        )
+
+
+def test_active_animatic_approval_is_invalidated_by_a_new_render(controller):
+    project = create_project(controller)
+    approval = controller.repository.create_approval(
+        project.id,
+        ApprovalRequest(stage=ApprovalStage.ANIMATIC, approved_by="producer"),
+        (),
+        "0" * 64,
+        expected_project_status=ProjectStatus.DRAFT,
+        resulting_project_status=None,
+    )
+    assert controller.repository.active_approval(project.id, "animatic")
+    invalidated = controller.repository.invalidate_active_approval(
+        project.id, "animatic", reason="new render"
+    )
+    assert invalidated["status"] == "invalidated"
+    assert invalidated["id"] == approval["id"]
+    assert controller.repository.active_approval(project.id, "animatic") is None
