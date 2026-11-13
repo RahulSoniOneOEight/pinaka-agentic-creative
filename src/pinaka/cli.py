@@ -73,6 +73,7 @@ from .models import (
     BudgetPlanApprovalCreate,
     BudgetPlanCreate,
     BudgetRaiseCreate,
+    CapabilityDiscoveryCreate,
     CreativeElementCreate,
     CreativeReviewCreate,
     DeliverableCreate,
@@ -1617,6 +1618,25 @@ def cmd_quality_status(args: argparse.Namespace) -> dict[str, Any]:
 def cmd_review_packet(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).build_review_packet(
         args.project_id, artifact_id=args.artifact
+    )
+
+
+def cmd_record_capabilities(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_capability_discovery(
+        args.project_id, CapabilityDiscoveryCreate.model_validate(payload)
+    )
+
+
+def cmd_openmontage_capabilities(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).current_capability_discovery(args.project_id)
+
+
+def cmd_route_capability(args: argparse.Namespace) -> dict[str, Any]:
+    return (
+        _controller(args)
+        .route_capability(args.project_id, args.capability_id)
+        .model_dump(mode="json")
     )
 
 
@@ -3435,6 +3455,28 @@ def build_parser() -> argparse.ArgumentParser:
     review_packet_parser.add_argument("project_id")
     review_packet_parser.add_argument("--artifact", required=True)
     review_packet_parser.set_defaults(handler=cmd_review_packet)
+
+    record_capabilities_parser = subparsers.add_parser(
+        "record-capabilities",
+        help="Record an OpenMontage capability/account snapshot",
+    )
+    record_capabilities_parser.add_argument("project_id")
+    record_capabilities_parser.add_argument("--file", required=True)
+    record_capabilities_parser.set_defaults(handler=cmd_record_capabilities)
+
+    capabilities_parser = subparsers.add_parser(
+        "capabilities", help="Show the current OpenMontage capability snapshot"
+    )
+    capabilities_parser.add_argument("project_id")
+    capabilities_parser.set_defaults(handler=cmd_openmontage_capabilities)
+
+    route_capability_parser = subparsers.add_parser(
+        "route-capability",
+        help="Choose Studio or the recorded fallback for one capability",
+    )
+    route_capability_parser.add_argument("project_id")
+    route_capability_parser.add_argument("capability_id")
+    route_capability_parser.set_defaults(handler=cmd_route_capability)
 
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",

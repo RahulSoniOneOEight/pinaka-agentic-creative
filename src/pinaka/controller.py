@@ -52,6 +52,7 @@ from .use_cases.images import ImagesUseCases
 from .use_cases.jobs import JobsUseCases
 from .use_cases.motion import MotionUseCases
 from .use_cases.narration import NarrationUseCases
+from .use_cases.openmontage import OpenMontageUseCases
 from .use_cases.planning import PlanningUseCases
 from .use_cases.production import ProductionUseCases
 from .use_cases.production_plan import ProductionPlanUseCases
@@ -94,6 +95,7 @@ class CreativeController(
     AnimaticUseCases,
     FramesUseCases,
     NarrationUseCases,
+    OpenMontageUseCases,
     PublicationUseCases,
     ImagesUseCases,
 ):

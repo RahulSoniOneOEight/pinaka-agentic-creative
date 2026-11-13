@@ -17,6 +17,8 @@ from .contracts import BudgetPlanApprovalCreate as BudgetPlanApprovalCreate
 from .contracts import BudgetPlanCreate as BudgetPlanCreate
 from .contracts import BudgetPlanItemCreate as BudgetPlanItemCreate
 from .contracts import BudgetRaiseCreate as BudgetRaiseCreate
+from .contracts import CapabilityDiscoveryCreate as CapabilityDiscoveryCreate
+from .contracts import CapabilityEntry as CapabilityEntry
 from .contracts import CapabilityResult as CapabilityResult
 from .contracts import ChangeRequestCreate as ChangeRequestCreate
 from .contracts import ChangeRequestDecision as ChangeRequestDecision

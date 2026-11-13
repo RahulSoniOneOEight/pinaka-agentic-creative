@@ -21,6 +21,10 @@ from pinaka.contracts.flow import (
     SourcingCandidateCreate,
     SourcingDecisionCreate,
 )
+from pinaka.contracts.openmontage import (
+    CapabilityDiscoveryCreate,
+    CapabilityEntry,
+)
 from pinaka.contracts.quality import (
     CreativeReviewCreate,
     IntentBeatDelivery,
@@ -37,6 +41,7 @@ from pinaka.enums import (
 )
 from pinaka.models import (
     ApprovalRequest,
+    AudioCueRequest,
     BudgetPlanCreate,
     BudgetPlanItemCreate,
     FactSetCreate,
@@ -69,6 +74,51 @@ project = controller.create_project(
     )
 )
 
+
+controller.record_capability_discovery(
+    project.id,
+    CapabilityDiscoveryCreate(
+        source="manual snapshot: openmontage.video/capabilities, 2026-11-14",
+        account_ready=False,
+        credits=0,
+        providers=("fal", "google"),
+        capabilities=(
+            CapabilityEntry(
+                capability_id="cinematic_shots",
+                name="Cinematic shots",
+                category="make",
+                planning_use="generated 10-second shot",
+                production_method="image_to_video",
+                cost_hint="a few dollars per shot",
+                account_requirement="Studio credits or provider keys",
+                fallback="owned still + local compositing",
+            ),
+            CapabilityEntry(
+                capability_id="product_commercial",
+                name="Product commercials",
+                category="make",
+                planning_use="product film with end card",
+                production_method="image_to_video",
+                cost_hint="a few dollars per shot",
+                account_requirement="Studio credits or provider keys",
+                fallback="product stills + local edit",
+            ),
+            CapabilityEntry(
+                capability_id="motion_graphics",
+                name="Motion graphics",
+                category="make",
+                planning_use="data/type animation",
+                production_method="compositing",
+                cost_hint="almost free",
+                account_requirement="none",
+                fallback="local HTML/CSS animation",
+            ),
+        ),
+        notes="Studio is private alpha; no account or credits were used.",
+    ),
+)
+openmontage_route = controller.route_capability(project.id, "cinematic_shots")
+print("openmontage", openmontage_route.ready, openmontage_route.action)
 
 controller.record_quality_contract(
     project.id,
@@ -431,11 +481,26 @@ def write_music_bed(path: Path, root: float, seconds: float = 10.0) -> None:
         handle.writeframes(pcm.tobytes())
 
 
+def write_quack(path: Path, seconds: float = 0.35) -> None:
+    sample_rate = 24000
+    time = np.arange(int(seconds * sample_rate), dtype=np.float32) / sample_rate
+    frequency = 900 - 550 * (time / seconds)
+    signal = 0.26 * np.sin(2 * np.pi * frequency * time) * np.exp(-7 * time)
+    pcm = np.clip(signal * 32767, -32768, 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(pcm.tobytes())
+
+
 context = default_context(monetized=True)
 music_primary_path = BASE / "music-primary.wav"
 music_backup_path = BASE / "music-backup.wav"
 write_music_bed(music_primary_path, 261.63)
 write_music_bed(music_backup_path, 220.0)
+quack_path = BASE / "quack.wav"
+write_quack(quack_path)
 music_primary = controller.write_artifact(
     project.id,
     kind=ArtifactKind.AUDIO,
@@ -477,6 +542,45 @@ controller.assign_audio_bed(
     criteria=AssetCriteria(),
     decided_by="producer",
     context=context,
+)
+quack = controller.write_artifact(
+    project.id,
+    kind=ArtifactKind.AUDIO,
+    relative_path="audio/quack.wav",
+    content=quack_path.read_bytes(),
+    operation={
+        "type": "sfx",
+        "rights": rights(),
+        "duration_seconds": 0.35,
+        "execution_owner": "local",
+        "studio_role": "none",
+    },
+)
+controller.assign_audio_cue(
+    project.id,
+    AudioCueRequest(
+        cue_key="quack-1",
+        artifact_id=quack["id"],
+        role="sfx",
+        start_ms=3200,
+        duration_ms=350,
+        gain_db=Decimal(-10),
+        shot_id=plan["shots"][0]["id"],
+        decided_by="producer",
+    ),
+)
+controller.assign_audio_cue(
+    project.id,
+    AudioCueRequest(
+        cue_key="quack-2",
+        artifact_id=quack["id"],
+        role="sfx",
+        start_ms=3650,
+        duration_ms=350,
+        gain_db=Decimal(-10),
+        shot_id=plan["shots"][0]["id"],
+        decided_by="producer",
+    ),
 )
 visuals = {}
 for index, shot in enumerate(plan["shots"], start=1):
@@ -719,6 +823,7 @@ for index, shot in enumerate(plan["shots"], start=1):
             "fallback": "owned still",
             "acceptance_checks": ["duck visible", "captions readable"],
             "reviewer_check": "Watch the beat and read the caption",
+            "data_keys": ["duck_count", "count_range"],
         }
     )
     cursor += duration
@@ -756,6 +861,22 @@ production_plan = controller.record_production_plan(
             "beats": beats,
             "shot_directions": shot_directions,
             "asset_manifest": asset_manifest,
+            "data_bindings": [
+                {
+                    "key": "duck_count",
+                    "value": "5",
+                    "source": "script: Five little ducks",
+                    "evidence": ["script:five-little-ducks", "intent:five_ducklings"],
+                    "locked": True,
+                },
+                {
+                    "key": "count_range",
+                    "value": "1-5",
+                    "source": "script: count one to five",
+                    "evidence": ["script:count-1-5", "intent:count_1_5"],
+                    "locked": True,
+                },
+            ],
             "continuity_notes": ["same duck identity and palette across shots"],
             "rough_cut": {
                 "duration_seconds": cursor,
@@ -1254,6 +1375,8 @@ print(
                 project.id, artifact_id=captioned["video"]["id"]
             )["readiness"],
             "review_packet": review_packet["artifact"]["id"],
+            "audio_layers": controller.audio_coverage(project.id),
+            "openmontage": openmontage_route.model_dump(mode="json"),
         },
         indent=2,
     )

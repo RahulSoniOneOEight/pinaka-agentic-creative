@@ -123,6 +123,16 @@ class AudioPlan(StrictModel):
     carry_over: str | None = Field(default=None, max_length=1000)
 
 
+class DataBinding(StrictModel):
+    """An exact count, price, claim, label or offer bound to approved data."""
+
+    key: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=1000)
+    source: str = Field(min_length=1, max_length=500)
+    evidence: tuple[str, ...] = ()
+    locked: bool = True
+
+
 class AssetRoute(StrictModel):
     asset_id: str = Field(min_length=1, max_length=120)
     kind: str = Field(min_length=1, max_length=100)
@@ -150,6 +160,7 @@ class ShotDirection(StrictModel):
     fallback: str = Field(min_length=1, max_length=1000)
     acceptance_checks: tuple[str, ...] = Field(min_length=1)
     reviewer_check: str = Field(min_length=1, max_length=1000)
+    data_keys: tuple[str, ...] = ()
     openmontage_capability: str | None = Field(default=None, max_length=120)
 
 
@@ -177,6 +188,7 @@ class ProductionPlanCreate(StrictModel):
     beats: tuple[BeatPlan, ...] = Field(min_length=1)
     shot_directions: tuple[ShotDirection, ...] = Field(min_length=1)
     asset_manifest: tuple[AssetRoute, ...] = Field(min_length=1)
+    data_bindings: tuple[DataBinding, ...] = ()
     continuity_notes: tuple[str, ...] = Field(min_length=1)
     rough_cut: RoughCutPlan
 
@@ -200,6 +212,9 @@ class ProductionPlanCreate(StrictModel):
                     + ", ".join(sorted(unknown))
                 )
         known_assets = set(asset_ids)
+        binding_ids = [binding.key for binding in self.data_bindings]
+        if len(binding_ids) != len(set(binding_ids)):
+            raise ValueError("Data binding keys must be unique")
         for shot in self.shot_directions:
             unknown = set(shot.asset_ids) - known_assets
             if unknown:
@@ -207,6 +222,19 @@ class ProductionPlanCreate(StrictModel):
                     f"Shot {shot.shot_key} references unknown assets: "
                     + ", ".join(sorted(unknown))
                 )
+            unknown_data = set(shot.data_keys) - set(binding_ids)
+            if unknown_data:
+                raise ValueError(
+                    f"Shot {shot.shot_key} references unknown data keys: "
+                    + ", ".join(sorted(unknown_data))
+                )
+        for binding in self.data_bindings:
+            if not binding.locked:
+                raise ValueError(
+                    f"Data binding {binding.key} must be locked before production"
+                )
+            if not binding.evidence:
+                raise ValueError(f"Data binding {binding.key} needs evidence")
         beat_set = set(beat_ids)
         timing_ids = [timing.beat_id for timing in self.rough_cut.beat_timings]
         if len(timing_ids) != len(set(timing_ids)):

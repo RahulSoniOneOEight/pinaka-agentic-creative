@@ -345,6 +345,11 @@ class ProductionPlanUseCases:
         ]
         if missing_assets:
             issues.append("assets marked missing: " + ", ".join(missing_assets))
+        for binding in plan.get("data_bindings", ()):
+            if not binding.get("locked"):
+                issues.append(f"data binding is not locked: {binding.get('key')}")
+            if not binding.get("evidence"):
+                issues.append(f"data binding has no evidence: {binding.get('key')}")
         planned_assets = [
             asset["asset_id"]
             for asset in plan.get("asset_manifest", ())

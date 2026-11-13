@@ -109,17 +109,17 @@ The original fixture had a ~1 s near-black cut, placeholder art, 540×960 at
 
 | Item | Result |
 |---|---|
-| Project / archive | `prj_8f9c77253ecf4e2fbc8092238fed10f8` / `archive_aa4d1fa3c46f4db49a8316c7c3a7742a` |
-| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, hash `b3d36bba...` |
+| Project / archive | `prj_6118755d98124c8eb9afc5b56969826e` / `archive_9d46af3b850a47a4bd9dcc1d55951da9` |
+| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, hash `d275712f...` |
 | Quality bar | 33/33 gates pass; QA 13/13; quality readiness true |
 | Luma / motion | 141–184, no dark runs; continuity identity 1.0 |
-| Captions / audio | 0.994 coverage, 2 cues; −16.74 LUFS, −4.38 dBTP; music bed primary + backup |
+| Captions / audio | 0.992 coverage, 2 cues; −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
 | Budget | USD 1.00 cap, USD 0.00 spent |
-| Quality contract | `flow_fixture`, publication not allowed; intent beats delivered |
-| Review packet | `art_acf7f6cf...` (contact sheet + evidence) |
-| Change request / revision | `crq_006c81e0...` / `prj_6cd0c721...` |
-| Tests | 698 pass |
+| Quality contract | archived run `flow_fixture`; production contract recorded; publication pending human review |
+| Review packet | `art_571faf6a...` (contact sheet + evidence) |
+| Change request / revision | `crq_a4741041...` / `prj_f1a66ab6...` |
+| Tests | 701 pass |
 
-This is a **flow fixture**, not a publishable creative. The contract blocks
+The archived run is a **flow fixture**; a production contract was recorded on the same exact hash. Publication is allowed by that contract but readiness fails on the human review (model review is `revise`, average 3.22). Live Studio routing falls back because `account_ready=false` (private alpha, no account/credits). Final character art is still procedural. Data binding, SFX, the plan generator and the Studio routing interface are implemented.
 publication; production-grade character art, music/SFX, the plan generator,
 exact data binding and Studio routing remain open.

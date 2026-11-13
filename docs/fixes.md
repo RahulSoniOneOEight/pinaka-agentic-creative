@@ -25,19 +25,19 @@ The defects below are not polish; they are release blockers for a kids channel.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 698 tests |
+| Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 701 tests |
 | Executable production plan | **Implemented** | `ProductionPlanCreate` contract: format/style/delivery/method, seven-pass payload, shot directions, asset routes, rough cut; `production_plan` quality-bar gate |
 | Beat-to-delivery intent matrix | **Implemented** | `IntentMatrixCreate` with delivered/blocked beats and evidence; `intent-matrix` CLI; readiness gate |
 | Quality contract + creative review | **Implemented** | `QualityContractCreate` / `CreativeReviewCreate`; fixture versus production purpose; human-review gate; `quality-readiness` gate |
 | Publication gate | **Implemented** | Fixture contract sets `publication_allowed=false`; publication authorization refuses it and requires readiness |
 | Explicit delivery contract for QA | **Implemented** | `qa_render` checks contract resolution, fps, LUFS and true peak |
 | Plan generator from a 50â€“100-word idea | **Implemented (rule-based)** | `generate-production-plan` builds the contract from the brief/shot plan; LLM-assisted generation is optional |
-| Exact counts / product / claim binding | **Open** | Structural fields exist; automatic verification against approved copy/data is not wired |
+| Exact counts / product / claim binding | **Implemented** | `duck_count=5`, `count_range=1-5` locked with evidence; plan validator rejects unlocked/unknown data keys |
 | Black cut | **Fixed** | Latest 10 s run: luma 141â€“184, zero dark runs, 1080Ã—1920/24 |
 | Character/world | **Partial** | Fixture now has mother + five ducklings and a layered pond; still procedural, not final art |
-| Motion / captions / audio | **Partial** | Motion and captions pass; music bed added, no SFX |
-| 10-second counting rhyme run | **Pass** | `prj_8f9c7725â€¦`, 33/33 gates, QA 13/13, quality readiness true, USD 0.00 spent |
-| Review packet | **Implemented** | Contact sheet + luma/motion/QA/caption evidence packet for the exact hash |
+| Motion / captions / audio | **Partial** | Motion and captions pass; music bed + 2 SFX cues; no final character art |
+| 10-second counting rhyme run | **Pass (fixture); production pending sign-off** | `prj_6118755d…`, 33/33 gates, QA 13/13, USD 0.00 spent |
+| Review packet | `art_571faf6af8a141f3a9fae9a6d4cd3c1b` (contact sheet + metrics) |
 | Reference-independent quality model | **Implemented** | Contract + intent matrix + review + planning framework |
 
 ## Defect classification
@@ -81,7 +81,7 @@ motion continuity/coverage and caption speed.
 
 | Action | Implementation | Status | Acceptance | Evidence |
 |---|---|---|---|---|
-| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Done** | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` + `quality_readiness` gates; fixture contract public=false; 698 tests |
+| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Done** | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` + `quality_readiness` gates; fixture contract public=false; 701 tests |
 | Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6â€“8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | 10 s run: luma 141â€“184, zero dark runs, 240 frames |
 | Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | **Done** | Standard vertical delivery refuses anything below 1080Ã—1920 or 24 fps unless explicitly classified as a fixture/proxy. | `contract.resolution`, `contract.frame_rate`, `contract.loudness` all pass |
 | Add a publication review gate | Require named human creative approval after viewing the exact final hash with audio and captions. | **Done** | No publication when any rubric dimension is below 3/5 or a hard check fails. | Production contract requires human review; fixture contract blocks publication |
@@ -94,7 +94,7 @@ motion continuity/coverage and caption speed.
 | Character/world | Build or source approved character sheets for five distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Partial** â€” fixture has mother + five ducklings and a layered pond; still procedural | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
 | Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, motherâ€™s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Pass on fixture** â€” continuity identity 1.0006 | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects â‰¥0.5% of frame for â‰¥25% of the shot. |
 | Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1â€“3 s cue duration, â‰¤15 CPS, â‰¥52 px at 1080 width, safe margins, outline/backplate, contrast â‰¥4.5:1. | **Pass on fixture** â€” 2 cues, 0.994 coverage, â‰¤15 CPS | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
-| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** — narration + music bed; −16.74 LUFS, −4.38 dBTP; no SFX | Narration intelligible; bed at least 8 dB below speech; −16 LUFS ±1; true peak ≤−2 dBTP; no clipping or unintended silence. |
+| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
 | Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Done** â€” contact sheet + metrics packet generated | Review packet covers every shot and transition and is attached to approval. |
 
 ### P2 â€” polish
@@ -172,7 +172,7 @@ production-plan <project>
 production-plan-status <project>
 ```
 
-- 698 tests pass.
+- 701 tests pass.
 - The end-to-end policy test records a complete plan and passes the new gate.
 - The latest fixture records a plan; the gate is structurally ready, while
   creative QC still blocks on motion and captions.
@@ -290,7 +290,7 @@ This is the critique part of the flow, now in code.
 | Motion | levels/evidence, final motion verdict, continuity, motion-area coverage | failed continuity, <0.5% motion coverage, missing evidence |
 | Visual | 1080Ã—1920, 24 fps, luma continuity, dark/dead frames, letterbox, sharpness | any near-black gap, stale/high finding, soft render |
 | Captions | coverage, max cue, CPS, lines | coverage <90%, cue >4 s, >15 CPS, >2 lines |
-| Audio | loudness, true peak, audio presence, warnings/fails | failed loudness/peak, no audio QA |
+| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
 | Delivery | A/B completeness, A/B packet existence | missing A/B packet |
 
 ### How the gate behaves
@@ -316,7 +316,7 @@ critique-status <project> [--artifact ARTIFACT_ID]
 
 ### Current evidence
 
-- Schema v26; 698 tests pass.
+- Schema v26; 701 tests pass.
 - Latest render (`prj_71319â€¦`, `captioned-2916â€¦`): 1080Ã—1920, 24 fps,
   192 frames, luma 95.9â€“122.6, no dark runs; visual critique **passes**.
 - Latest creative QC: motion **revise** (continuity, low motion coverage) and
@@ -347,7 +347,7 @@ A pass means **governed, reproducible, compliant and technically formed**.
 | Motion | Camera-compensated subject-ROI measurement; visible action plus two-part articulation for M2; quantified secondary-motion visibility. |
 | Composition | Subject inside safe area; no accidental crop, occlusion, letterboxing or persistent dead-centre repetition. |
 | Captions | 100% dialogue coverage, â‰¤100 ms drift, â‰¤15 CPS, 1â€“3 s cues, â‰¤2 lines, safe area, contrast â‰¥4.5:1. |
-| Audio | âˆ’16 LUFS Â±1, true peak â‰¤âˆ’2 dBTP, intelligible narration, no clipping/dropouts; required music/cues present and rights-cleared. |
+| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
 
 Model-based story/style checks should produce findings and confidence scores,
 but must not alone approve subjective quality.
@@ -412,26 +412,28 @@ cap and passes the policy, creative, plan and quality gates.
 
 | Item | Value |
 |---|---|
-| Project | `prj_8f9c77253ecf4e2fbc8092238fed10f8` |
-| Archive | `archive_aa4d1fa3c46f4db49a8316c7c3a7742a` |
-| Final artifact | `art_45950ef84bfe4cab8c7a0dde86703c08` |
-| Hash | `b3d36bbadb5c68544950fc9c92c27c94992a4ecdfca6e5f7d54cdce9a31328d5` |
+| Project | `prj_6118755d98124c8eb9afc5b56969826e` |
+| Archive | `archive_9d46af3b850a47a4bd9dcc1d55951da9` |
+| Final artifact | `art_01651c5904ad47a69487a8fdacca773c` |
+| Hash | `d275712f4b1c629616e6d9cccbfc1e2569e4cc849043b620d2beabc04e3d2637` |
 | Video | 1080Ã—1920, 24 fps, 10.0 s, 240 frames |
 | Quality bar | **33/33 gates pass, 0 failed** |
 | QA | 13 checks, 0 failing |
 | Luma | 141â€“184, zero dark runs, zero dead frames |
 | Motion | continuity identity 1.0, scale 1.0, colour 0.0053, position 0.0051 |
-| Captions | ASR, 2 cues, 9.94/10 s, ratio 0.994 |
-| Audio | âˆ’16.57 LUFS, âˆ’4.38 dBTP |
+| Captions | ASR, 2 cues, 9.92/10 s, ratio 0.992 |
+| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
 | Budget | USD 1.00 cap, USD 0.00 spent; A/B labels 1/1 |
-| A/B packet | `3831180021a8526d0a138af0f37e1c8d0d4554d90f509323b0ce5ec80a7199ec` |
+| A/B packet | `3f76d8f21e6b353b969b43abb41e2548e4a08470ae57bef2248990905b7457f5` |
 | Quality contract | `flow_fixture`; publication **not allowed**; intent beats delivered |
-| Review packet | `art_acf7f6cffe6f43a9bdbbfe28647abdb1` (contact sheet + metrics) |
+| Review packet | `art_571faf6af8a141f3a9fae9a6d4cd3c1b` (contact sheet + metrics) |
 | Plan | generated from the shot plan and frozen |
-| Change request | `crq_006c81e0...` â†’ revision `prj_6cd0c721...` |
+| Change request | `crq_a4741041...` → revision `prj_f1a66ab6...` |
 | Flow / critiques | complete / complete |
 
-The output is a **flow fixture**, not a publication-quality creative. The
+The archived run is a **flow fixture**, but a production contract was recorded on the same exact hash. Publication is allowed by that contract; readiness fails only on the creative review: the recorded review is a model review (`revise`, average 3.22), and the contract requires a human reviewer.
+
+Production readiness after promotion: `passed=false`; issues: "creative review verdict is revise" and "creative review requires a human reviewer". This is the human sign-off blocker. OpenMontage routing also falls back (`account_ready=false`) because Studio is private alpha and no account/credits are connected.
 quality contract makes that explicit; publication authorization refuses it.
 The remaining gaps are creative production, not software gates.
 

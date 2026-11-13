@@ -36,6 +36,9 @@ from .flow import MotionLevelCreate as MotionLevelCreate
 from .flow import SlotPickCreate as SlotPickCreate
 from .flow import SourcingCandidateCreate as SourcingCandidateCreate
 from .flow import SourcingDecisionCreate as SourcingDecisionCreate
+from .openmontage import CapabilityDiscoveryCreate as CapabilityDiscoveryCreate
+from .openmontage import CapabilityEntry as CapabilityEntry
+from .openmontage import CapabilityRoute as CapabilityRoute
 from .pilot import ClientProfile as ClientProfile
 from .pilot import PilotContract as PilotContract
 from .pilot import PilotDeliverablePlan as PilotDeliverablePlan
