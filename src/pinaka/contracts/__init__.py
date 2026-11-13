@@ -74,6 +74,9 @@ from .projects import ProjectCreate as ProjectCreate
 from .projects import ProjectRecord as ProjectRecord
 from .projects import PublicationAuthorizationCreate as PublicationAuthorizationCreate
 from .projects import SegmentCreate as SegmentCreate
+from .quality import CreativeReviewCreate as CreativeReviewCreate
+from .quality import IntentMatrixCreate as IntentMatrixCreate
+from .quality import QualityContractCreate as QualityContractCreate
 from .studio import StudioReadinessReport as StudioReadinessReport
 from .studio import StudioResultOutputImport as StudioResultOutputImport
 from .studio import StudioResultPacketImport as StudioResultPacketImport

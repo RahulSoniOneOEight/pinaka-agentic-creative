@@ -687,9 +687,9 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   object-fit: cover;
 }}
 .layer.subject {{
-  max-width: 78%;
-  max-height: 58%;
-  bottom: 6%;
+  max-width: 64%;
+  max-height: 52%;
+  bottom: 14%;
   top: auto;
 }}
 .beat {{

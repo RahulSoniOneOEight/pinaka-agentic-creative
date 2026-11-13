@@ -25,6 +25,7 @@ from .contracts import ChangeRequestRecord as ChangeRequestRecord
 from .contracts import ClientProfile as ClientProfile
 from .contracts import CorrectiveActionClose as CorrectiveActionClose
 from .contracts import CreativeElementCreate as CreativeElementCreate
+from .contracts import CreativeReviewCreate as CreativeReviewCreate
 from .contracts import CritiqueFinding as CritiqueFinding
 from .contracts import DeliverableCreate as DeliverableCreate
 from .contracts import DeliverableRecord as DeliverableRecord
@@ -35,6 +36,7 @@ from .contracts import ExecutionReceiptCreate as ExecutionReceiptCreate
 from .contracts import FactSetCreate as FactSetCreate
 from .contracts import FlowStepCreate as FlowStepCreate
 from .contracts import GroundingBundleCreate as GroundingBundleCreate
+from .contracts import IntentMatrixCreate as IntentMatrixCreate
 from .contracts import JobRecord as JobRecord
 from .contracts import JobRequest as JobRequest
 from .contracts import Money as Money
@@ -55,6 +57,7 @@ from .contracts import ProviderProfile as ProviderProfile
 from .contracts import PublicationAuthorizationCreate as PublicationAuthorizationCreate
 from .contracts import QACheck as QACheck
 from .contracts import QAReport as QAReport
+from .contracts import QualityContractCreate as QualityContractCreate
 from .contracts import ScriptApproval as ScriptApproval
 from .contracts import ScriptCreate as ScriptCreate
 from .contracts import SegmentCreate as SegmentCreate

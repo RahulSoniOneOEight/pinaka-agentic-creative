@@ -49,6 +49,13 @@ class PublicationUseCases:
             raise NotFoundError(
                 "The approved final artifact is no longer current; re-approve it first"
             )
+        contract = self.current_quality_contract(project_id)
+        if contract:
+            if not contract["contract"]["publication_allowed"]:
+                raise ConflictError(
+                    "The quality contract is a flow fixture and does not allow publication"
+                )
+            self.require_quality_readiness(project_id, artifact_id=artifact["id"])
         self._reject_sensitive_payload(
             request.model_dump(mode="json"), "publication_authorization"
         )

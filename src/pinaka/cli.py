@@ -74,12 +74,14 @@ from .models import (
     BudgetPlanCreate,
     BudgetRaiseCreate,
     CreativeElementCreate,
+    CreativeReviewCreate,
     DeliverableCreate,
     EffectsPlanCreate,
     ExecutionReceiptCreate,
     FactSetCreate,
     FlowStepCreate,
     GroundingBundleCreate,
+    IntentMatrixCreate,
     JobRequest,
     Money,
     MotionLevelCreate,
@@ -89,6 +91,7 @@ from .models import (
     ProjectCreate,
     ProviderModelProfileCreate,
     PublicationAuthorizationCreate,
+    QualityContractCreate,
     ScriptApproval,
     ScriptCreate,
     SegmentCreate,
@@ -1580,6 +1583,31 @@ def cmd_production_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_production_plan_status(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).production_plan_status(args.project_id)
+
+
+def cmd_quality_contract(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_quality_contract(
+        args.project_id, QualityContractCreate.model_validate(payload)
+    )
+
+
+def cmd_intent_matrix(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_intent_matrix(
+        args.project_id, IntentMatrixCreate.model_validate(payload)
+    )
+
+
+def cmd_creative_review(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_creative_review(
+        args.project_id, CreativeReviewCreate.model_validate(payload)
+    )
+
+
+def cmd_quality_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).quality_status(args.project_id, artifact_id=args.artifact)
 
 
 def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
@@ -3350,6 +3378,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_status_parser.add_argument("project_id")
     plan_status_parser.set_defaults(handler=cmd_production_plan_status)
+
+    quality_contract_parser = subparsers.add_parser(
+        "quality-contract",
+        help="Freeze the project quality contract (purpose, minimums, must-have beats)",
+    )
+    quality_contract_parser.add_argument("project_id")
+    quality_contract_parser.add_argument("--file", required=True)
+    quality_contract_parser.set_defaults(handler=cmd_quality_contract)
+
+    intent_matrix_parser = subparsers.add_parser(
+        "intent-matrix",
+        help="Record delivered evidence for every must-have beat",
+    )
+    intent_matrix_parser.add_argument("project_id")
+    intent_matrix_parser.add_argument("--file", required=True)
+    intent_matrix_parser.set_defaults(handler=cmd_intent_matrix)
+
+    creative_review_parser = subparsers.add_parser(
+        "creative-review",
+        help="Record the 1-5 creative review for the exact final hash",
+    )
+    creative_review_parser.add_argument("project_id")
+    creative_review_parser.add_argument("--file", required=True)
+    creative_review_parser.set_defaults(handler=cmd_creative_review)
+
+    quality_status_parser = subparsers.add_parser(
+        "quality-status",
+        help="Show the quality contract, intent matrix and readiness",
+    )
+    quality_status_parser.add_argument("project_id")
+    quality_status_parser.add_argument("--artifact")
+    quality_status_parser.set_defaults(handler=cmd_quality_status)
 
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",

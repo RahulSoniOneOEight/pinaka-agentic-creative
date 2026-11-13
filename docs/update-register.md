@@ -102,6 +102,23 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 
 **Quality caveat.** Revision 18 closes the listed **governance implementation**
 items; it does not certify creative quality. The 30/30 result is Policy QC.
-The fixture has a ~1 s near-black cut (3.25–4.25 s), placeholder OpenCV art,
-540×960 at 12 fps, no music/SFX, and a story that does not match the lyric.
-Creative QC remains open; see [fixes.md](fixes.md).
+The original fixture had a ~1 s near-black cut, placeholder art, 540×960 at
+12 fps and no music/SFX. Creative QC remains open; see [fixes.md](fixes.md).
+
+## 10-second counting rhyme fixture (2026-11-14)
+
+| Item | Result |
+|---|---|
+| Project / archive | `prj_dfd4022b2d4f4641ab894a1713f15c38` / `archive_73c773b2a4c744748261f601918f004f` |
+| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames |
+| Quality bar | 33/33 gates pass; QA 13/13 |
+| Luma / motion | 141–184, no dark runs; continuity identity 1.0006 |
+| Captions / audio | 0.994 coverage, 2 cues; −16.61 LUFS, −4.45 dBTP |
+| Budget | USD 1.00 cap, USD 0.00 spent |
+| Quality contract | `flow_fixture`, publication not allowed; intent beats delivered |
+| Change request / revision | `crq_025ac29d...` / `prj_ccc1f7eb...` |
+| Tests | 696 pass |
+
+This is a **flow fixture**, not a publishable creative. The contract blocks
+publication; production-grade character art, music/SFX, the plan generator,
+exact data binding and Studio routing remain open.

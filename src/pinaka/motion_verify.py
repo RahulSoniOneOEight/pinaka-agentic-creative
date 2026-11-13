@@ -37,6 +37,10 @@ def verify_frames(
     areas: list[float] = []
     boxes: list[tuple[float, float, float, float]] = []
     colours: list[tuple[float, float, float]] = []
+    subject_centroids: list[tuple[float, float]] = []
+    subject_areas: list[float] = []
+    subject_boxes: list[tuple[float, float, float, float]] = []
+    subject_colours: list[tuple[float, float, float]] = []
     for previous, current in itertools.pairwise(frames):
         prev = _gray(previous).astype(np.float32)
         cur = _gray(current).astype(np.float32)
@@ -90,6 +94,51 @@ def verify_frames(
             mean_bgr = cv2.mean(current, mask=component_mask)[:3]
             colours.append((mean_bgr[2], mean_bgr[1], mean_bgr[0]))
 
+            union_mask = np.isin(labels, moving).astype(np.uint8) * 255
+            union_area = float(sum(stats[index, cv2.CC_STAT_AREA] for index in moving))
+            total_area = union_area or 1.0
+            union_centroid = (
+                sum(
+                    centroids_raw[index][0] * stats[index, cv2.CC_STAT_AREA]
+                    for index in moving
+                )
+                / total_area,
+                sum(
+                    centroids_raw[index][1] * stats[index, cv2.CC_STAT_AREA]
+                    for index in moving
+                )
+                / total_area,
+            )
+            subject_centroids.append(
+                (
+                    float(union_centroid[0]) / threshold.shape[1],
+                    float(union_centroid[1]) / threshold.shape[0],
+                )
+            )
+            subject_areas.append(
+                union_area / float(threshold.shape[0] * threshold.shape[1])
+            )
+            left = min(stats[index, cv2.CC_STAT_LEFT] for index in moving)
+            top = min(stats[index, cv2.CC_STAT_TOP] for index in moving)
+            right = max(
+                stats[index, cv2.CC_STAT_LEFT] + stats[index, cv2.CC_STAT_WIDTH]
+                for index in moving
+            )
+            bottom = max(
+                stats[index, cv2.CC_STAT_TOP] + stats[index, cv2.CC_STAT_HEIGHT]
+                for index in moving
+            )
+            subject_boxes.append(
+                (
+                    float(left) / threshold.shape[1],
+                    float(top) / threshold.shape[0],
+                    float(right - left) / threshold.shape[1],
+                    float(bottom - top) / threshold.shape[0],
+                )
+            )
+            union_mean = cv2.mean(current, mask=union_mask)[:3]
+            subject_colours.append((union_mean[2], union_mean[1], union_mean[0]))
+
     residual_ratio = float(sum(residuals) / len(residuals))
     max_components = max(components)
     passed = residual_ratio >= min_residual and max_components >= min_components
@@ -124,6 +173,33 @@ def verify_frames(
                 round(median(item[index] for item in colours), 2) for index in range(3)
             )
             if colours
+            else None
+        ),
+        "subject_centroid": (
+            (
+                round(median(item[0] for item in subject_centroids), 4),
+                round(median(item[1] for item in subject_centroids), 4),
+            )
+            if subject_centroids
+            else None
+        ),
+        "subject_area_ratio": (
+            round(median(subject_areas), 6) if subject_areas else 0.0
+        ),
+        "subject_bbox": (
+            tuple(
+                round(median(item[index] for item in subject_boxes), 4)
+                for index in range(4)
+            )
+            if subject_boxes
+            else None
+        ),
+        "subject_color": (
+            tuple(
+                round(median(item[index] for item in subject_colours), 2)
+                for index in range(3)
+            )
+            if subject_colours
             else None
         ),
     }

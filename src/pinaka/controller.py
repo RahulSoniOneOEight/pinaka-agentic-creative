@@ -58,6 +58,7 @@ from .use_cases.production_plan import ProductionPlanUseCases
 from .use_cases.projects import ProjectsUseCases
 from .use_cases.publication import PublicationUseCases
 from .use_cases.qa import QaUseCases
+from .use_cases.quality import QualityUseCases
 from .use_cases.settlement import SettlementUseCases
 from .use_cases.sourcing import SourcingUseCases
 from .use_cases.studio_execution import StudioExecutionUseCases
@@ -74,6 +75,7 @@ class CreativeController(
     ABDeliveryUseCases,
     CritiqueUseCases,
     ProductionPlanUseCases,
+    QualityUseCases,
     ProductionUseCases,
     SourcingUseCases,
     AssetsUseCases,

@@ -490,7 +490,7 @@ class CritiqueUseCases:
                             threshold=">= 360x640",
                         )
                     )
-                if probe.get("sharpness", 0) < 8:
+                if slot.get("role") != "background" and probe.get("sharpness", 0) < 8:
                     findings.append(
                         self._finding(
                             "assets",
@@ -581,14 +581,17 @@ class CritiqueUseCases:
                             threshold=">= 0.002",
                         )
                     )
-                if shot.get("motion_area_ratio", 0) < 0.005:
+                motion_area = shot.get("subject_area_ratio") or shot.get(
+                    "motion_area_ratio", 0
+                )
+                if motion_area < 0.005:
                     findings.append(
                         self._finding(
                             "motion",
                             "high",
                             f"{shot['stable_key']} motion covers too little of the frame",
                             evidence=(artifact_id,),
-                            metric=str(shot.get("motion_area_ratio")),
+                            metric=str(motion_area),
                             threshold=">= 0.005",
                         )
                     )

@@ -51,7 +51,11 @@ class QaUseCases:
     ) -> dict[str, Any]:
         """Technical QA on a rendered deliverable, recorded per check."""
 
+        contract = self.current_quality_contract(project_id)
+        minimums = contract["contract"]["hard_minimums"] if contract else {}
         true_peak_limit = max_true_peak_dbtp
+        if "true_peak_dbtp" in minimums:
+            true_peak_limit = float(minimums["true_peak_dbtp"])
         if true_peak_limit is None:
             true_peak_limit = -1.0
             creative = self.current_creative_plan(project_id)
@@ -143,6 +147,23 @@ class QaUseCases:
                 "expected_height": expected_height,
             },
         )
+        contract_resolution = minimums.get("resolution")
+        if contract_resolution:
+            required_width, required_height = (
+                int(part) for part in contract_resolution.lower().split("x", 1)
+            )
+            record(
+                "contract.resolution",
+                "pass"
+                if width >= required_width and height >= required_height
+                else "fail",
+                f"{width}x{height} vs contract {contract_resolution}",
+                {
+                    "width_px": width,
+                    "height_px": height,
+                    "required": contract_resolution,
+                },
+            )
         if expected_fps is not None:
             fps = float(metadata.get("fps") or 0)
             record(
@@ -150,6 +171,15 @@ class QaUseCases:
                 "pass" if abs(fps - expected_fps) <= 0.51 else "warn",
                 f"{fps} fps",
                 {"fps": fps, "expected": expected_fps},
+            )
+        contract_fps = minimums.get("fps")
+        if contract_fps:
+            actual_fps = float(metadata.get("fps") or 0)
+            record(
+                "contract.frame_rate",
+                "pass" if actual_fps >= float(contract_fps) else "fail",
+                f"{actual_fps} fps vs contract {contract_fps}",
+                {"fps": actual_fps, "required": contract_fps},
             )
         has_audio = bool(metadata.get("has_audio"))
         record(
@@ -185,6 +215,15 @@ class QaUseCases:
                     f"integrated {integrated if integrated is not None else 'n/a'} LUFS",
                     {"integrated_lufs": integrated},
                 )
+                contract_lufs = minimums.get("lufs")
+                if contract_lufs and integrated is not None:
+                    delta = abs(integrated - float(contract_lufs))
+                    record(
+                        "contract.loudness",
+                        "pass" if delta <= 2.0 else "warn" if delta <= 3.0 else "fail",
+                        f"{integrated} LUFS vs contract {contract_lufs}",
+                        {"integrated_lufs": integrated, "required": contract_lufs},
+                    )
                 if peak is not None:
                     peak_status = (
                         "pass"

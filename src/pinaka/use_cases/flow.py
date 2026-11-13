@@ -958,6 +958,16 @@ class FlowUseCases:
             else "; ".join(plan_status["issues"]),
         )
         if artifact_id:
+            try:
+                self.require_quality_readiness(project_id, artifact_id=artifact_id)
+                gate(
+                    "quality_readiness",
+                    True,
+                    "quality contract, intent matrix and review pass",
+                )
+            except ApprovalRequiredError as error:
+                gate("quality_readiness", False, str(error))
+        if artifact_id:
             checks = [
                 result
                 for result in self.repository.list_qa_results(project_id)
@@ -1140,13 +1150,15 @@ class FlowUseCases:
         missing = [
             row["stable_key"]
             for row in rows
-            if row.get("centroid") is None
-            or row.get("bbox") is None
-            or row.get("dominant_color") is None
+            if (row.get("subject_centroid") or row.get("centroid")) is None
+            or (row.get("subject_bbox") or row.get("bbox")) is None
+            or (row.get("subject_color") or row.get("dominant_color")) is None
         ]
-        centroids = [row.get("centroid") for row in rows]
-        boxes = [row.get("bbox") for row in rows]
-        colours = [row.get("dominant_color") for row in rows]
+        centroids = [row.get("subject_centroid") or row.get("centroid") for row in rows]
+        boxes = [row.get("subject_bbox") or row.get("bbox") for row in rows]
+        colours = [
+            row.get("subject_color") or row.get("dominant_color") for row in rows
+        ]
 
         drift = 0.0
         if len(centroids) > 1 and all(centroids):

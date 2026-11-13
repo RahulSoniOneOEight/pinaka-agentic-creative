@@ -20,6 +20,12 @@ from pinaka.contracts.flow import (
     SourcingCandidateCreate,
     SourcingDecisionCreate,
 )
+from pinaka.contracts.quality import (
+    CreativeReviewCreate,
+    IntentBeatDelivery,
+    IntentMatrixCreate,
+    QualityContractCreate,
+)
 from pinaka.controller import CreativeController
 from pinaka.enums import (
     ApprovalStage,
@@ -38,10 +44,12 @@ from pinaka.models import (
     ProjectCreate,
     ScriptApproval,
     ScriptCreate,
+    SlotCreate,
     TextBriefRequest,
 )
 from pinaka.openverse import default_context
 from pinaka.production import ReuseDecisionCreate, ReuseItem
+from pinaka.utils import canonical_json
 
 ROOT = Path(r"D:\pinaka-agentic-creative\workspace\complete-flow-qc")
 if ROOT.exists():
@@ -49,15 +57,41 @@ if ROOT.exists():
 controller = CreativeController.open(ROOT)
 project = controller.create_project(
     ProjectCreate(
-        name="Pinaka Complete Flow QC",
-        objective="Prove every gaps-and-fixes item with a real rendered rhyme",
+        name="Pinaka Counting Rhyme QC",
+        objective="Produce a 10-second counting rhyme under a USD 1.00 cap",
         mode="entertainment",
         audience="children and reviewers",
         output_format="9:16",
         language="en",
-        duration_seconds=Decimal(8),
+        duration_seconds=Decimal(10),
         max_budget=Money(amount=Decimal("1.00"), currency="USD"),
     )
+)
+
+
+controller.record_quality_contract(
+    project.id,
+    QualityContractCreate(
+        purpose="flow_fixture",
+        publication_allowed=False,
+        human_review_required=False,
+        review_required=False,
+        hard_minimums={
+            "resolution": "1080x1920",
+            "fps": "24",
+            "lufs": "-16",
+            "true_peak_dbtp": "-2",
+            "cps": "15",
+            "motion_area": "0.005",
+        },
+        must_have_beats=(
+            "five_ducklings",
+            "mother_duck",
+            "pond",
+            "count_1_5",
+            "quack",
+        ),
+    ),
 )
 
 
@@ -133,10 +167,11 @@ plan = controller.plan_from_text(
     project.id,
     TextBriefRequest(
         text=(
-            "Make an 8 second rhyme for kids: Two little ducks went out one day, "
-            "over the hill and far away. Mother duck said quack quack quack."
+            "Make a 10 second counting rhyme for kids: five little ducks swim "
+            "on the pond, count one two three four five, mother duck says "
+            "quack quack quack."
         ),
-        duration_seconds=Decimal(8),
+        duration_seconds=Decimal(10),
         create_plan=True,
         persist_slots=True,
         persist_elements=True,
@@ -144,9 +179,38 @@ plan = controller.plan_from_text(
         visual_style_id="flat-2d-cartoon",
     ),
 )
+for shot in plan["shots"]:
+    controller.add_slot(
+        project.id,
+        SlotCreate(
+            shot_id=shot["id"],
+            stable_key=f"{shot['stable_key']}.background",
+            role="background",
+            identity_requirement="pond and sky",
+            fact_requirement="pond setting",
+            transformation_permission="crop and grade",
+            approved_sources=("owned",),
+            media_requirement="image",
+            style_id="flat-2d-cartoon",
+        ),
+    )
+    requirements = shot["requirements"]
+    requirements.setdefault("subject", {})["action"] = "swim"
+    requirements.setdefault("motion", {})["action"] = "swim"
+    with controller.repository.database.transaction() as connection:
+        connection.execute(
+            "UPDATE shots SET requirements_json = ? WHERE id = ?",
+            (canonical_json(requirements), shot["id"]),
+        )
 production = controller.plan_production(project.id)
-TOTAL_SECONDS = 4 * len(plan["shots"])
-print("slots", len(plan["slots"]), "shots", len(plan["shots"]))
+TOTAL_SECONDS = 10.0
+SECONDS = TOTAL_SECONDS / len(plan["shots"])
+print(
+    "slots",
+    len(controller.repository.list_slots(project.id)),
+    "shots",
+    len(plan["shots"]),
+)
 print("shot productions", len(production["productions"]))
 critique("shots")
 critique("style")
@@ -167,8 +231,8 @@ controller.approve(
 controller.add_fact_set(
     project.id,
     FactSetCreate(
-        source_ref="rhyme-canon/two-little-ducks",
-        values={"rhyme": "Two Little Ducks", "setting": "pond", "sound": "quack"},
+        source_ref="rhyme-canon/five-little-ducks",
+        values={"rhyme": "Five Little Ducks", "setting": "pond", "count": "1-5"},
         evidence_refs=("https://en.wikipedia.org/wiki/Two_Little_Dicks",),
     ),
 )
@@ -180,38 +244,99 @@ BASE = Path(r"C:\Users\LENOVO\AppData\Local\Temp\pinaka-complete-assets")
 if BASE.exists():
     shutil.rmtree(BASE)
 BASE.mkdir(parents=True)
-WIDTH, HEIGHT, FPS, SECONDS = 1080, 1920, 24, 4
+WIDTH, HEIGHT, FPS = 1080, 1920, 24
 
 
 def background_array(seed: int) -> np.ndarray:
+    """A soft pond: sky, sun, layered hills, water, ripples and edge reeds."""
+
     canvas = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+    horizon = int(HEIGHT * 0.44)
     for y in range(HEIGHT):
-        canvas[y, :, :] = (
-            80 + min(60, y // 32 + seed * 8),
-            140 - min(50, y // 40),
-            120 + min(40, seed * 5),
+        if y < horizon:
+            blue = 238 - int(30 * y / HEIGHT)
+            canvas[y, :, :] = (blue, blue - 8, 150)
+        else:
+            depth = (y - horizon) / max(1, HEIGHT - horizon)
+            canvas[y, :, :] = (
+                205 - int(70 * depth),
+                225 - int(75 * depth),
+                190 - int(55 * depth),
+            )
+    cv2.circle(canvas, (180, 250), 120, (228, 238, 248), -1)
+    back_hill = np.array(
+        [
+            [0, horizon],
+            [0, int(HEIGHT * 0.34)],
+            [int(WIDTH * 0.18), int(HEIGHT * 0.30)],
+            [int(WIDTH * 0.34), int(HEIGHT * 0.36)],
+            [int(WIDTH * 0.52), int(HEIGHT * 0.29)],
+            [int(WIDTH * 0.70), int(HEIGHT * 0.35)],
+            [int(WIDTH * 0.86), int(HEIGHT * 0.31)],
+            [WIDTH, int(HEIGHT * 0.37)],
+            [WIDTH, horizon],
+        ],
+        dtype=np.int32,
+    )
+    front_hill = np.array(
+        [
+            [0, horizon],
+            [0, int(HEIGHT * 0.39)],
+            [int(WIDTH * 0.22), int(HEIGHT * 0.35)],
+            [int(WIDTH * 0.42), int(HEIGHT * 0.41)],
+            [int(WIDTH * 0.62), int(HEIGHT * 0.34)],
+            [int(WIDTH * 0.82), int(HEIGHT * 0.40)],
+            [WIDTH, int(HEIGHT * 0.36)],
+            [WIDTH, horizon],
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(canvas, [back_hill], (150, 190, 120))
+    cv2.fillPoly(canvas, [front_hill], (105, 160, 95))
+    for index in range(7):
+        cx = int(WIDTH * (0.10 + index * 0.13))
+        cy = int(HEIGHT * (0.80 + 0.015 * (index % 3)))
+        cv2.ellipse(
+            canvas,
+            (cx, cy),
+            (int(WIDTH * 0.14), 10),
+            0,
+            0,
+            360,
+            (185, 215, 205),
+            2,
         )
-    cv2.circle(canvas, (180 + seed * 40, 320), 140, (210, 220, 230), -1)
-    return canvas
+    for x in (24, 52, 80, WIDTH - 90, WIDTH - 60, WIDTH - 28):
+        cv2.line(
+            canvas,
+            (x, horizon + 20),
+            (x + 8, int(HEIGHT * 0.92)),
+            (70, 120, 80),
+            5,
+        )
+    return cv2.GaussianBlur(canvas, (0, 0), 1.2)
 
 
-def duck_cutout(size: int = 720, *, backup: bool = False) -> np.ndarray:
-    """Return a transparent RGBA duck cutout for the character layer."""
-
-    bgr = np.zeros((size, size, 3), dtype=np.uint8)
-    mask = np.zeros((size, size), dtype=np.uint8)
-    color = (70, 140, 220) if backup else (40, 180, 240)
-    cx, cy = size // 2, int(size * 0.58)
-    body = ((cx, cy), (int(size * 0.30), int(size * 0.18)), 0)
-    head = ((cx + int(size * 0.22), cy - int(size * 0.10)), int(size * 0.12))
+def _paint_duck(
+    bgr: np.ndarray,
+    mask: np.ndarray,
+    *,
+    cx: int,
+    cy: int,
+    scale: float,
+    color: tuple[int, int, int],
+    mother: bool = False,
+) -> None:
+    body = ((cx, cy), (int(scale * 0.34), int(scale * 0.20)), 0)
+    head = ((cx + int(scale * 0.24), cy - int(scale * 0.16)), int(scale * 0.15))
     wing = (
-        (cx - int(size * 0.10), cy),
-        (int(size * 0.15), int(size * 0.07)),
-        -25,
+        (cx - int(scale * 0.08), cy),
+        (int(scale * 0.17), int(scale * 0.08)),
+        -22,
     )
     beak = (
-        (cx + int(size * 0.34), cy - int(size * 0.06)),
-        (int(size * 0.06), int(size * 0.025)),
+        (cx + int(scale * 0.38), cy - int(scale * 0.08)),
+        (int(scale * 0.07), int(scale * 0.03)),
         0,
     )
     for image, paint in ((bgr, color), (mask, 255)):
@@ -219,9 +344,45 @@ def duck_cutout(size: int = 720, *, backup: bool = False) -> np.ndarray:
         cv2.circle(image, head[0], head[1], paint, -1)
         cv2.ellipse(image, wing[0], wing[1], wing[2], 0, 360, paint, -1)
         cv2.ellipse(image, beak[0], beak[1], beak[2], 0, 360, paint, -1)
-    eye = (cx + int(size * 0.25), cy - int(size * 0.13))
-    cv2.circle(bgr, eye, max(2, int(size * 0.012)), (20, 20, 20), -1)
-    cv2.circle(mask, eye, max(2, int(size * 0.012)), 255, -1)
+    eye = (cx + int(scale * 0.28), cy - int(scale * 0.20))
+    cv2.circle(bgr, eye, max(2, int(scale * 0.018)), (20, 20, 20), -1)
+    cv2.circle(mask, eye, max(2, int(scale * 0.018)), 255, -1)
+    if mother:
+        cv2.circle(bgr, (eye[0] - 4, eye[1] - 5), 3, (250, 250, 250), -1)
+
+
+def family_cutout(size: int = 900, *, backup: bool = False) -> np.ndarray:
+    """Mother duck plus five ducklings as one transparent character layer."""
+
+    bgr = np.zeros((size, size, 3), dtype=np.uint8)
+    mask = np.zeros((size, size), dtype=np.uint8)
+    mother_color = (60, 100, 160) if backup else (55, 95, 150)
+    duckling_color = (55, 185, 245) if backup else (40, 205, 250)
+    _paint_duck(
+        bgr,
+        mask,
+        cx=int(size * 0.58),
+        cy=int(size * 0.42),
+        scale=size * 0.72,
+        color=mother_color,
+        mother=True,
+    )
+    positions = [
+        (0.14, 0.66),
+        (0.29, 0.72),
+        (0.44, 0.75),
+        (0.70, 0.74),
+        (0.85, 0.67),
+    ]
+    for index, (px, py) in enumerate(positions):
+        _paint_duck(
+            bgr,
+            mask,
+            cx=int(size * px),
+            cy=int(size * py),
+            scale=size * (0.30 if index % 2 == 0 else 0.33),
+            color=duckling_color,
+        )
     rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
     rgba[:, :, 3] = mask
     return rgba
@@ -258,8 +419,8 @@ for index, shot in enumerate(plan["shots"], start=1):
     backup_character_path = BASE / f"character-{index}-b.png"
     cv2.imwrite(str(background_path), background_array(1))
     cv2.imwrite(str(backup_background_path), background_array(3))
-    cv2.imwrite(str(character_path), duck_cutout())
-    cv2.imwrite(str(backup_character_path), duck_cutout(backup=True))
+    cv2.imwrite(str(character_path), family_cutout())
+    cv2.imwrite(str(backup_character_path), family_cutout(backup=True))
     background = controller.write_artifact(
         project.id,
         kind=ArtifactKind.GENERATED,
@@ -430,7 +591,7 @@ for index, shot in enumerate(plan["shots"], start=1):
             "beat_id": f"beat-{index:02d}",
             "purpose": f"Deliver rhyme beat {index}",
             "viewer_need": "understand",
-            "script_line": "Two little ducks. Mother duck said quack quack quack.",
+            "script_line": "Five little ducks. Mother duck said quack quack quack.",
             "visual_action": "The duck swims across the pond",
             "duration_seconds": duration,
             "shot_keys": [shot_key],
@@ -507,7 +668,13 @@ production_plan = controller.record_production_plan(
                 "objective": project.objective,
                 "audience": project.audience,
                 "language": project.language,
-                "required_content": ["two ducks", "mother duck", "pond", "quack"],
+                "required_content": [
+                    "five ducklings",
+                    "mother duck",
+                    "pond",
+                    "count 1-5",
+                    "quack",
+                ],
                 "constraints": ["USD 1.00 cap"],
                 "assumptions": [],
                 "missing_inputs": [],
@@ -539,6 +706,7 @@ print(
     production_plan["status"]["issues"],
 )
 critique("assets")
+critique("style")
 controller.approve(
     project.id,
     ApprovalRequest(
@@ -749,13 +917,13 @@ controller.transition_project(
     project.id, ProjectStatus.FINAL_CANDIDATE, reason="Animatic approved"
 )
 
-script_text = "Two little ducks. Mother duck said quack quack quack."
+script_text = "Five little ducks. Quack quack. One, two, three, four, five!"
 script = controller.record_script(project.id, ScriptCreate(text=script_text))
 controller.approve_script(
     project.id, script["id"], ScriptApproval(approved_by="producer")
 )
 critique("script")
-narration = controller.synthesize_narration(project.id, script=script_text, speed=0.9)
+narration = controller.synthesize_narration(project.id, script=script_text, speed=0.82)
 muxed = controller.mux_narration(
     project.id,
     video_artifact_id=render["video"]["id"],
@@ -797,6 +965,85 @@ critique("captions")
 critique("audio", captioned["video"]["id"])
 critique("visual", captioned["video"]["id"])
 critique("motion", captioned["video"]["id"])
+
+shot_keys = [shot["stable_key"] for shot in plan["shots"]]
+family_ids = [visuals[shot["stable_key"]]["character"]["id"] for shot in plan["shots"]]
+background_ids = [
+    visuals[shot["stable_key"]]["background"]["id"] for shot in plan["shots"]
+]
+controller.record_intent_matrix(
+    project.id,
+    IntentMatrixCreate(
+        beats=(
+            IntentBeatDelivery(
+                beat_id="five_ducklings",
+                status="delivered",
+                shot_keys=tuple(shot_keys),
+                asset_ids=tuple(family_ids),
+                evidence=tuple(f"artifact:{item}" for item in family_ids),
+            ),
+            IntentBeatDelivery(
+                beat_id="mother_duck",
+                status="delivered",
+                shot_keys=tuple(shot_keys),
+                asset_ids=tuple(family_ids),
+                evidence=tuple(f"artifact:{item}" for item in family_ids),
+            ),
+            IntentBeatDelivery(
+                beat_id="pond",
+                status="delivered",
+                shot_keys=tuple(shot_keys),
+                asset_ids=tuple(background_ids),
+                evidence=tuple(f"artifact:{item}" for item in background_ids),
+            ),
+            IntentBeatDelivery(
+                beat_id="count_1_5",
+                status="delivered",
+                shot_keys=tuple(shot_keys),
+                asset_ids=tuple(family_ids),
+                audio_evidence=narration["artifact"]["id"],
+                caption_evidence=captions["artifact"]["id"],
+                evidence=(
+                    f"captions:{captions['artifact']['id']}",
+                    f"narration:{narration['artifact']['id']}",
+                ),
+            ),
+            IntentBeatDelivery(
+                beat_id="quack",
+                status="delivered",
+                shot_keys=tuple(shot_keys),
+                audio_evidence=narration["artifact"]["id"],
+                caption_evidence=captions["artifact"]["id"],
+                evidence=(
+                    f"narration:{narration['artifact']['id']}",
+                    f"captions:{captions['artifact']['id']}",
+                ),
+            ),
+        )
+    ),
+)
+controller.record_creative_review(
+    project.id,
+    CreativeReviewCreate(
+        artifact_id=captioned["video"]["id"],
+        artifact_hash=captioned["video"]["content_hash"],
+        reviewer="pinaka.fixture_review",
+        reviewer_kind="model",
+        scores={
+            "character": 3,
+            "world": 3,
+            "story": 3,
+            "motion": 4,
+            "composition": 3,
+            "captions": 4,
+            "audio": 3,
+            "brand": 3,
+            "overall": 3,
+        },
+        notes="Flow fixture; not a publication-quality creative.",
+        verdict="revise",
+    ),
+)
 
 graded = controller.grade_asset(
     project.id, captioned["video"]["id"], saturation=1.1, brightness=0.02
@@ -933,6 +1180,9 @@ print(
             "critiques": controller.critique_summary(
                 project.id, artifact_id=captioned["video"]["id"]
             )["complete"],
+            "quality": controller.quality_status(
+                project.id, artifact_id=captioned["video"]["id"]
+            )["readiness"],
         },
         indent=2,
     )
