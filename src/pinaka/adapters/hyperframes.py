@@ -193,8 +193,10 @@ html, body {{ margin: 0; width: {width}px; height: {height}px; overflow: hidden;
 #char {{ left: {width * 0.34:.1f}px; top: {height * 0.45:.1f}px;
   width: {width * 0.32:.1f}px; height: {height * 0.13:.1f}px;
   border-radius: 50%; background: #f2c230; }}
-#wing {{ position: absolute; left: 16%; top: 42%; width: 42%; height: 40%;
-  border-radius: 50%; background: #d9a520; transform-origin: 85% 50%; }}
+#wing {{ position: absolute; left: {width * 0.40:.1f}px;
+  top: {height * 0.465:.1f}px; width: {width * 0.13:.1f}px;
+  height: {height * 0.05:.1f}px; border-radius: 50%; background: #d9a520;
+  transform-origin: 85% 50%; }}
 #fx {{ inset: 0; opacity: 0;
   background: radial-gradient(circle at 50% 55%, rgba(255,255,255,.5), transparent 45%); }}
 </style>
@@ -206,7 +208,9 @@ html, body {{ margin: 0; width: {width}px; height: {height}px; overflow: hidden;
        data-track-index="0"></div>
   <div class="layer clip" id="char" data-start="0" data-duration="{duration}"
        data-track-index="10" data-hf-scene="shot-01"
-       data-hf-scene-no-swap><div id="wing"></div></div>
+       data-hf-scene-no-swap></div>
+  <div class="layer clip" id="wing" data-start="0" data-duration="{duration}"
+       data-track-index="11"></div>
   <div class="layer clip" id="fx" data-start="0" data-duration="{duration}"
        data-track-index="20"></div>
 </div>
@@ -219,6 +223,8 @@ tl.fromTo("#char", {{ x: -{width * 0.18:.1f}, y: 0 }},
 tl.fromTo("#char", {{ scaleX: 1 }},
   {{ scaleX: 1.06, duration: {duration / 8}, ease: "sine.inOut",
      yoyo: true, repeat: 7 }}, 0);
+tl.fromTo("#wing", {{ x: -{width * 0.18:.1f} }},
+  {{ x: {width * 0.18:.1f}, duration: {duration}, ease: "sine.inOut" }}, 0);
 tl.fromTo("#wing", {{ rotation: -22 }},
   {{ rotation: 22, duration: {duration / 24}, ease: "sine.inOut",
      yoyo: true, repeat: 23 }}, 0);
