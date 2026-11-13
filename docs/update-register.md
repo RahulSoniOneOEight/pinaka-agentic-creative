@@ -89,13 +89,13 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 | Pexels evidence fallback | Closed | `archive_search_evidence` stores API responses; a 403 writes `provider_blocked` evidence and marks `asset-provider:pexels` unavailable; `tests/test_gap_completion.py` |
 | Caption coverage warning | Closed | ASR SRT pads the final cue to the runtime; complete-flow run reports 8.0/8.0 s, ratio 1.0, pass |
 
-## Complete implementation run (Revision 18, commit 2f6752c)
+## Complete implementation run (Revision 18, commits 2f6752c + 20c52f8)
 
 | Item | Status | Evidence |
 |---|---|---|
 | Remaining gaps F13/F15/F20/F24/F26/F28/F29/F30/F32/F33/F36 | Closed | schema v25, 688 tests, 30/30 gates; `scripts/qc_complete_flow.py` |
-| USD 1.00 rhyme run | Closed | project `prj_5af9fdf514b4451ea083828b466c7e31`, archive `archive_b9af3a4a8fe44d8aa32f10bf3b5f4cf4`, USD 0.00 spent |
-| A/B delivery | Closed | `A/`, `B/`, `experiment.json`, `metrics-plan.json`; manifest `bfefa3de...` |
-| Change request + revision | Closed | `crq_9e17a6ae...` applied; revision `prj_2c39ecca...` linked |
+| USD 1.00 rhyme run | Closed | project `prj_76ec1e8610764ea19095f0b91275f252`, archive `archive_cb2b03dad36e4b84a4a9db591b48251d`, USD 0.00 spent |
+| A/B delivery | Closed | `A/`, `B/`, `experiment.json`, `metrics-plan.json`; manifest `8931a3b0...` |
+| Change request + revision | Closed | `crq_2bae5da0...` applied; revision `prj_824cc49a...` linked; both ledger steps recorded |
 | Motion / captions / QA | Pass | M2 both shots; continuity passes; ASR coverage 1.0; QA 10/10 |
 | Live providers | Unchanged | P1 fal still not re-run; P2 Studio blocked at credits 0; Pexels still 403 |
