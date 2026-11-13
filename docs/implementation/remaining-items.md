@@ -158,18 +158,19 @@ can actually proceed. Remote CI status is separate from the local test evidence 
 
 ### Gap-completion bundle (2026-11-13, schema v25)
 
-- Commits `2f6752c` + `20c52f8`; 688 tests pass; `ruff check`/`format` clean; `mypy` clean (51 files).
+- Commits `2f6752c` + `20c52f8` + `94589f4`; 688 tests pass; `ruff check`/`format` clean; `mypy` clean (51 files).
 - Schema v25 is additive: budget A/B labels, project change-request link, flow execution
   ownership, change-request/event tables and A/B delivery ledger. A v24 database opens and
   migrates; `tests/test_gap_completion.py::test_schema_v24_migrates_to_v25` covers it.
 - Closed: F13 (ASR default), F15 (effect library), F20 (ownership auto-link), F24 (A/B packet),
   F26 (budget labels), F28 (intake), F29 (impact), F30 (revision link), F32 (slot coverage),
   F33 (Pexels evidence/unavailable) and F36 (caption coverage).
-- Run: `scripts/qc_complete_flow.py`, project `prj_76ec1e8610764ea19095f0b91275f252`,
-  archive `archive_cb2b03dad36e4b84a4a9db591b48251d`, 30/30 quality-bar gates, final QA pass,
-  ASR caption coverage 1.0, M2 motion and continuity pass, USD 0.00 of the USD 1.00 cap.
-- A/B packet manifest `8931a3b0...`; change request `crq_2bae5da0...` applied to revision
-  `prj_824cc49a...`; the child records both g0 and `change_request:<id>` ledger steps; g5
+- Run: `scripts/qc_complete_flow.py`, project `prj_be33a4c3f52943a98c652a3188cd7884`,
+  archive `archive_e612b96250dc4300a21a12c7580092b7`, 30/30 quality-bar gates, final QA pass,
+  ASR caption coverage 1.0, M2 motion and continuity pass, kids true peak -4.45 dBTP
+  against a -2.0 limit, USD 0.00 of the USD 1.00 cap.
+- A/B packet manifest `1761856f...`; change request `crq_7f251020...` applied to revision
+  `prj_903d7e7d...`; the child records both g0 and `change_request:<id>` ledger steps; g5
   records a local fallback of Studio with a trade-off.
 - Still external, not claimed as passed: P1 live fal still, P2 Studio video/avatar (credits 0),
   Pexels video evidence pages (HTTP 403).
