@@ -893,7 +893,7 @@ class FlowUseCases:
                     f"scale {continuity['checks']['scale']['value']}, "
                     f"colour {continuity['checks']['colour']['value']}, "
                     f"identity {continuity['checks']['identity']['value']}, "
-                    f"loop {continuity['checks']['loop']['value'] if continuity['checks']['loop']['required'] else 'n/a'}"
+                    f"loop {continuity['checks']['loop']['value']}"
                 )
                 if continuity["passed"]
                 else "motion continuity failed",
@@ -1073,17 +1073,13 @@ class FlowUseCases:
                 for right in range(left + 1, len(colours))
             )
 
-        seam = (
-            loop_seam(
-                str(
-                    self.artifact_store.resolve(
-                        project_id,
-                        self.repository.get_artifact(artifact_id)["relative_path"],
-                    )
+        seam = loop_seam(
+            str(
+                self.artifact_store.resolve(
+                    project_id,
+                    self.repository.get_artifact(artifact_id)["relative_path"],
                 )
             )
-            if loop_required
-            else {"seam": None}
         )
 
         checks = {
@@ -1117,9 +1113,9 @@ class FlowUseCases:
             "loop": {
                 "required": loop_required,
                 "passed": (
-                    None
-                    if not loop_required
-                    else seam.get("seam") is not None and seam["seam"] <= 0.12
+                    seam.get("seam") is not None and seam["seam"] <= 0.12
+                    if loop_required
+                    else True
                 ),
                 "value": seam.get("seam"),
                 "threshold": 0.12,

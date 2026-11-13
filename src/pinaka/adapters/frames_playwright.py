@@ -8,6 +8,10 @@ from .frames import CapturedFrame, FrameCaptureResult
 
 SEEK_SCRIPT = """
 async (seconds) => {
+  const seek = window.__seek;
+  if (typeof seek === "function") {
+    seek(seconds);
+  }
   const clips = Array.from(document.querySelectorAll("video.clip"));
   if (!clips.length) return 0;
   await Promise.all(clips.map((video) => new Promise((resolve) => {

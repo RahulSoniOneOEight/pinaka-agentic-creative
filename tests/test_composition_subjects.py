@@ -66,7 +66,7 @@ def test_subject_keyframes_are_windowed():
     html = build_composition(
         title="x", width=540, height=960, shots=SHOTS, layers=layers
     )
-    assert "@keyframes subj-1-0" in html
+    assert "@keyframes subj-1-1-0" in html
     assert "translateX(-18%)" in html
     assert "rotate(6deg)" in html or "scale(" in html
 

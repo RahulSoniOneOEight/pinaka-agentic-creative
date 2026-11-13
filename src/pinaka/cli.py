@@ -1086,6 +1086,7 @@ def cmd_render_composition(args: argparse.Namespace) -> dict[str, Any]:
         fps=args.fps,
         width=args.width,
         height=args.height,
+        renderer=args.renderer,
     )
 
 
@@ -2938,6 +2939,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("--fps", type=int, default=24)
     render_parser.add_argument("--width", type=int, default=1080)
     render_parser.add_argument("--height", type=int, default=1920)
+    render_parser.add_argument(
+        "--renderer",
+        choices=("legacy", "hyperframes"),
+        default=None,
+        help="Override PINAKA_RENDERER for this render",
+    )
     render_parser.set_defaults(handler=cmd_render_composition)
 
     studio_show_parser = subparsers.add_parser(

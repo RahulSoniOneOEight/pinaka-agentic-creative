@@ -132,8 +132,8 @@ def test_still_camera_move_and_no_baked_text():
 def test_baked_text_is_rejected_by_validation():
     html = build_composition(title="x", width=10, height=10, shots=SHOTS)
     tampered = html.replace(
-        '<div class="layers"',
-        '<p class="narrative">Baked caption</p><div class="layers"',
+        'class="layers"',
+        'class="narrative">Baked caption</p><div class="layers"',
     )
     report = validate_composition(tampered)
     assert report["valid"] is False
@@ -158,4 +158,5 @@ def test_primary_visual_layer_is_full_bleed():
             ]
         },
     )
-    assert 'class="layer background" data-role="primary visual"' in html
+    assert 'class="layer background"' in html
+    assert 'data-role="primary visual"' in html

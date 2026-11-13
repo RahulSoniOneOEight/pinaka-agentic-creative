@@ -6,6 +6,7 @@ import pytest
 
 from pinaka.adapters.encode import EncodedVideo
 from pinaka.adapters.frames import CapturedFrame, FrameCaptureResult
+from pinaka.adapters.hyperframes import HyperFramesAdapter, video_duration
 from pinaka.errors import IntegrityError, NotFoundError
 from pinaka.models import TextBriefRequest
 from pinaka.utils import sha256_bytes
@@ -140,3 +141,36 @@ def test_render_rejects_a_tampered_composition(controller):
     path.write_text("<!doctype html><title>x</title>", encoding="utf-8")
     with pytest.raises(IntegrityError, match="validation"):
         controller.render_composition(project.id, capture=FakeCapture())
+
+
+def test_render_rejects_an_unknown_renderer(controller):
+    project, _ = _composition_project(controller)
+    with pytest.raises(IntegrityError, match="Unknown renderer"):
+        controller.render_composition(
+            project.id, fps=5, renderer="magic", capture=FakeCapture()
+        )
+
+
+@pytest.mark.skipif(
+    not HyperFramesAdapter().installed(), reason="HyperFrames is not installed"
+)
+def test_hyperframes_render_matches_legacy_duration(controller, monkeypatch):
+    project, _ = _composition_project(controller)
+    legacy = controller.render_composition(
+        project.id, fps=5, width=540, height=960, renderer="legacy"
+    )
+    monkeypatch.setenv("PINAKA_RENDERER", "hyperframes")
+    hyperframes = controller.render_composition(
+        project.id, fps=5, width=540, height=960
+    )
+    assert hyperframes["renderer"] == "hyperframes"
+    assert legacy["frames"] == hyperframes["frames"] == 25
+    assert legacy["duration_seconds"] == hyperframes["duration_seconds"] == "5"
+    legacy_path = controller.artifact_store.resolve(
+        project.id, legacy["video"]["relative_path"]
+    )
+    hyperframes_path = controller.artifact_store.resolve(
+        project.id, hyperframes["video"]["relative_path"]
+    )
+    assert video_duration(legacy_path) == pytest.approx(5.0, abs=0.2)
+    assert video_duration(hyperframes_path) == pytest.approx(5.0, abs=0.2)

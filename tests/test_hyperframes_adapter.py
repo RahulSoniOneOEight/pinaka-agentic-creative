@@ -68,7 +68,8 @@ def test_layer_manifest_emits_track_indices():
 
 
 @requires_hyperframes
-def test_hyperframes_render_matches_legacy_duration(tmp_path: Path):
+def test_hyperframes_smoke_duration_matches_contract(tmp_path: Path):
+    # True legacy/HyperFrames parity lives in tests/test_composition_render.py.
     project = tmp_path / "hyperframes"
     html = adapter.write_smoke_project(
         project, width=270, height=480, duration=2, fps=12

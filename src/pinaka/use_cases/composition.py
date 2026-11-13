@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import os
+import re
+import shutil
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from ..adapters.encode import FFmpegEncodeAdapter, VideoEncodeAdapter
 from ..adapters.frames import ChromeFrameCapture, FrameCaptureAdapter
@@ -8,12 +14,14 @@ from ..adapters.frames_playwright import PlaywrightFrameCapture
 from ..composition import (
     build_composition,
     composition_duration,
+    composition_size,
     validate_composition,
 )
 from ..enums import (
     ArtifactKind,
 )
 from ..errors import (
+    ConfigurationError,
     ConflictError,
     IntegrityError,
     NotFoundError,
@@ -25,12 +33,32 @@ from ..policy.guards import (
     require_active_project,
 )
 from ..utils import sha256_bytes
+
+LOCAL_SRC = re.compile(r'src="(file:///[^"]+)"')
 from ._shared import (
     MAX_EMBEDDED_BYTES,
     MAX_LAYER_BYTES,
     VIDEO_MIME,
     _image_mime,
 )
+
+
+def _materialize_local_media(html: str, project_dir: Path) -> str:
+    """Copy file:// layers into the HyperFrames project and use relative paths."""
+
+    assets = project_dir / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    for uri in set(LOCAL_SRC.findall(html)):
+        parsed = urlparse(uri)
+        source = Path(url2pathname(unquote(parsed.path)))
+        if not source.is_file():
+            raise IntegrityError(f"Layer file is missing: {source}")
+        digest = sha256_bytes(source.read_bytes())[:12]
+        target = assets / f"{digest}-{source.name}"
+        if not target.is_file():
+            shutil.copy2(source, target)
+        html = html.replace(uri, f"assets/{target.name}")
+    return html
 
 
 class CompositionUseCases:
@@ -112,6 +140,20 @@ class CompositionUseCases:
             )
         return layers, skipped
 
+    @staticmethod
+    def _gsap_source() -> str:
+        """Inline GSAP when the pinned HyperFrames install ships it."""
+
+        from ..adapters.hyperframes import HyperFramesAdapter
+
+        adapter = HyperFramesAdapter()
+        if not adapter.installed():
+            return ""
+        try:
+            return adapter.gsap_source()
+        except ConfigurationError:
+            return ""
+
     def author_composition(
         self,
         project_id: str,
@@ -144,6 +186,7 @@ class CompositionUseCases:
             shots=shots,
             elements=elements,
             layers=layers,
+            gsap_script=self._gsap_source(),
         )
         report = validate_composition(html)
         if not report["valid"]:
@@ -198,6 +241,7 @@ class CompositionUseCases:
         max_frames: int = 600,
         capture: FrameCaptureAdapter | None = None,
         encoder: VideoEncodeAdapter | None = None,
+        renderer: str | None = None,
     ) -> dict[str, Any]:
         """Render one authored composition to a silent H.264 preview."""
 
@@ -230,38 +274,109 @@ class CompositionUseCases:
                 f"Render would produce {frame_count} frames; limit is {max_frames}"
             )
         html_path = self.artifact_store.resolve(project_id, artifact["relative_path"])
-        if capture is None:
-            capture = (
-                PlaywrightFrameCapture()
-                if 'class="layer clip"' in html
-                else ChromeFrameCapture()
-            )
-        encoder = encoder or FFmpegEncodeAdapter()
-        captured = capture.capture(
-            html_path=html_path,
-            frame_count=frame_count,
-            fps=fps,
-            width=width,
-            height=height,
+        renderer_name = (
+            (renderer or os.environ.get("PINAKA_RENDERER", "legacy")).strip().lower()
         )
-        with tempfile.TemporaryDirectory(prefix="pinaka-render-") as temp:
-            frames_dir = _Path(temp)
-            for frame in captured.frames:
-                (frames_dir / f"frame-{frame.index:04d}.png").write_bytes(frame.content)
-            encoded = encoder.encode(
-                frames_dir=frames_dir,
+        if renderer_name not in {"legacy", "hyperframes"}:
+            raise IntegrityError(
+                f"Unknown renderer {renderer_name!r}; use legacy or hyperframes"
+            )
+        if renderer_name == "hyperframes":
+            from ..adapters.hyperframes import HyperFramesAdapter
+
+            adapter = HyperFramesAdapter()
+            if not adapter.installed():
+                raise IntegrityError(
+                    "PINAKA_RENDERER=hyperframes requires the pinned install: "
+                    "run npm ci in tools/hyperframes"
+                )
+            declared = composition_size(html)
+            if declared != (width, height):
+                raise IntegrityError(
+                    f"Composition is {declared[0]}x{declared[1]} but render asked "
+                    f"for {width}x{height}"
+                )
+            temp = tempfile.mkdtemp(prefix="pinaka-hyperframes-")
+            try:
+                project_dir = _Path(temp) / "project"
+                project_dir.mkdir()
+                local_html = _materialize_local_media(html, project_dir)
+                (project_dir / "index.html").write_text(local_html, encoding="utf-8")
+                (project_dir / "hyperframes.json").write_text(
+                    '{"paths":{"blocks":"compositions",'
+                    '"components":"compositions/components","assets":"assets"}}',
+                    encoding="utf-8",
+                )
+                lint = adapter.lint(project_dir / "index.html")
+                if not lint.get("ok") or lint.get("errorCount"):
+                    raise IntegrityError(
+                        "HyperFrames lint rejected the composition: "
+                        + "; ".join(
+                            str(item.get("message"))
+                            for item in lint.get("findings", ())
+                        )
+                    )
+                result = adapter.render(
+                    project_dir,
+                    _Path(temp) / "render.mp4",
+                    fps=fps,
+                    quality="looks",
+                )
+                content = (_Path(temp) / "render.mp4").read_bytes()
+            finally:
+                shutil.rmtree(temp, ignore_errors=True)
+            encoder_key = "hyperframes"
+            command_hash = result["command_hash"]
+            encoder_version = f"hyperframes/{result['version']}"
+            metadata = {
+                "renderer": "hyperframes",
+                "version": result["version"],
+                "lint": {
+                    "errors": lint.get("errorCount", 0),
+                    "warnings": lint.get("warningCount", 0),
+                },
+                "bytes": result["bytes"],
+            }
+        else:
+            if capture is None:
+                capture = (
+                    PlaywrightFrameCapture()
+                    if 'class="layer clip"' in html
+                    else ChromeFrameCapture()
+                )
+            encoder = encoder or FFmpegEncodeAdapter()
+            captured = capture.capture(
+                html_path=html_path,
                 frame_count=frame_count,
                 fps=fps,
                 width=width,
                 height=height,
             )
+            with tempfile.TemporaryDirectory(prefix="pinaka-render-") as temp:
+                frames_dir = _Path(temp)
+                for frame in captured.frames:
+                    (frames_dir / f"frame-{frame.index:04d}.png").write_bytes(
+                        frame.content
+                    )
+                encoded = encoder.encode(
+                    frames_dir=frames_dir,
+                    frame_count=frame_count,
+                    fps=fps,
+                    width=width,
+                    height=height,
+                )
+            content = encoded.content
+            encoder_key = encoder.profile_key
+            command_hash = encoded.command_hash
+            encoder_version = encoded.encoder_version
+            metadata = encoded.metadata
         duration_text = format(duration.normalize(), "f")
-        digest = sha256_bytes(encoded.content)
+        digest = sha256_bytes(content)
         video = self.write_artifact(
             project_id,
             kind=ArtifactKind.RENDER,
             relative_path=f"renders/composition-{digest[:12]}.mp4",
-            content=encoded.content,
+            content=content,
             operation={
                 "type": "composition_render",
                 "composition_artifact_id": artifact["id"],
@@ -270,9 +385,10 @@ class CompositionUseCases:
                 "duration_seconds": duration_text,
                 "width": width,
                 "height": height,
-                "encoder": encoder.profile_key,
-                "command_hash": encoded.command_hash,
-                "encoder_version": encoded.encoder_version,
+                "renderer": encoder_key,
+                "encoder": encoder_key,
+                "command_hash": command_hash,
+                "encoder_version": encoder_version,
             },
             dependencies=(
                 DependencyRef(
@@ -294,8 +410,9 @@ class CompositionUseCases:
             "fps": fps,
             "frames": frame_count,
             "duration_seconds": duration_text,
-            "metadata": encoded.metadata,
-            "command_hash": encoded.command_hash,
+            "metadata": metadata,
+            "command_hash": command_hash,
+            "renderer": encoder_key,
         }
 
     def _latest_composition(self, project_id: str) -> dict[str, Any] | None:
