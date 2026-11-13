@@ -343,8 +343,6 @@ def build_composition(
         kinds = [str(cue.get("kind")) for cue in shot_effects]
         if kinds:
             rendered_effects[str(shot["stable_key"])] = sorted(set(kinds))
-        fade_in = min(Decimal(6), duration / Decimal(4))
-        fade_out = min(Decimal(6), duration / Decimal(4))
         transition = next(
             (
                 cue
@@ -353,25 +351,31 @@ def build_composition(
             ),
             None,
         )
+        fade = min(Decimal("0.6"), duration / Decimal(3))
         if transition is not None:
-            transition_seconds = Decimal(str(transition.get("duration_seconds", 0.5)))
-            if str(transition.get("kind")) == "transition_dissolve":
-                fade_in = min(duration / 2, max(fade_in, transition_seconds))
-            else:
-                fade_in = min(duration / 2, max(fade_in, transition_seconds))
-        from_pct = _pct(start + fade_in, total)
-        to_pct = _pct(end - fade_out, total)
+            fade = max(
+                fade,
+                min(
+                    Decimal("1.0"),
+                    Decimal(str(transition.get("duration_seconds", 0.5))),
+                ),
+            )
+        half = fade / 2
+        in_start = max(Decimal(0), start - half)
+        in_end = min(total, start + half)
+        out_start = max(Decimal(0), end - half)
+        out_end = min(total, end + half)
         opening = (
             "  0% { opacity: 1; }\n"
             if start == 0
-            else f"  0%, {_pct(start, total)}% {{ opacity: 0; }}\n"
+            else f"  0%, {_pct(in_start, total)}% {{ opacity: 0; }}\n"
         )
         keyframes.append(
             f"@keyframes scene-{index} {{\n"
             f"{opening}"
-            f"  {from_pct}% {{ opacity: 1; }}\n"
-            f"  {to_pct}% {{ opacity: 1; }}\n"
-            f"  {_pct(end, total)}%, 100% {{ opacity: 0; }}\n"
+            f"  {_pct(in_end, total)}% {{ opacity: 1; }}\n"
+            f"  {_pct(out_start, total)}% {{ opacity: 1; }}\n"
+            f"  {_pct(out_end, total)}%, 100% {{ opacity: 0; }}\n"
             f"}}"
         )
         labels = "".join(
@@ -488,12 +492,12 @@ def build_composition(
         else:
             timeline.append(
                 f'  tl.fromTo("#scene-{index}", {{ opacity: 0 }}, '
-                f"{{ opacity: 1, duration: {_js(fade_in)} }}, {_js(start)});"
+                f"{{ opacity: 1, duration: {_js(fade)} }}, {_js(in_start)});"
             )
         if end < total:
             timeline.append(
                 f'  tl.to("#scene-{index}", {{ opacity: 0, '
-                f"duration: {_js(fade_out)} }}, {_js(end - fade_out)});"
+                f"duration: {_js(fade)} }}, {_js(max(Decimal(0), end - half))});"
             )
         camera_gsap = {
             "push_in": ("{ scale: 1 }", '{ scale: 1.08, duration: DUR, ease: "none" }'),
@@ -531,6 +535,8 @@ def build_composition(
                 "parallax",
                 "sfx",
                 "music_bed",
+                "transition_fade",
+                "transition_dissolve",
             }:
                 continue
             name = f"fx-{index}-{effect_index}"
@@ -681,8 +687,8 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
   object-fit: cover;
 }}
 .layer.subject {{
-  max-width: 62%;
-  max-height: 62%;
+  max-width: 78%;
+  max-height: 58%;
   bottom: 6%;
   top: auto;
 }}

@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -1109,6 +1109,47 @@ CREATE INDEX IF NOT EXISTS idx_ab_deliveries_project
 """
 
 
+SCHEMA_V26 = r"""
+CREATE TABLE IF NOT EXISTS stage_critiques (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    subject_type TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    subject_hash TEXT,
+    reviewer TEXT NOT NULL,
+    reviewer_kind TEXT NOT NULL,
+    verdict TEXT NOT NULL,
+    findings_json TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stage_critiques_project
+    ON stage_critiques(project_id, stage, created_at);
+CREATE INDEX IF NOT EXISTS idx_stage_critiques_subject
+    ON stage_critiques(project_id, stage, subject_id, created_at);
+
+CREATE TABLE IF NOT EXISTS corrective_actions (
+    id TEXT PRIMARY KEY,
+    critique_id TEXT NOT NULL REFERENCES stage_critiques(id) ON DELETE CASCADE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    finding_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    action TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    evidence_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    closed_at TEXT,
+    closed_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_corrective_actions_project
+    ON corrective_actions(project_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_corrective_actions_critique
+    ON corrective_actions(critique_id, finding_id);
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -1135,4 +1176,5 @@ MIGRATIONS = {
     23: SCHEMA_V23,
     24: SCHEMA_V24,
     25: SCHEMA_V25,
+    26: SCHEMA_V26,
 }

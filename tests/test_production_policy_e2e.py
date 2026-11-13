@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pinaka.assets import AssetCriteria
+from pinaka.contracts.critique import StageCritiqueCreate
 from pinaka.contracts.effects import EffectCueCreate, EffectsPlanCreate
 from pinaka.contracts.flow import (
     ABExperimentCreate,
@@ -14,6 +15,7 @@ from pinaka.contracts.flow import (
 from pinaka.enums import ArtifactKind, SlotAssetRole
 from pinaka.models import ScriptApproval, ScriptCreate, TextBriefRequest
 from pinaka.production import ReuseDecisionCreate, ReuseItem
+from pinaka.use_cases.critique import REQUIRED_CRITIQUE_STAGES
 from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
 
 from .conftest import create_project, record_motion_evidence_stub
@@ -258,6 +260,19 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller, tmp_path):
     change = controller.change_request(project.id)
     assert "change_request" in change["change_request"]
     assert change["change_request"]["slots"]
+
+    for stage in REQUIRED_CRITIQUE_STAGES:
+        controller.record_stage_critique(
+            project.id,
+            StageCritiqueCreate(
+                stage=stage,
+                subject_type="project",
+                subject_id=project.id,
+                reviewer="reviewer",
+                reviewer_kind="human",
+                verdict="pass",
+            ),
+        )
 
     bar = controller.quality_bar(project.id)
     assert bar["passed"] is True, bar["failed"]

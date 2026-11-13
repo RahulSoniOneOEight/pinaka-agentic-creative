@@ -35,6 +35,7 @@ class CaptionsUseCases:
         narration_artifact_id: str | None = None,
         transcriber: Any | None = None,
         pad_to_seconds: float | None = None,
+        max_cue_seconds: float = 6.0,
     ) -> dict[str, Any]:
         """Write an SRT from narration (ASR) when it exists, else from the shot plan."""
 
@@ -72,6 +73,7 @@ class CaptionsUseCases:
                 words,
                 profile=profile,
                 locale=active_locale,
+                max_cue_seconds=max_cue_seconds,
                 pad_to_seconds=pad_to_seconds,
             )
             violations = legibility_violations(cues, profile)
@@ -79,6 +81,7 @@ class CaptionsUseCases:
                 words,
                 profile=profile,
                 locale=active_locale,
+                max_cue_seconds=max_cue_seconds,
                 pad_to_seconds=pad_to_seconds,
             )
             operation = {

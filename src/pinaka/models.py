@@ -23,7 +23,9 @@ from .contracts import ChangeRequestDecision as ChangeRequestDecision
 from .contracts import ChangeRequestItemCreate as ChangeRequestItemCreate
 from .contracts import ChangeRequestRecord as ChangeRequestRecord
 from .contracts import ClientProfile as ClientProfile
+from .contracts import CorrectiveActionClose as CorrectiveActionClose
 from .contracts import CreativeElementCreate as CreativeElementCreate
+from .contracts import CritiqueFinding as CritiqueFinding
 from .contracts import DeliverableCreate as DeliverableCreate
 from .contracts import DeliverableRecord as DeliverableRecord
 from .contracts import DependencyRef as DependencyRef
@@ -63,6 +65,8 @@ from .contracts import SlotCreate as SlotCreate
 from .contracts import SlotPickCreate as SlotPickCreate
 from .contracts import SourcingCandidateCreate as SourcingCandidateCreate
 from .contracts import SourcingDecisionCreate as SourcingDecisionCreate
+from .contracts import StageCritiqueCreate as StageCritiqueCreate
+from .contracts import StageCritiqueRecord as StageCritiqueRecord
 from .contracts import StrictModel as StrictModel
 from .contracts import StudioReadinessReport as StudioReadinessReport
 from .contracts import StudioResultOutputImport as StudioResultOutputImport

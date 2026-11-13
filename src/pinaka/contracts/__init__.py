@@ -23,6 +23,10 @@ from .change_request import ChangeRequestItemCreate as ChangeRequestItemCreate
 from .change_request import ChangeRequestRecord as ChangeRequestRecord
 from .common import Money as Money
 from .common import StrictModel as StrictModel
+from .critique import CorrectiveActionClose as CorrectiveActionClose
+from .critique import CritiqueFinding as CritiqueFinding
+from .critique import StageCritiqueCreate as StageCritiqueCreate
+from .critique import StageCritiqueRecord as StageCritiqueRecord
 from .effects import EffectCueCreate as EffectCueCreate
 from .effects import EffectsPlanCreate as EffectsPlanCreate
 from .flow import ABExperimentCreate as ABExperimentCreate

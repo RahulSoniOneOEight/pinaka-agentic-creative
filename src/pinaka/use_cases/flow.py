@@ -940,6 +940,15 @@ class FlowUseCases:
             if change_requests
             else "no change-request template",
         )
+        try:
+            self.require_creative_qc(project_id, artifact_id=artifact_id)
+            gate(
+                "creative_qc",
+                True,
+                "every stage has a current critique and no open high-impact action",
+            )
+        except ApprovalRequiredError as error:
+            gate("creative_qc", False, str(error))
         if artifact_id:
             checks = [
                 result

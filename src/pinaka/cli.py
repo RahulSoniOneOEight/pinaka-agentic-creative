@@ -98,6 +98,7 @@ from .models import (
     SlotPickCreate,
     SourcingCandidateCreate,
     SourcingDecisionCreate,
+    StageCritiqueCreate,
     StudioReadinessReport,
     StudioResultPacketImport,
     StudioSpendApprovalCreate,
@@ -1064,6 +1065,7 @@ def cmd_export_captions(args: argparse.Namespace) -> dict[str, Any]:
         source=args.source,
         narration_artifact_id=args.narration,
         pad_to_seconds=args.pad_to,
+        max_cue_seconds=args.max_cue,
     )
 
 
@@ -1534,6 +1536,34 @@ def cmd_decide_change_request(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_change_request_status(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).change_request_status(args.project_id, args.request)
+
+
+def cmd_auto_critique(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).auto_critique(
+        args.project_id, args.stage, artifact_id=args.artifact
+    )
+
+
+def cmd_record_critique(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_stage_critique(
+        args.project_id, StageCritiqueCreate.model_validate(payload)
+    )
+
+
+def cmd_close_corrective_action(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).close_corrective_action(
+        args.action_id,
+        closed_by=args.by,
+        evidence=tuple(args.evidence),
+        result=args.result,
+    )
+
+
+def cmd_critique_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).critique_summary(
+        args.project_id, artifact_id=args.artifact
+    )
 
 
 def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
@@ -2942,6 +2972,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Extend the final cue to this runtime so coverage passes",
     )
+    captions_export_parser.add_argument(
+        "--max-cue-seconds",
+        type=float,
+        default=6.0,
+        help="Maximum duration of one caption cue (kids preset uses 3.5)",
+    )
     captions_export_parser.set_defaults(handler=cmd_export_captions)
 
     captions_burn_parser = subparsers.add_parser(
@@ -3229,6 +3265,54 @@ def build_parser() -> argparse.ArgumentParser:
     change_status_parser.add_argument("project_id")
     change_status_parser.add_argument("--request")
     change_status_parser.set_defaults(handler=cmd_change_request_status)
+
+    auto_critique_parser = subparsers.add_parser(
+        "auto-critique",
+        help="Run the stage critic and record findings plus corrective actions",
+    )
+    auto_critique_parser.add_argument("project_id")
+    auto_critique_parser.add_argument(
+        "stage",
+        choices=(
+            "script",
+            "shots",
+            "style",
+            "assets",
+            "motion",
+            "visual",
+            "captions",
+            "audio",
+            "delivery",
+        ),
+    )
+    auto_critique_parser.add_argument("--artifact")
+    auto_critique_parser.set_defaults(handler=cmd_auto_critique)
+
+    record_critique_parser = subparsers.add_parser(
+        "record-critique",
+        help="Record a human/model stage critique from JSON",
+    )
+    record_critique_parser.add_argument("project_id")
+    record_critique_parser.add_argument("--file", required=True)
+    record_critique_parser.set_defaults(handler=cmd_record_critique)
+
+    close_action_parser = subparsers.add_parser(
+        "close-corrective-action",
+        help="Close one corrective action with verification evidence",
+    )
+    close_action_parser.add_argument("action_id")
+    close_action_parser.add_argument("--by", required=True)
+    close_action_parser.add_argument("--result", required=True)
+    close_action_parser.add_argument("--evidence", action="append", default=[])
+    close_action_parser.set_defaults(handler=cmd_close_corrective_action)
+
+    critique_status_parser = subparsers.add_parser(
+        "critique-status",
+        help="Show every stage critique and its corrective actions",
+    )
+    critique_status_parser.add_argument("project_id")
+    critique_status_parser.add_argument("--artifact")
+    critique_status_parser.set_defaults(handler=cmd_critique_status)
 
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",

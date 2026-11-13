@@ -356,7 +356,7 @@ def test_pexels_403_is_archived_and_marks_provider_unavailable(controller):
     assert "HTTP 403" in capability["detail"]
 
 
-def test_schema_v24_migrates_to_v25(tmp_path):
+def test_schema_v24_migrates_to_current(tmp_path):
     path = tmp_path / "legacy.sqlite"
     with sqlite3.connect(path) as connection:
         for version in range(1, 25):
@@ -380,8 +380,14 @@ def test_schema_v24_migrates_to_v25(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-    assert version == SCHEMA_VERSION == 25
+    assert version == SCHEMA_VERSION == 26
     assert {"variant_label", "ab_experiment_id"} <= budget_columns
     assert "change_request_id" in project_columns
     assert {"execution_owner", "studio_role", "fallback_of"} <= flow_columns
-    assert {"change_requests", "change_request_events", "ab_deliveries"} <= tables
+    assert {
+        "change_requests",
+        "change_request_events",
+        "ab_deliveries",
+        "stage_critiques",
+        "corrective_actions",
+    } <= tables

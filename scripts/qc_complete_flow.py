@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
-import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -60,6 +58,21 @@ project = controller.create_project(
         max_budget=Money(amount=Decimal("1.00"), currency="USD"),
     )
 )
+
+
+def critique(stage: str, artifact_id: str | None = None) -> dict:
+    result = controller.auto_critique(project.id, stage, artifact_id=artifact_id)
+    print(
+        "critique",
+        stage,
+        result["critique"]["verdict"],
+        "findings",
+        len(result["critique"]["findings"]),
+        "actions",
+        len(result["actions"]),
+    )
+    return result
+
 
 controller.plan_creative_budget(
     project.id,
@@ -134,6 +147,8 @@ production = controller.plan_production(project.id)
 TOTAL_SECONDS = 4 * len(plan["shots"])
 print("slots", len(plan["slots"]), "shots", len(plan["shots"]))
 print("shot productions", len(production["productions"]))
+critique("shots")
+critique("style")
 
 controller.transition_project(project.id, ProjectStatus.PLANNED, reason="Plan ready")
 controller.approve(
@@ -164,98 +179,51 @@ BASE = Path(r"C:\Users\LENOVO\AppData\Local\Temp\pinaka-complete-assets")
 if BASE.exists():
     shutil.rmtree(BASE)
 BASE.mkdir(parents=True)
-WIDTH, HEIGHT, FPS, SECONDS = 540, 960, 12, 4
-FRAMES = FPS * SECONDS
+WIDTH, HEIGHT, FPS, SECONDS = 1080, 1920, 24, 4
 
 
 def background_array(seed: int) -> np.ndarray:
     canvas = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
     for y in range(HEIGHT):
         canvas[y, :, :] = (
-            80 + min(60, y // 16 + seed * 8),
-            140 - min(50, y // 20),
+            80 + min(60, y // 32 + seed * 8),
+            140 - min(50, y // 40),
             120 + min(40, seed * 5),
         )
-    cv2.circle(canvas, (90 + seed * 20, 160), 70, (210, 220, 230), -1)
-    cv2.rectangle(canvas, (0, int(HEIGHT * 0.65)), (WIDTH, HEIGHT), (70, 90, 60), -1)
+    cv2.circle(canvas, (180 + seed * 40, 320), 140, (210, 220, 230), -1)
     return canvas
 
 
-def duck_frame(
-    base: np.ndarray, phase: float, color: tuple[int, int, int]
-) -> np.ndarray:
-    frame = base.copy()
-    cx = WIDTH // 2
-    cy = int(HEIGHT * 0.55)
-    bob = int(6 * np.sin(phase))
-    cv2.ellipse(frame, (cx, cy + bob), (95, 58), 0, 0, 360, color, -1)
-    cv2.circle(frame, (cx + 70, cy - 28 + bob), 36, color, -1)
-    cv2.circle(frame, (cx + 82, cy - 35 + bob), 5, (20, 20, 20), -1)
-    cv2.ellipse(
-        frame,
-        (cx - 35, cy - 5 + bob),
-        (50, 24),
-        -25 + 18 * np.sin(phase),
+def duck_cutout(size: int = 720, *, backup: bool = False) -> np.ndarray:
+    """Return a transparent RGBA duck cutout for the character layer."""
+
+    bgr = np.zeros((size, size, 3), dtype=np.uint8)
+    mask = np.zeros((size, size), dtype=np.uint8)
+    color = (70, 140, 220) if backup else (40, 180, 240)
+    cx, cy = size // 2, int(size * 0.58)
+    body = ((cx, cy), (int(size * 0.30), int(size * 0.18)), 0)
+    head = ((cx + int(size * 0.22), cy - int(size * 0.10)), int(size * 0.12))
+    wing = (
+        (cx - int(size * 0.10), cy),
+        (int(size * 0.15), int(size * 0.07)),
+        -25,
+    )
+    beak = (
+        (cx + int(size * 0.34), cy - int(size * 0.06)),
+        (int(size * 0.06), int(size * 0.025)),
         0,
-        360,
-        (40, 90, 170),
-        -1,
     )
-    cv2.ellipse(
-        frame, (cx + 108, cy - 20 + bob), (18, 8), 0, 0, 360, (30, 120, 220), -1
-    )
-    return frame
-
-
-def write_clip(path: Path, seed: int, backup: bool = False) -> None:
-    ffmpeg = subprocess.check_output(
-        [
-            sys.executable,
-            "-c",
-            "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())",
-        ],
-        text=True,
-    ).strip()
-    command = [
-        ffmpeg,
-        "-y",
-        "-f",
-        "rawvideo",
-        "-pix_fmt",
-        "bgr24",
-        "-s",
-        f"{WIDTH}x{HEIGHT}",
-        "-r",
-        str(FPS),
-        "-i",
-        "-",
-        "-c:v",
-        "libvpx-vp9",
-        "-b:v",
-        "1M",
-        "-pix_fmt",
-        "yuv420p",
-        "-deadline",
-        "realtime",
-        "-cpu-used",
-        "5",
-        str(path),
-    ]
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    base = background_array(seed)
-    for index in range(FRAMES):
-        phase = (index / FRAMES) * 2 * np.pi
-        color = (40, 180, 240) if not backup else (70, 140, 220)
-        frame = duck_frame(base, phase if not backup else -phase, color)
-        process.stdin.write(frame.tobytes())
-    process.stdin.close()
-    if process.wait() != 0:
-        raise RuntimeError(f"ffmpeg failed for {path}")
+    for image, paint in ((bgr, color), (mask, 255)):
+        cv2.ellipse(image, body[0], body[1], body[2], 0, 360, paint, -1)
+        cv2.circle(image, head[0], head[1], paint, -1)
+        cv2.ellipse(image, wing[0], wing[1], wing[2], 0, 360, paint, -1)
+        cv2.ellipse(image, beak[0], beak[1], beak[2], 0, 360, paint, -1)
+    eye = (cx + int(size * 0.25), cy - int(size * 0.13))
+    cv2.circle(bgr, eye, max(2, int(size * 0.012)), (20, 20, 20), -1)
+    cv2.circle(mask, eye, max(2, int(size * 0.012)), 255, -1)
+    rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
+    rgba[:, :, 3] = mask
+    return rgba
 
 
 def rights() -> dict:
@@ -285,12 +253,12 @@ visuals = {}
 for index, shot in enumerate(plan["shots"], start=1):
     background_path = BASE / f"background-{index}.png"
     backup_background_path = BASE / f"background-{index}-b.png"
-    clip_path = BASE / f"character-{index}.webm"
-    backup_clip_path = BASE / f"character-{index}-b.webm"
-    cv2.imwrite(str(background_path), background_array(index))
-    cv2.imwrite(str(backup_background_path), background_array(index + 2))
-    write_clip(clip_path, index)
-    write_clip(backup_clip_path, index, backup=True)
+    character_path = BASE / f"character-{index}.png"
+    backup_character_path = BASE / f"character-{index}-b.png"
+    cv2.imwrite(str(background_path), background_array(1))
+    cv2.imwrite(str(backup_background_path), background_array(3))
+    cv2.imwrite(str(character_path), duck_cutout())
+    cv2.imwrite(str(backup_character_path), duck_cutout(backup=True))
     background = controller.write_artifact(
         project.id,
         kind=ArtifactKind.GENERATED,
@@ -308,15 +276,15 @@ for index, shot in enumerate(plan["shots"], start=1):
     character = controller.write_artifact(
         project.id,
         kind=ArtifactKind.GENERATED,
-        relative_path=f"assets/originals/character-{index}.webm",
-        content=clip_path.read_bytes(),
+        relative_path=f"assets/originals/character-{index}.png",
+        content=character_path.read_bytes(),
         operation={"type": "owned_asset", "rights": rights()},
     )
     backup_character = controller.write_artifact(
         project.id,
         kind=ArtifactKind.GENERATED,
-        relative_path=f"assets/originals/character-{index}-b.webm",
-        content=backup_clip_path.read_bytes(),
+        relative_path=f"assets/originals/character-{index}-b.png",
+        content=backup_character_path.read_bytes(),
         operation={"type": "owned_asset", "rights": rights()},
     )
     visuals[shot["stable_key"]] = {
@@ -324,7 +292,6 @@ for index, shot in enumerate(plan["shots"], start=1):
         "background_backup": backup_background,
         "character": character,
         "character_backup": backup_character,
-        "clip": clip_path,
     }
 
 for shot in plan["shots"]:
@@ -424,6 +391,7 @@ for slot in controller.repository.list_slots(project.id):
         ),
     )
 
+critique("assets")
 controller.approve(
     project.id,
     ApprovalRequest(
@@ -452,23 +420,9 @@ for shot_index, shot in enumerate(plan["shots"]):
             ),
             EffectCueCreate(
                 shot_key=shot["stable_key"],
-                kind="light_glow",
-                start_seconds=str(shot_index * SECONDS + 0.2),
-                duration_seconds="2.5",
-                rights="owned:local",
-            ),
-            EffectCueCreate(
-                shot_key=shot["stable_key"],
                 kind="particles",
                 start_seconds=str(shot_index * SECONDS + 0.5),
                 duration_seconds="3",
-                rights="owned:local",
-            ),
-            EffectCueCreate(
-                shot_key=shot["stable_key"],
-                kind="blur",
-                start_seconds=str(shot_index * SECONDS + 0.8),
-                duration_seconds="1.5",
                 rights="owned:local",
             ),
             EffectCueCreate(
@@ -506,11 +460,15 @@ qa_animatic = controller.qa_render(
 )
 assert qa_animatic["overall"] != "fail", qa_animatic
 
-for shot in plan["shots"]:
-    clip = visuals[shot["stable_key"]]["clip"]
-    capture = cv2.VideoCapture(str(clip))
+render_path = controller.artifact_store.resolve(
+    project.id, render["video"]["relative_path"]
+)
+for shot_index, shot in enumerate(plan["shots"]):
+    capture = cv2.VideoCapture(str(render_path))
     frames = []
-    while len(frames) < 12:
+    for sample in range(12):
+        timestamp = shot_index * SECONDS + (sample + 0.5) * SECONDS / 12
+        capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
         ok, frame = capture.read()
         if not ok:
             break
@@ -534,6 +492,9 @@ for shot in plan["shots"]:
             evidence_artifact_id=evidence["artifact"]["id"],
         ),
     )
+
+critique("motion", render["video"]["id"])
+critique("visual", render["video"]["id"])
 
 controller.record_flow_step(
     project.id,
@@ -641,15 +602,13 @@ controller.transition_project(
     project.id, ProjectStatus.FINAL_CANDIDATE, reason="Animatic approved"
 )
 
-script_text = (
-    "Two little ducks went out one day, over the hill and far away. "
-    "Mother duck said quack quack quack. Goodnight, little ducks."
-)
+script_text = "Two little ducks. Mother duck said quack quack quack."
 script = controller.record_script(project.id, ScriptCreate(text=script_text))
 controller.approve_script(
     project.id, script["id"], ScriptApproval(approved_by="producer")
 )
-narration = controller.synthesize_narration(project.id, script=script_text)
+critique("script")
+narration = controller.synthesize_narration(project.id, script=script_text, speed=0.9)
 muxed = controller.mux_narration(
     project.id,
     video_artifact_id=render["video"]["id"],
@@ -659,6 +618,7 @@ captions = controller.export_captions(
     project.id,
     source="asr",
     pad_to_seconds=float(TOTAL_SECONDS),
+    max_cue_seconds=3.5,
 )
 print(
     "captions",
@@ -686,6 +646,10 @@ coverage = next(
     item for item in qa_final["checks"] if item["check"] == "captions.coverage"
 )
 assert coverage["status"] == "pass", coverage
+critique("captions")
+critique("audio", captioned["video"]["id"])
+critique("visual", captioned["video"]["id"])
+critique("motion", captioned["video"]["id"])
 
 graded = controller.grade_asset(
     project.id, captioned["video"]["id"], saturation=1.1, brightness=0.02
@@ -719,6 +683,7 @@ controller.bind_ab_variant(
 ab_delivery = controller.build_ab_delivery_package(
     project.id, str(ROOT / "ab-delivery")
 )
+critique("delivery")
 controller.write_delivery_metadata(project.id)
 controller.record_flow_step(
     project.id,
@@ -818,8 +783,18 @@ print(
                 "change_request_id": revision.change_request_id,
             },
             "flow": controller.flow_completeness(project.id)["complete"],
+            "critiques": controller.critique_summary(
+                project.id, artifact_id=captioned["video"]["id"]
+            )["complete"],
         },
         indent=2,
+    )
+)
+print(
+    json.dumps(
+        controller.critique_summary(project.id, artifact_id=captioned["video"]["id"]),
+        indent=2,
+        default=str,
     )
 )
 if not bar["passed"]:

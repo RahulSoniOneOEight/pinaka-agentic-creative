@@ -153,6 +153,13 @@ closes all listed items. Correct the wording to:
 - This run is a successful **flow fixture** and a **failed publication candidate**.
 - 30/30 is a Policy QC result, not an overall quality certification.
 
+## Reference-independent version
+
+A benchmark video is optional. The full model for judging an original idea
+without one is in [quality-model.md](quality-model.md): a frozen creative
+quality contract, approved pre-production artifacts, absolute craft minimums,
+intent traceability, internal consistency and human/audience review.
+
 ## Immediate next actions
 
 1. Add the luma-continuity regression and fix the fade/dissolve in `composition.py`.
