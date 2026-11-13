@@ -99,3 +99,9 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 | Change request + revision | Closed | `crq_daffcf9d...` applied; revision `prj_066cc524...` linked; both ledger steps recorded |
 | Motion / captions / QA | Pass | M2 both shots; continuity passes; ASR coverage 1.0; QA 10/10; kids peak -4.39 dBTP vs -2.0 limit |
 | Live providers | Unchanged | P1 fal still not re-run; P2 Studio blocked at credits 0; Pexels still 403 |
+
+**Quality caveat.** Revision 18 closes the listed **governance implementation**
+items; it does not certify creative quality. The 30/30 result is Policy QC.
+The fixture has a ~1 s near-black cut (3.25–4.25 s), placeholder OpenCV art,
+540×960 at 12 fps, no music/SFX, and a story that does not match the lyric.
+Creative QC remains open; see [fixes.md](fixes.md).
