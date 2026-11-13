@@ -463,3 +463,31 @@ def test_active_animatic_approval_is_invalidated_by_a_new_render(controller):
     assert invalidated["status"] == "invalidated"
     assert invalidated["id"] == approval["id"]
     assert controller.repository.active_approval(project.id, "animatic") is None
+
+
+def test_imported_original_can_carry_provider_rights(controller, tmp_path):
+    project = create_project(controller)
+    source = tmp_path / "stock.webb"
+    source.write_bytes(b"provider-bytes")
+    artifact = controller.import_original(
+        project.id,
+        source,
+        operation={
+            "type": "provider_import",
+            "provider": "wikimedia_commons",
+            "rights": {
+                "license_name": "CC BY 4.0",
+                "license_url": "https://creativecommons.org/licenses/by/4.0",
+                "terms_url": "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+                "terms_reviewed_at": "2026-11-13",
+                "attribution_required": True,
+                "attribution_text": "Example / Wikimedia Commons / CC BY 4.0",
+                "origin_license_verified": True,
+            },
+        },
+    )
+    assert artifact["kind"] == ArtifactKind.ORIGINAL.value
+    assert artifact["operation"]["type"] == "provider_import"
+    assert artifact["operation"]["rights"]["license_name"] == "CC BY 4.0"
+    assert artifact["operation"]["size_bytes"] == len(b"provider-bytes")
+    assert controller.verify_artifact(artifact["id"]) is True

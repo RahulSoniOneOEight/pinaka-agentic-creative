@@ -33,7 +33,13 @@ class ArtifactsUseCases:
             unique[key] = dependency
         return tuple(unique[key] for key in sorted(unique))
 
-    def import_original(self, project_id: str, source: Path | str) -> dict[str, Any]:
+    def import_original(
+        self,
+        project_id: str,
+        source: Path | str,
+        *,
+        operation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self.repository.get_project(project_id)
         stored = self.artifact_store.import_original(project_id, source)
         existing = self.repository.artifact_by_path(project_id, stored.relative_path)
@@ -52,7 +58,10 @@ class ArtifactsUseCases:
                 kind=ArtifactKind.ORIGINAL,
                 relative_path=stored.relative_path,
                 content_hash=stored.content_hash,
-                operation={"type": "import", "size_bytes": stored.size_bytes},
+                operation={
+                    **(operation or {"type": "import"}),
+                    "size_bytes": stored.size_bytes,
+                },
                 immutable=True,
             ),
         )
