@@ -1,4 +1,4 @@
-# Pinaka Agentic Creative Production
+﻿# Pinaka Agentic Creative Production
 
 Controller-first foundation for the creative-production system described in
 `Pinaka_Agentic_Creative_Production_Specification.txt`.
@@ -114,20 +114,20 @@ Runtime data defaults to `workspace/` and is excluded from Git:
 
 ```text
 workspace/
-├── state/pinaka.sqlite
-└── projects/<project-id>/
-    ├── inputs/                 ├── references/
-    ├── assets/originals/       ├── assets/derived/
-    ├── assets/generated/       ├── designs/
-    ├── audio/                  ├── previews/
-    ├── renders/                ├── qa/
-    └── archive/
+â”œâ”€â”€ state/pinaka.sqlite
+â””â”€â”€ projects/<project-id>/
+    â”œâ”€â”€ inputs/                 â”œâ”€â”€ references/
+    â”œâ”€â”€ assets/originals/       â”œâ”€â”€ assets/derived/
+    â”œâ”€â”€ assets/generated/       â”œâ”€â”€ designs/
+    â”œâ”€â”€ audio/                  â”œâ”€â”€ previews/
+    â”œâ”€â”€ renders/                â”œâ”€â”€ qa/
+    â””â”€â”€ archive/
 ```
 
 ## Current scope and next gate
 
 Implemented: the Phase 1 controller and production pipeline, the Phase 2 governance layer, and the
-Phase 3 governed-Studio foundation — creative rules, recipes and slots, rights-aware sourcing,
+Phase 3 governed-Studio foundation â€” creative rules, recipes and slots, rights-aware sourcing,
 provider routing, external-spend reconciliation, publication preflight, font licensing, localisation
 planning and A/B analytics.
 
@@ -196,7 +196,7 @@ technical QA pass alone does not pass the bar.
 - 1080x1920 H.264/AAC output with local Kokoro narration and burned ASR captions;
 - A/B variants (ungraded and graded), production record and change-request packet;
 - `quality-bar` passed 10/10 gates and `flow-log` completed G0-G7;
-- motion is **M1** (camera moves on stock stills), not the preferred M3 character motion.
+- motion is **M0** by the doc's definition (camera push/pan on stills, no character pixels moving); it was recorded as M1 by mistake, so the motion policy is **not met**.
 
 The run found and fixed two gaps: full-bleed composition for `primary visual` layers and a
 change-request join that now shows bound slot artifacts and credits. A slot-coverage gate at final

@@ -75,14 +75,14 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Five Little Ducks 12 s rhyme | Closed (M1) | `workspace/rhyme-flow-qc`, project `prj_75f91f43382d4b05bb3d501935d45de4`, archived |
+| Five Little Ducks 12 s rhyme | Closed (flow) / motion FAIL | `workspace/rhyme-flow-qc`, project `prj_75f91f43382d4b05bb3d501935d45de4`, archived |
 | Budget | Closed | USD 1.00 cap, USD 0.00 spent; `asset-costs` count 0 |
 | Sourcing | Closed | 20 candidates from Openverse and Pexels; Pexels evidence 403 recorded; three primary + three backup assets bound |
 | Quality bar | Pass | 10/10 gates, failed list empty; technical QA 10 checks, 0 fail |
 | Flow ledger | Pass | G0-G7 complete, all with evidence |
 | A/B | Pass | ungraded master and graded derivative, distinct hashes |
 | Change request | Pass | `C:\Users\LENOVO\Desktop\pinaka-rhyme-flow-qc`, slot artifact ids, hashes and credits |
-| Motion | M1, not M3 | camera push/pan on stock stills; no stock video or paid video used |
+| Motion | **FAIL: M0 recorded as M1** | camera push/pan only; no character pixels move; motion gate trusts the declared level and has no frame verifier |
 | Composition full-bleed | Fixed | `FULL_BLEED_ROLES`; `tests/test_composition.py::test_primary_visual_layer_is_full_bleed` |
 | Change-request slot join | Fixed | `_bound_entry` reads slot assets; credits included |
 | Slot-coverage gate at final approval | Open | candidate picks pass before artifact coverage; run bound backups before archive manually |
