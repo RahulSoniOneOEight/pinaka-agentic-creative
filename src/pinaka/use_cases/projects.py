@@ -140,6 +140,23 @@ class ProjectsUseCases:
                     studio_role="none",
                 ),
             )
+            self.record_flow_step(
+                child.id,
+                FlowStepCreate(
+                    step=f"change_request:{change_request_id}",
+                    status="done",
+                    actor=requested_by,
+                    tool="pinaka.change_request",
+                    evidence=(
+                        f"request:{change_request_id}",
+                        f"classification:{change_request.classification}",
+                        f"revision:{child.id}",
+                    ),
+                    reason="Change request applied to this revision",
+                    execution_owner="local",
+                    studio_role="none",
+                ),
+            )
             if change_request and change_request.status == "approved":
                 self.repository.record_change_request_status(
                     change_request_id,

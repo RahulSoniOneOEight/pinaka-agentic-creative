@@ -467,6 +467,10 @@ class ChangeRequestUseCases:
                         }
                     )
         estimated_minor = sum(item["estimated_minor"] for item in budget_items)
+        available_minor = (
+            project.max_budget.minor - project.spent.minor - project.reserved.minor
+        )
+        within_available = estimated_minor <= available_minor
         rights = (target_artifact or {}).get("operation", {}).get("rights") or {}
         facts_recheck = target_type == "element" and any(
             element["id"] == target_id
@@ -477,6 +481,12 @@ class ChangeRequestUseCases:
         if project.status == ProjectStatus.ARCHIVED:
             classification = "blocked"
             rationale = "The project is archived; create a child revision first"
+        elif not within_available:
+            classification = "blocked"
+            rationale = (
+                "The estimated change cost exceeds the available budget; "
+                "raise the budget or reduce the scope"
+            )
         elif request.change_type == "metadata" and target_type in {
             "artifact",
             "deliverable",
@@ -535,6 +545,8 @@ class ChangeRequestUseCases:
             },
             "budget": {
                 "estimated_minor": estimated_minor,
+                "available_minor": available_minor,
+                "within_available": within_available,
                 "currency": plan["currency"] if plan else project.max_budget.currency,
                 "items": budget_items,
             },

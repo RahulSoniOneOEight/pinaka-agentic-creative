@@ -108,6 +108,7 @@ def test_change_request_roundtrip_impact_decision_and_revision(controller):
     assert request["status"] == "analysed"
     assert request["classification"] == "safe_in_place"
     assert submitted["impact"]["budget"]["estimated_minor"] >= 0
+    assert submitted["impact"]["budget"]["within_available"] is True
     assert submitted["impact"]["checks"]["version_scope"] == "both"
 
     decided = controller.decide_change_request(
@@ -139,6 +140,10 @@ def test_change_request_roundtrip_impact_decision_and_revision(controller):
     assert any(
         step["step"] == "g0_intake"
         and any("change_request" in item for item in step["evidence"])
+        for step in flow
+    )
+    assert any(
+        step["step"] == f"change_request:{request['id']}" and step["status"] == "done"
         for step in flow
     )
 
