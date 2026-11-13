@@ -325,7 +325,24 @@ class ProjectsUseCases:
         if request.stage == ApprovalStage.ANIMATIC and self.repository.list_shots(
             project_id
         ):
+            if self.repository.list_shot_productions(project_id):
+                self.require_creative_plan(project_id)
+                self.require_reuse_decision(project_id)
+                self.require_shot_productions(project_id)
             self.require_motion_levels(project_id)
+            render_id = request.scope.get("render")
+            if render_id:
+                render = self.repository.get_artifact(str(render_id))
+                if render["project_id"] != project_id:
+                    raise IntegrityError("Animatic render belongs to another project")
+                self.require_qa_pass(project_id, str(render_id))
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=render["id"],
+                        entity_hash=render["content_hash"],
+                    )
+                )
         if request.stage == ApprovalStage.FINAL and not request.output_hash:
             raise IntegrityError("Final approval must bind to an exact output hash")
         if request.stage == ApprovalStage.FINAL:
@@ -360,6 +377,9 @@ class ProjectsUseCases:
                     entity_hash=candidate["content_hash"],
                 )
             )
+            if self.repository.list_shot_productions(project_id):
+                self.require_final_motion(project_id, candidate["id"])
+                self.require_motion_continuity(project_id, candidate["id"])
             self.require_flow_complete(project_id)
             if self.repository.list_ab_experiments(project_id):
                 self.require_ab_complete(project_id)
@@ -372,6 +392,51 @@ class ProjectsUseCases:
                         entity_type="artifact",
                         entity_id=sourcing_manifest["artifact"]["id"],
                         entity_hash=sourcing_manifest["manifest_hash"],
+                    )
+                )
+            if self.repository.list_shot_productions(project_id):
+                self.require_creative_plan(project_id)
+                self.require_reuse_decision(project_id)
+                self.require_approved_script(project_id)
+                self.require_shot_productions(project_id)
+            animatic = self.repository.active_approval(project_id, "animatic")
+            if animatic and animatic.get("scope", {}).get("render"):
+                latest_animatic = self.latest_animatic_render(project_id)
+                if (
+                    latest_animatic
+                    and latest_animatic["id"] != animatic["scope"]["render"]
+                ):
+                    raise ApprovalRequiredError(
+                        "The animatic approval is stale; the render changed"
+                    )
+                self.require_qa_pass(project_id, str(animatic["scope"]["render"]))
+            script = self.current_script(project_id)
+            if script:
+                if not script["approved_by"]:
+                    raise ApprovalRequiredError(
+                        "The current narration script is not approved"
+                    )
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="script",
+                        entity_id=script["id"],
+                        entity_hash=script["content_hash"],
+                    )
+                )
+            if self.repository.list_slot_assets(project_id):
+                delivery = self.require_delivery_metadata(project_id)
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=delivery["metadata_artifact"]["id"],
+                        entity_hash=delivery["metadata_artifact"]["content_hash"],
+                    )
+                )
+                dependencies.append(
+                    DependencyRef(
+                        entity_type="artifact",
+                        entity_id=delivery["credits_artifact"]["id"],
+                        entity_hash=delivery["credits_artifact"]["content_hash"],
                     )
                 )
 

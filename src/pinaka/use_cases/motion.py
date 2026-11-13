@@ -274,6 +274,14 @@ class MotionUseCases:
                 project_id, request.last_frame_artifact_id, "last frame"
             )
         shot = self._motion_shot(project_id, request)
+        if self.repository.list_shot_productions(project_id):
+            production = self.repository.get_shot_production(shot["id"])
+            if not production:
+                raise IntegrityError("Paid motion requires a shot production contract")
+            if production["method"] != "image_to_video":
+                raise IntegrityError(
+                    "Shot production method is not image_to_video; do not pay for M3"
+                )
         output_path = f"artifacts/motion/{shot['stable_key']}-{estimate}.mp4"
         job_request = JobRequest(
             provider="studio-video",

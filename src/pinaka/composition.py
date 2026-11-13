@@ -244,8 +244,7 @@ def build_composition(
             for item in (elements or ())
             if item.get("kind") in {"character", "prop", "location"}
         )
-        image_layers = []
-        video_layers = []
+        layer_html = []
         for layer in sorted(
             (layers or {}).get(shot["stable_key"], ()),
             key=lambda item: (
@@ -258,7 +257,7 @@ def build_composition(
         ):
             role = str(layer.get("role", "visual"))
             if layer.get("kind") == "video":
-                video_layers.append(
+                layer_html.append(
                     f'<video class="layer clip" data-role="{_escape(role)}" '
                     f'data-start="{start}" data-end="{end}" '
                     f'src="{layer["path"]}" muted playsinline '
@@ -266,7 +265,7 @@ def build_composition(
                 )
                 continue
             if role.lower() in FULL_BLEED_ROLES:
-                image_layers.append(
+                layer_html.append(
                     f'<img class="{_layer_class(role)}" data-role="{_escape(role)}" '
                     f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
                 )
@@ -291,7 +290,7 @@ def build_composition(
                 path_attr = (
                     f"data-path='{json.dumps(plan['path'])}' " if plan["path"] else ""
                 )
-                image_layers.append(
+                layer_html.append(
                     f'<img class="layer subject" data-role="{_escape(role)}" '
                     f'data-action="{plan["action"]}" data-copy="{copy_index}" '
                     f'data-count="{plan["count"]}" {path_attr}'
@@ -300,7 +299,7 @@ def build_composition(
                     f'left:{spread:.1f}%;{animation}" '
                     f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
                 )
-        image_layers_html = "".join(video_layers + image_layers)
+        image_layers_html = "".join(layer_html)
         camera = str((shot.get("requirements") or {}).get("camera", "")).lower()
         camera_animation = ""
         camera_moves = {

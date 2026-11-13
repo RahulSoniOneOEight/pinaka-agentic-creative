@@ -29,6 +29,8 @@ class CandidatesStore:
             "eligibility_reason": row["eligibility_reason"],
             "treatment": row["treatment"],
             "score": row["score"],
+            "style_fit": row["style_fit"],
+            "style_fit_reason": row["style_fit_reason"],
             "selected_role": row["selected_role"],
             "evidence": json.loads(row["evidence_json"]),
             "metadata": json.loads(row["metadata_json"]),
@@ -36,7 +38,13 @@ class CandidatesStore:
         }
 
     def record_sourcing_candidate(
-        self, project_id: str, request: SourcingCandidateCreate, *, score: int
+        self,
+        project_id: str,
+        request: SourcingCandidateCreate,
+        *,
+        score: int,
+        style_fit: int = 0,
+        style_fit_reason: str | None = None,
     ) -> dict[str, Any]:
         candidate_id = new_id("cand")
         now = utc_now()
@@ -55,8 +63,9 @@ class CandidatesStore:
                         id, project_id, slot_id, provider, provider_asset_id,
                         media_type, source_url, creator, licence, licence_url,
                         eligibility, eligibility_reason, treatment, score,
+                        style_fit, style_fit_reason,
                         selected_role, evidence_json, metadata_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         candidate_id,
@@ -73,6 +82,8 @@ class CandidatesStore:
                         request.eligibility_reason,
                         request.treatment,
                         score,
+                        style_fit,
+                        style_fit_reason,
                         None,
                         canonical_json(request.evidence),
                         canonical_json(request.metadata),
@@ -103,6 +114,8 @@ class CandidatesStore:
                 "project_id": project_id,
                 **request.model_dump(mode="json"),
                 "score": score,
+                "style_fit": style_fit,
+                "style_fit_reason": style_fit_reason,
                 "selected_role": None,
                 "created_at": now,
             }

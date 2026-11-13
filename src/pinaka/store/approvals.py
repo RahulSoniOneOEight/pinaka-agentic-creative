@@ -39,6 +39,44 @@ class ApprovalsStore:
             ).fetchall()
             return [self._approval_dict(connection, row) for row in rows]
 
+    def invalidate_active_approval(
+        self, project_id: str, stage: str, *, reason: str
+    ) -> dict[str, Any] | None:
+        now = utc_now()
+        with self.database.transaction() as connection:
+            self._require_project(connection, project_id)
+            row = connection.execute(
+                "SELECT * FROM approvals WHERE project_id = ? AND stage = ? AND status = ?",
+                (project_id, stage, ApprovalStatus.ACTIVE.value),
+            ).fetchone()
+            if not row:
+                return None
+            connection.execute(
+                """
+                UPDATE approvals
+                SET status = ?, invalidated_at = ?, invalidation_reason = ?
+                WHERE id = ?
+                """,
+                (
+                    ApprovalStatus.INVALIDATED.value,
+                    now,
+                    reason,
+                    row["id"],
+                ),
+            )
+            self._event(
+                connection,
+                project_id=project_id,
+                entity_type="approval",
+                entity_id=row["id"],
+                event_type="approval.invalidated",
+                payload={"stage": stage, "reason": reason},
+            )
+            updated = connection.execute(
+                "SELECT * FROM approvals WHERE id = ?", (row["id"],)
+            ).fetchone()
+            return self._approval_dict(connection, updated)
+
     @staticmethod
     def _approval_dict(
         connection: sqlite3.Connection, row: sqlite3.Row

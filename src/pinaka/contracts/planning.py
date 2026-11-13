@@ -43,6 +43,8 @@ class SlotCreate(StrictModel):
         default="generic",
         pattern=r"^(exact|faithful|generic)$",
     )
+    style_id: str | None = Field(default=None, max_length=100)
+    media_requirement: str | None = Field(default=None, max_length=50)
 
 
 class BriefDecisionCreate(StrictModel):
@@ -138,3 +140,16 @@ class TextBriefRequest(StrictModel):
     create_plan: bool = True
     persist_elements: bool = False
     persist_slots: bool = False
+    production_preset_id: str | None = Field(default=None, max_length=100)
+    visual_style_id: str | None = Field(default=None, max_length=100)
+    style_map: dict[str, str] = Field(default_factory=dict)
+    exact_items: tuple[str, ...] = ()
+
+
+class ScriptCreate(StrictModel):
+    text: str = Field(min_length=1, max_length=100000)
+    brief_id: str | None = Field(default=None, max_length=120)
+
+
+class ScriptApproval(StrictModel):
+    approved_by: str = Field(min_length=1, max_length=200)

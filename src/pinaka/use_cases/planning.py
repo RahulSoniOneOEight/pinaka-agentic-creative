@@ -23,6 +23,7 @@ from ..planning import (
     DEFAULT_DURATION_SECONDS,
     analyze_text,
     build_brief,
+    build_profile_from_analysis,
     propose_elements,
     propose_shots,
     scene_plan_markdown,
@@ -30,11 +31,127 @@ from ..planning import (
 from ..policy.guards import (
     require_active_project,
 )
+from ..recipes import CreativePlan, build_plan
 from ..scripts import SuppliedScriptAdapter, script_prompt
 from ..utils import canonical_json, sha256_bytes
 
 
 class PlanningUseCases:
+    def record_creative_plan(
+        self, project_id: str, plan: CreativePlan
+    ) -> dict[str, Any]:
+        """Persist the profile, rules, recipe and slots as one artifact."""
+
+        content = plan.model_dump_json(indent=2).encode("utf-8")
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.CONTRACT,
+            relative_path=f"artifacts/creative-plan-{plan.profile_hash[:12]}.json",
+            content=content,
+            operation={
+                "type": "creative_plan",
+                "guide_version": plan.guide_version,
+                "recipe_id": plan.recipe_selection.recipe.id,
+                "recipe_version": plan.recipe_selection.recipe.version,
+                "decision_risk": plan.decision.risk,
+                "treatment_ceiling": plan.decision.treatment_ceiling,
+                "preset_id": plan.production.preset_id,
+                "style_id": plan.production.style_id,
+            },
+        )
+        return {
+            "artifact": artifact,
+            "plan": plan,
+            "profile_hash": plan.profile_hash,
+            "recipe_id": plan.recipe_selection.recipe.id,
+            "recipe_version": plan.recipe_selection.recipe.version,
+        }
+
+    def current_creative_plan(self, project_id: str) -> dict[str, Any] | None:
+        artifacts = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if (artifact.get("operation") or {}).get("type") == "creative_plan"
+        ]
+        if not artifacts:
+            return None
+        artifact = max(artifacts, key=lambda item: item["created_at"])
+        plan = CreativePlan.model_validate_json(self.read_artifact_text(artifact["id"]))
+        return {"artifact": artifact, "plan": plan}
+
+    def require_creative_plan(self, project_id: str) -> dict[str, Any]:
+        current = self.current_creative_plan(project_id)
+        if not current:
+            raise IntegrityError(
+                "A persisted creative plan (profile, rules, recipe, slots) is required"
+            )
+        return current
+
+    @staticmethod
+    def _slot_specs_from_plan(
+        plan: CreativePlan, shots: list[dict[str, Any]]
+    ) -> list[SlotCreate]:
+        if not shots:
+            return []
+
+        def media_for(style_id: str) -> str:
+            if style_id in {"cinematic-live-action", "handheld-creator"}:
+                return "motion_clip"
+            if style_id in {"anime", "flat-2d-cartoon", "comic-watercolor"}:
+                return "cutout"
+            if style_id == "stylized-3d":
+                return "model"
+            return "still"
+
+        specs: list[SlotCreate] = []
+        visual = next(
+            (policy for policy in plan.slots if policy.role == "primary_visual"),
+            None,
+        )
+        if visual:
+            for shot in shots:
+                style_id = plan.production.style_map.get(
+                    shot["stable_key"], plan.production.style_id
+                )
+                specs.append(
+                    SlotCreate(
+                        shot_id=shot["id"],
+                        stable_key=f"{shot['stable_key']}.primary_visual",
+                        role="primary_visual",
+                        identity_requirement="Original, non-protected subject",
+                        fact_requirement="Matches the planned shot requirement",
+                        transformation_permission=(
+                            "Composition and motion within the approved style"
+                        ),
+                        approved_sources=visual.allowed_sources,
+                        treatment_ceiling=visual.treatment_ceiling,
+                        exactness=visual.exactness,
+                        style_id=style_id,
+                        media_requirement=media_for(style_id),
+                    )
+                )
+        global_roles = {"hook", "captions", "narration", "music", "cta"}
+        for policy in plan.slots:
+            if policy.role not in global_roles:
+                continue
+            shot = shots[-1] if policy.role == "cta" else shots[0]
+            specs.append(
+                SlotCreate(
+                    shot_id=shot["id"],
+                    stable_key=f"{shot['stable_key']}.{policy.role}",
+                    role=policy.role,
+                    identity_requirement="Global production element",
+                    fact_requirement="Matches the approved brief",
+                    transformation_permission="Deterministic composition only",
+                    approved_sources=policy.allowed_sources,
+                    treatment_ceiling=policy.treatment_ceiling,
+                    exactness=policy.exactness,
+                    style_id=plan.production.style_id,
+                    media_requirement="procedural",
+                )
+            )
+        return specs
+
     def record_scene_plan(self, project_id: str, markdown: str) -> dict[str, Any]:
         """Store the SCENE_PLAN document and its hash for review."""
 
@@ -115,6 +232,9 @@ class PlanningUseCases:
         duration = analysis["duration_seconds"] or DEFAULT_DURATION_SECONDS
         brief_request = build_brief(artifact, analysis, project)
         brief = self.record_workable_brief(project_id, brief_request)
+        profile = build_profile_from_analysis(project, analysis, request)
+        plan = build_plan(profile)
+        creative_plan = self.record_creative_plan(project_id, plan)
         shots: list[dict[str, Any]] = []
         scene_plan = None
         skipped_reason = None
@@ -127,28 +247,12 @@ class PlanningUseCases:
                 scene_plan = self.record_scene_plan(
                     project_id, scene_plan_markdown(shots, duration)
                 )
-        proposed_slots = [
-            {
-                "shot_id": shot["id"],
-                "stable_key": f"{shot['stable_key']}.visual",
-                "role": "primary visual",
-                "identity_requirement": "Original, non-protected subject",
-                "fact_requirement": "Matches the planned shot requirement",
-                "transformation_permission": "Composition and gentle animation",
-                "approved_sources": [
-                    "owned",
-                    "official_api",
-                    "manual_import",
-                    "deterministic",
-                    "generated",
-                ],
-            }
-            for shot in shots
-        ]
+        slot_specs = self._slot_specs_from_plan(plan, shots)
+        proposed_slots = [spec.model_dump(mode="json") for spec in slot_specs]
         recorded_slots: list[dict[str, Any]] = []
         if request.persist_slots:
-            for spec in proposed_slots:
-                recorded_slots.append(self.add_slot(project_id, SlotCreate(**spec)))
+            for spec in slot_specs:
+                recorded_slots.append(self.add_slot(project_id, spec))
         production_contract = (
             self.record_production_contract(project_id) if request.create_plan else None
         )
@@ -175,6 +279,8 @@ class PlanningUseCases:
             "proposed_slots": proposed_slots,
             "slots": recorded_slots,
             "production_contract": production_contract,
+            "creative_plan": creative_plan,
+            "production": plan.production.model_dump(mode="json"),
             "proposed_elements": proposed_elements,
             "recorded_elements": recorded_elements,
         }
@@ -276,6 +382,7 @@ class PlanningUseCases:
             raise IntegrityError("A production contract requires a workable brief")
         shots = self.repository.list_shots(project_id)
         slots = self.repository.list_slots(project_id)
+        creative = self.current_creative_plan(project_id)
         package = brief["package"]
         body = {
             "schema": "production-contract/v1",
@@ -291,6 +398,11 @@ class PlanningUseCases:
             "acceptance": package["acceptance"],
             "shots": shots,
             "slots": slots,
+            "production": (
+                creative["plan"].production.model_dump(mode="json")
+                if creative
+                else None
+            ),
             "policies": {
                 "sourcing_order": [
                     "owned",

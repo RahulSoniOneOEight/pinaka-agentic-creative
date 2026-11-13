@@ -12,6 +12,7 @@ from .creative_rules import (
     evaluate_profile,
 )
 from .models import StrictModel
+from .production import ProductionPlan
 from .utils import sha256_json
 
 GUIDE_VERSION = "0.1"
@@ -90,6 +91,7 @@ class CreativePlan(StrictModel):
     decision: RuleDecision
     recipe_selection: RecipeSelection
     slots: tuple[SlotPolicy, ...]
+    production: ProductionPlan
     alternatives: tuple[str, ...] = ()
 
 
@@ -653,6 +655,12 @@ def build_plan(profile: CreativeProfile) -> CreativePlan:
         decision=decision,
         recipe_selection=selection,
         slots=slots,
+        production=ProductionPlan(
+            preset_id=profile.production_preset_id,
+            style_id=profile.visual_style_id,
+            style_map=profile.style_map,
+            exact_items=profile.exact_items,
+        ),
         alternatives=(selection.runner_up or "No alternative recipe matched.",),
     )
 

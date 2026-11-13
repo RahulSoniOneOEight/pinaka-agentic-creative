@@ -15,7 +15,14 @@ from ..contracts.flow import (
 )
 from ..creative_rules import CEILING_ORDER
 from ..enums import ArtifactKind
-from ..errors import ConflictError, IntegrityError
+from ..errors import (
+    ApprovalRequiredError,
+    ConflictError,
+    IntegrityError,
+    NotFoundError,
+)
+from ..motion_verify import verify_frames, verify_video_segment
+from ..production import style_fit
 from ..utils import canonical_json, sha256_bytes
 
 REQUIRED_FLOW_STEPS: tuple[str, ...] = (
@@ -106,8 +113,13 @@ class FlowUseCases:
 
         steps = self.repository.list_flow_steps(project_id)
         latest: dict[str, dict[str, Any]] = {}
+        evidence_by_step: dict[str, list[str]] = {}
         for entry in steps:
             latest[entry["step"]] = entry
+            bucket = evidence_by_step.setdefault(entry["step"], [])
+            for item in entry.get("evidence", ()):
+                if item not in bucket:
+                    bucket.append(item)
         missing = [step for step in REQUIRED_FLOW_STEPS if step not in latest]
         incomplete = [
             step
@@ -128,7 +140,14 @@ class FlowUseCases:
             "incomplete": incomplete,
             "unapproved_skips": unapproved_skips,
             "complete": not missing and not incomplete and not unapproved_skips,
-            "steps": [latest[step] for step in REQUIRED_FLOW_STEPS if step in latest],
+            "steps": [
+                {
+                    **latest[step],
+                    "evidence": evidence_by_step.get(step, []),
+                }
+                for step in REQUIRED_FLOW_STEPS
+                if step in latest
+            ],
         }
 
     def require_flow_complete(self, project_id: str) -> dict[str, Any]:
@@ -162,8 +181,27 @@ class FlowUseCases:
         score = 0
         if request.eligibility == "eligible":
             score = 100 - TREATMENT_PENALTY[request.treatment]
+        slot_style = slot.get("style_id")
+        asset_class = request.asset_class
+        if not asset_class:
+            asset_class = "photo" if request.media_type == "image" else "footage"
+        fit, fit_reasons = (
+            style_fit(
+                slot_style, asset_class=asset_class, media_type=request.media_type
+            )
+            if slot_style
+            else (0, [])
+        )
+        if request.eligibility == "eligible" and slot_style and fit <= 0:
+            raise IntegrityError(
+                "Candidate does not fit the slot style: " + "; ".join(fit_reasons)
+            )
         return self.repository.record_sourcing_candidate(
-            project_id, request, score=score
+            project_id,
+            request,
+            score=score,
+            style_fit=fit,
+            style_fit_reason="; ".join(fit_reasons) if fit_reasons else None,
         )
 
     def sourcing_candidates(
@@ -276,6 +314,41 @@ class FlowUseCases:
     ) -> dict[str, Any]:
         return self.repository.record_motion_level(project_id, request)
 
+    def write_motion_evidence(
+        self,
+        project_id: str,
+        *,
+        shot_id: str,
+        level: str,
+        frames: list[Any],
+        mask: Any | None = None,
+        source: str = "composition",
+    ) -> dict[str, Any]:
+        report = verify_frames(frames, mask=mask)
+        body = {
+            "schema": "motion-evidence/v1",
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "level": level,
+            "source": source,
+            **report,
+        }
+        content = canonical_json(body).encode("utf-8")
+        digest = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"motion/evidence-{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "motion_evidence",
+                "shot_id": shot_id,
+                "level": level,
+                "verdict": report["verdict"],
+            },
+        )
+        return {"artifact": artifact, "evidence": body, "evidence_hash": digest}
+
     def motion_levels(self, project_id: str) -> dict[str, Any]:
         shots = self.repository.list_shots(project_id)
         latest: dict[str, dict[str, Any]] = {}
@@ -287,6 +360,14 @@ class FlowUseCases:
             required = "M1" if requirements.get("subject") else "M0"
             entry = latest.get(shot["id"])
             level = entry["level"] if entry else None
+            evidence = None
+            evidence_id = entry.get("evidence_artifact_id") if entry else None
+            if evidence_id:
+                try:
+                    evidence = json.loads(self.read_artifact_text(evidence_id))
+                except (json.JSONDecodeError, NotFoundError):
+                    evidence = None
+            evidence_pass = bool(evidence and evidence.get("verdict") == "pass")
             rows.append(
                 {
                     "shot_id": shot["id"],
@@ -294,9 +375,12 @@ class FlowUseCases:
                     "required": required,
                     "level": level,
                     "source": entry["source"] if entry else None,
+                    "evidence_artifact_id": evidence_id,
+                    "evidence_verdict": (evidence.get("verdict") if evidence else None),
                     "passes": (
                         level is not None
                         and MOTION_ORDER.index(level) >= MOTION_ORDER.index(required)
+                        and (level == "M0" or evidence_pass)
                     ),
                 }
             )
@@ -346,6 +430,8 @@ class FlowUseCases:
             "candidates": self.repository.list_sourcing_candidates(project_id),
             "picks": self.repository.slot_picks(project_id),
             "motion": self.motion_levels(project_id),
+            "shot_productions": self.repository.list_shot_productions(project_id),
+            "script": self.repository.current_script(project_id),
             "ab": self.ab_status(project_id),
             "flow": self.flow_completeness(project_id),
             "approvals": approvals,
@@ -530,6 +616,15 @@ class FlowUseCases:
             if motion["complete"]
             else f"missing {motion['missing']}, below minimum {motion['below_minimum']}",
         )
+        animatic = self.repository.active_approval(project_id, "animatic")
+        if animatic and animatic.get("scope", {}).get("render"):
+            try:
+                self.require_qa_pass(project_id, str(animatic["scope"]["render"]))
+                gate("animatic_qa", True, "approved render has passing QA")
+            except ApprovalRequiredError as error:
+                gate("animatic_qa", False, str(error))
+        else:
+            gate("animatic_qa", True, "no animatic approval yet")
         flow = self.flow_completeness(project_id)
         gate(
             "flow_ledger",
@@ -554,6 +649,154 @@ class FlowUseCases:
             if effects
             else "no effects or sound-design plan",
         )
+        productions = self.repository.list_shot_productions(project_id)
+        secondary_kinds = {"particles", "light_glow", "blur", "parallax"}
+        secondary_by_shot: dict[str, int] = {}
+        if effects:
+            for cue in effects["plan"].get("cues", ()):
+                if cue["kind"] in secondary_kinds:
+                    key = cue["shot_key"]
+                    secondary_by_shot[key] = secondary_by_shot.get(key, 0) + 1
+        shot_rows = self.repository.list_shots(project_id)
+        shots_by_id = {shot["id"]: shot for shot in shot_rows}
+        missing_secondary = [
+            shots_by_id[item["shot_id"]]["stable_key"]
+            for item in productions
+            if item["shot_id"] in shots_by_id
+            and secondary_by_shot.get(shots_by_id[item["shot_id"]]["stable_key"], 0)
+            == 0
+        ]
+        gate(
+            "secondary_motion",
+            not missing_secondary,
+            "secondary motion per shot"
+            if not missing_secondary
+            else "missing: " + ", ".join(missing_secondary),
+        )
+        try:
+            creative = self.require_creative_plan(project_id)
+            gate(
+                "creative_plan",
+                True,
+                f"recipe {creative['plan'].recipe_selection.recipe.id}",
+            )
+        except IntegrityError as error:
+            gate("creative_plan", False, str(error))
+        try:
+            reuse = self.require_reuse_decision(project_id)
+            gate("reuse_decision", True, f"decision {reuse['id']}")
+        except IntegrityError as error:
+            gate("reuse_decision", False, str(error))
+        productions = self.repository.list_shot_productions(project_id)
+        shots = self.repository.list_shots(project_id)
+        gate(
+            "shot_productions",
+            len(productions) == len(shots) and bool(shots),
+            f"{len(productions)}/{len(shots)} shots have production contracts",
+        )
+        bad_layers = [
+            item["shot_id"]
+            for item in productions
+            if not item["layers"]
+            or (
+                any(layer["role"] == "character" for layer in item["layers"])
+                and not any(layer["role"] == "background" for layer in item["layers"])
+            )
+        ]
+        gate(
+            "layer_plan",
+            not bad_layers,
+            "every shot has a layer stack"
+            if not bad_layers
+            else "bad layers: " + ", ".join(bad_layers),
+        )
+        gate(
+            "preset_style",
+            bool(productions)
+            and all(item["preset_id"] and item["style_id"] for item in productions),
+            "preset and style recorded on every shot",
+        )
+        query_plans = {
+            (artifact.get("operation") or {}).get("style_id")
+            for artifact in self.repository.list_artifacts(project_id)
+            if (artifact.get("operation") or {}).get("type") == "style_query_plan"
+        }
+        sourceable = [
+            slot for slot in slots if slot.get("media_requirement") != "procedural"
+        ]
+        missing_queries = [
+            slot["stable_key"]
+            for slot in sourceable
+            if slot.get("style_id") and slot["style_id"] not in query_plans
+        ]
+        gate(
+            "style_query_plan",
+            not missing_queries,
+            "query plan per sourceable slot"
+            if not missing_queries
+            else "missing: " + ", ".join(missing_queries),
+        )
+        candidate_by_id = {
+            candidate["id"]: candidate
+            for candidate in self.repository.list_sourcing_candidates(project_id)
+        }
+        selected_ids = []
+        for pick in picks["slots"]:
+            for role in ("primary", "backup"):
+                item = pick.get(role)
+                if item:
+                    selected_ids.append(item["id"])
+        off_style = [
+            candidate_id
+            for candidate_id in selected_ids
+            if candidate_by_id.get(candidate_id, {}).get("style_fit", 0) <= 0
+        ]
+        gate(
+            "style_fit",
+            not off_style,
+            "selected candidates fit the style"
+            if not off_style
+            else "off-style selected: " + ", ".join(off_style),
+        )
+        bad_exact = []
+        for production in productions:
+            for item in production.get("exact_items", ()):
+                source = (production.get("asset_source") or {}).get(item)
+                if not source or source in {"generated", "stock_photo"}:
+                    bad_exact.append(f"{production['shot_id']}:{item}")
+        gate(
+            "exact_items",
+            not bad_exact,
+            "exact items have approved sources"
+            if not bad_exact
+            else "unsourced: " + ", ".join(bad_exact),
+        )
+        missing_fallback = [
+            production["shot_id"]
+            for production in productions
+            if not production.get("fallback")
+        ]
+        gate(
+            "shot_fallback",
+            not missing_fallback,
+            "every shot has a fallback"
+            if not missing_fallback
+            else "missing: " + ", ".join(missing_fallback),
+        )
+        try:
+            script = self.require_approved_script(project_id)
+            gate("script", True, f"approved script {script['content_hash'][:12]}")
+        except IntegrityError as error:
+            gate("script", False, str(error))
+        try:
+            delivery = self.require_delivery_metadata(project_id)
+            gate(
+                "delivery_metadata",
+                True,
+                f"{len(delivery['credits'])} credit lines",
+            )
+        except ConflictError as error:
+            gate("delivery_metadata", False, str(error))
         change_requests = [
             artifact
             for artifact in self.repository.list_artifacts(project_id)
@@ -580,6 +823,25 @@ class FlowUseCases:
                 f"{len(checks)} checks, {len(failures)} failing"
                 if checks
                 else "no QA for the artifact",
+            )
+            motion_report = self.final_motion_report(project_id, artifact_id)
+            gate(
+                "final_motion",
+                motion_report["passed"],
+                "verified character motion in the final render"
+                if motion_report["passed"]
+                else "final render failed motion verification",
+            )
+            continuity = self.motion_continuity_report(project_id, artifact_id)
+            gate(
+                "motion_continuity",
+                continuity["passed"],
+                (
+                    f"drift {continuity['centroid_drift']}, "
+                    f"area ratio {continuity['area_ratio']}"
+                )
+                if continuity["passed"]
+                else "motion continuity failed",
             )
         return {
             "project_id": project_id,
@@ -637,3 +899,109 @@ class FlowUseCases:
             "artifact": artifact,
             "plan": json.loads(self.read_artifact_text(artifact["id"])),
         }
+
+    def require_qa_pass(
+        self, project_id: str, artifact_id: str
+    ) -> list[dict[str, Any]]:
+        checks = [
+            result
+            for result in self.repository.list_qa_results(project_id)
+            if result["artifact_id"] == artifact_id
+        ]
+        if not checks:
+            raise ApprovalRequiredError(
+                "Animatic approval requires recorded QA for the exact render"
+            )
+        if any(result["status"] == "fail" for result in checks):
+            raise ApprovalRequiredError(
+                "Animatic approval cannot use a render with failing QA"
+            )
+        return checks
+
+    def latest_animatic_render(self, project_id: str) -> dict[str, Any] | None:
+        renders = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if (artifact.get("operation") or {}).get("type") == "composition_render"
+        ]
+        if not renders:
+            return None
+        return max(renders, key=lambda item: item["created_at"])
+
+    def final_motion_report(self, project_id: str, artifact_id: str) -> dict[str, Any]:
+        artifact = self.repository.get_artifact(artifact_id)
+        if artifact["project_id"] != project_id:
+            raise ConflictError("Artifact belongs to a different project")
+        path = self.artifact_store.resolve(project_id, artifact["relative_path"])
+        shots = self.repository.list_shots(project_id)
+        rows = []
+        start = 0.0
+        for shot in shots:
+            duration = float(shot["duration_seconds"])
+            report = verify_video_segment(
+                str(path), start_seconds=start, duration_seconds=duration
+            )
+            rows.append(
+                {
+                    "shot_id": shot["id"],
+                    "stable_key": shot["stable_key"],
+                    "start_seconds": start,
+                    "duration_seconds": duration,
+                    **report,
+                }
+            )
+            start += duration
+        return {
+            "artifact_id": artifact_id,
+            "shots": rows,
+            "passed": bool(rows) and all(row["verdict"] == "pass" for row in rows),
+        }
+
+    def require_final_motion(self, project_id: str, artifact_id: str) -> dict[str, Any]:
+        report = self.final_motion_report(project_id, artifact_id)
+        if not report["passed"]:
+            failed = [
+                row["stable_key"] for row in report["shots"] if row["verdict"] != "pass"
+            ]
+            raise ApprovalRequiredError(
+                "Final render has no verified character motion: " + ", ".join(failed)
+            )
+        return report
+
+    def motion_continuity_report(
+        self, project_id: str, artifact_id: str
+    ) -> dict[str, Any]:
+        report = self.final_motion_report(project_id, artifact_id)
+        rows = report["shots"]
+        centroids = [row.get("centroid") for row in rows]
+        areas = [row.get("motion_area_ratio") or 0.0 for row in rows]
+        missing = [row["stable_key"] for row in rows if row.get("centroid") is None]
+        drift = 0.0
+        if all(centroids) and len(centroids) > 1:
+            for index in range(1, len(centroids)):
+                dx = centroids[index][0] - centroids[index - 1][0]
+                dy = centroids[index][1] - centroids[index - 1][1]
+                drift = max(drift, (dx * dx + dy * dy) ** 0.5)
+        area_ratio = max(areas) / min(areas) if areas and min(areas) > 0 else 0.0
+        passed = not missing and drift <= 0.35 and area_ratio <= 5.0
+        return {
+            "artifact_id": artifact_id,
+            "shots": rows,
+            "centroid_drift": round(drift, 4),
+            "area_ratio": round(area_ratio, 4),
+            "missing_motion": missing,
+            "passed": passed,
+        }
+
+    def require_motion_continuity(
+        self, project_id: str, artifact_id: str
+    ) -> dict[str, Any]:
+        report = self.motion_continuity_report(project_id, artifact_id)
+        if not report["passed"]:
+            raise ApprovalRequiredError(
+                "Motion continuity failed: "
+                f"drift={report['centroid_drift']}, "
+                f"area_ratio={report['area_ratio']}, "
+                f"missing={report['missing_motion']}"
+            )
+        return report

@@ -11,10 +11,11 @@ from pinaka.contracts.flow import (
     SourcingDecisionCreate,
 )
 from pinaka.enums import ArtifactKind
-from pinaka.models import TextBriefRequest
+from pinaka.models import ScriptApproval, ScriptCreate, TextBriefRequest
+from pinaka.production import ReuseDecisionCreate, ReuseItem
 from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
 
-from .conftest import create_project
+from .conftest import create_project, record_motion_evidence_stub
 
 
 def test_the_full_policy_chain_passes_the_quality_bar(controller):
@@ -28,9 +29,44 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
         ),
     )
     assert plan["production_contract"]["artifact"]["id"]
+    controller.record_reuse_decision(
+        project.id,
+        ReuseDecisionCreate(
+            approved_by="producer",
+            items=(
+                ReuseItem(
+                    component="layer contract",
+                    source="pinaka",
+                    decision="build",
+                    license="owned",
+                ),
+                ReuseItem(
+                    component="html renderer",
+                    source="hyperframes",
+                    decision="reuse",
+                    license="Apache-2.0",
+                ),
+            ),
+        ),
+    )
+    controller.plan_production(project.id)
 
-    slots = plan["slots"]
+    slots = controller.repository.list_slots(project.id)
+    sourceable = [
+        slot for slot in slots if slot.get("media_requirement") != "procedural"
+    ]
     for index, slot in enumerate(slots, start=1):
+        if slot not in sourceable:
+            controller.record_sourcing_decision(
+                project.id,
+                SourcingDecisionCreate(
+                    slot_id=slot["id"],
+                    decision="deterministic",
+                    reason=f"{slot['role']} is produced deterministically",
+                    approved_by="producer",
+                ),
+            )
+            continue
         controller.record_sourcing_decision(
             project.id,
             SourcingDecisionCreate(
@@ -54,6 +90,7 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
                 licence="Pexels licence",
                 eligibility="eligible",
                 treatment="as_is",
+                asset_class="illustration",
                 evidence=("evidence://pexels",),
             ),
         )
@@ -69,6 +106,7 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
                 licence="CC BY 4.0",
                 eligibility="eligible",
                 treatment="correct",
+                asset_class="illustration",
                 evidence=("evidence://openverse",),
             ),
         )
@@ -84,6 +122,9 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
         )
 
     for shot in plan["shots"]:
+        evidence_id = record_motion_evidence_stub(
+            controller, project.id, shot["id"], level="M3"
+        )
         controller.record_motion_level(
             project.id,
             MotionLevelCreate(
@@ -91,6 +132,7 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
                 level="M3",
                 source="composition",
                 evidence=(f"evidence://motion/{shot['stable_key']}",),
+                evidence_artifact_id=evidence_id,
             ),
         )
     for step in REQUIRED_FLOW_STEPS:
@@ -138,28 +180,42 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller):
             ),
         )
 
+    effect_cues = []
+    for shot in plan["shots"]:
+        effect_cues.append(
+            EffectCueCreate(
+                shot_key=shot["stable_key"],
+                kind="camera_push_in",
+                start_seconds="0",
+                duration_seconds="2",
+                rights="owned:composition",
+            )
+        )
+        effect_cues.append(
+            EffectCueCreate(
+                shot_key=shot["stable_key"],
+                kind="particles",
+                start_seconds="0.2",
+                duration_seconds="1.5",
+                rights="owned:composition",
+            )
+        )
     controller.record_effects_plan(
         project.id,
         EffectsPlanCreate(
-            cues=(
-                EffectCueCreate(
-                    shot_key=plan["shots"][0]["stable_key"],
-                    kind="camera_push_in",
-                    start_seconds="0",
-                    duration_seconds="2",
-                    rights="owned:composition",
-                ),
-                EffectCueCreate(
-                    shot_key=plan["shots"][0]["stable_key"],
-                    kind="sfx",
-                    start_seconds="0.5",
-                    duration_seconds="1",
-                    rights="licensed:pond-ambience",
-                ),
-            ),
+            cues=tuple(effect_cues),
             sound_design_notes="Soft pond ambience under the narration.",
         ),
     )
+
+    script = controller.record_script(
+        project.id,
+        ScriptCreate(text="Five little ducks went swimming one day."),
+    )
+    controller.approve_script(
+        project.id, script["id"], ScriptApproval(approved_by="producer")
+    )
+    controller.write_delivery_metadata(project.id)
 
     change = controller.change_request(project.id)
     assert "change_request" in change["change_request"]

@@ -4,12 +4,19 @@ import re
 from decimal import Decimal
 from typing import Any
 
+from .creative_rules import (
+    AudienceProfile,
+    CreativeProfile,
+    DeliverableProfile,
+    UsageProfile,
+)
 from .enums import ApprovalStage, CreativeElementKind, DecisionProvenance, DecisionRisk
 from .models import (
     BriefDecisionCreate,
     TextBriefRequest,
     WorkableBriefCreate,
 )
+from .production import infer_preset, infer_style
 
 DEFAULT_DURATION_SECONDS = Decimal(10)
 MAX_SHOTS = 6
@@ -32,7 +39,7 @@ _FAMILY_PATTERNS = (
 _DESTINATIONS = ("youtube", "instagram", "tiktok", "reels", "shorts")
 
 _CLAIM_PATTERNS = (
-    r"[$₹€£]\s?\d",
+    r"[$â‚¹â‚¬Â£]\s?\d",
     r"\b\d+(?:\.\d+)?\s?%",
     r"\b(best|number one|#1|guaranteed|cures?|clinically proven)\b",
 )
@@ -75,7 +82,7 @@ def _audience(text: str) -> str | None:
 
 def _age_range(text: str) -> str | None:
     match = re.search(
-        r"age[sd]?\s*(\d+)\s*(?:-|to|–)\s*(\d+)", text, flags=re.IGNORECASE
+        r"age[sd]?\s*(\d+)\s*(?:-|to|â€“)\s*(\d+)", text, flags=re.IGNORECASE
     )
     if match:
         return f"{match.group(1)} to {match.group(2)}"
@@ -100,7 +107,7 @@ def _destination(text: str) -> str | None:
 
 
 def _spoken_copy(text: str) -> str | None:
-    match = re.search(r"[\"“]([^\"”]{3,})[\"”]", text)
+    match = re.search(r"[\"â€œ]([^\"â€]{3,})[\"â€]", text)
     return match.group(1).strip() if match else None
 
 
@@ -336,6 +343,13 @@ def propose_shots(
                         "action": actions[(index - 1) % len(actions)],
                         "count": count,
                     },
+                    "motion": {
+                        "level": "M1",
+                        "action": actions[(index - 1) % len(actions)],
+                        "parts": ["body", "head", "wing"],
+                        "secondary": ["water_ripple"],
+                        "camera": "push_in",
+                    },
                 },
             }
         )
@@ -377,3 +391,93 @@ def scene_plan_markdown(shots: list[dict[str, Any]], duration: Decimal) -> str:
         lines.append("- Text: none")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def build_profile_from_analysis(
+    project: Any,
+    analysis: dict[str, Any],
+    request: TextBriefRequest,
+) -> CreativeProfile:
+    """Turn the text analysis into the governed classification profile."""
+
+    duration = Decimal(str(analysis["duration_seconds"] or DEFAULT_DURATION_SECONDS))
+    output_format = analysis["output_format"]
+    vertical = output_format in {"9:16", "vertical"}
+    family = analysis["content_family"]
+    subject = analysis["subject"]
+    form = (
+        "story"
+        if family in {"rhyme", "story"}
+        else "comedy"
+        if family == "comedy"
+        else "tutorial"
+        if family == "tutorial"
+        else "direct"
+        if family in {"ads", "product"}
+        else "explainer"
+    )
+    subjects = (
+        ("kids", "fiction")
+        if subject == "kids" and family in {"rhyme", "story"}
+        else ("kids",)
+        if subject == "kids"
+        else ("lifestyle",)
+    )
+    tone = ("friendly",) if subject == "kids" else ("neutral",)
+    outcome = (
+        "entertain"
+        if family in {"rhyme", "story", "comedy"}
+        else "sell"
+        if family in {"ads", "product"}
+        else "inform"
+    )
+    truth = "fictional" if family in {"rhyme", "story", "comedy"} else "source_bound"
+    source_material = "idea_only"
+    preset_id = request.production_preset_id or infer_preset(
+        content_family=family, subject=subject
+    )
+    style_id = request.visual_style_id or infer_style(
+        content_family=family, subject=subject
+    )
+    return CreativeProfile(
+        deliverable=DeliverableProfile(
+            output_kind="video",
+            duration_seconds=duration,
+            orientation="vertical" if vertical else "horizontal",
+            aspect_ratio=output_format,
+            width_px=1080 if vertical else 1920,
+            height_px=1920 if vertical else 1080,
+            destination=analysis["destination"] or "social",
+            language=analysis["language"],
+        ),
+        product_role="none",
+        form=form,
+        structures=("linear",),
+        subjects=subjects,
+        tones=tone,
+        primary_outcome=outcome,
+        truth_policy=truth,
+        usage=UsageProfile(
+            use_class="commercial",
+            monetized=project.max_budget.minor > 0,
+            modification_planned=True,
+            attribution_can_be_delivered=True,
+        ),
+        audience=AudienceProfile(
+            description=analysis["audience"] or project.audience,
+            age_band=analysis["age_range"],
+            caption_required=True,
+            narration_required=True,
+        ),
+        quality_tier="standard",
+        series_pattern="one_off",
+        asset_readiness="no_assets",
+        source_material=source_material,
+        content_depth="multi_beat" if duration >= 8 else "single_message",
+        realistic_synthetic=False,
+        heavy_generation=False,
+        production_preset_id=preset_id,
+        visual_style_id=style_id,
+        style_map=dict(request.style_map),
+        exact_items=tuple(request.exact_items),
+    )

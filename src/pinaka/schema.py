@@ -1,4 +1,4 @@
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 SCHEMA_V1 = r"""
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -1000,6 +1000,46 @@ CREATE INDEX IF NOT EXISTS idx_ab_experiments_project
 """
 
 
+SCHEMA_V24 = r"""
+ALTER TABLE slots ADD COLUMN style_id TEXT;
+ALTER TABLE slots ADD COLUMN media_requirement TEXT;
+ALTER TABLE sourcing_candidates ADD COLUMN style_fit INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sourcing_candidates ADD COLUMN style_fit_reason TEXT;
+ALTER TABLE motion_levels ADD COLUMN evidence_artifact_id TEXT;
+CREATE TABLE IF NOT EXISTS shot_productions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    shot_id TEXT NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+    preset_id TEXT NOT NULL,
+    style_id TEXT NOT NULL,
+    appears TEXT NOT NULL,
+    method TEXT NOT NULL,
+    fallback TEXT NOT NULL,
+    asset_source_json TEXT NOT NULL,
+    exact_items_json TEXT NOT NULL,
+    layers_json TEXT NOT NULL,
+    motion_json TEXT NOT NULL,
+    qa_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(shot_id)
+);
+CREATE TABLE IF NOT EXISTS scripts (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    brief_id TEXT,
+    content_hash TEXT NOT NULL,
+    text TEXT NOT NULL,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0, 1)),
+    approved_by TEXT,
+    approved_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scripts_current
+    ON scripts(project_id) WHERE is_current = 1;
+"""
+
+
 MIGRATIONS = {
     1: SCHEMA_V1,
     2: SCHEMA_V2,
@@ -1024,4 +1064,5 @@ MIGRATIONS = {
     21: SCHEMA_V21,
     22: SCHEMA_V22,
     23: SCHEMA_V23,
+    24: SCHEMA_V24,
 }

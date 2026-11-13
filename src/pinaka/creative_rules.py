@@ -155,6 +155,10 @@ class CreativeProfile(StrictModel):
     content_depth: ContentDepth = "single_message"
     realistic_synthetic: bool = False
     heavy_generation: bool = False
+    production_preset_id: str = "cinematic-story"
+    visual_style_id: str = "cinematic-live-action"
+    style_map: dict[str, str] = Field(default_factory=dict)
+    exact_items: tuple[str, ...] = ()
 
 
 class RuleMatch(StrictModel):

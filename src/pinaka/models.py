@@ -48,6 +48,8 @@ from .contracts import ProviderProfile as ProviderProfile
 from .contracts import PublicationAuthorizationCreate as PublicationAuthorizationCreate
 from .contracts import QACheck as QACheck
 from .contracts import QAReport as QAReport
+from .contracts import ScriptApproval as ScriptApproval
+from .contracts import ScriptCreate as ScriptCreate
 from .contracts import SegmentCreate as SegmentCreate
 from .contracts import ShotCreate as ShotCreate
 from .contracts import ShotElementBindingCreate as ShotElementBindingCreate

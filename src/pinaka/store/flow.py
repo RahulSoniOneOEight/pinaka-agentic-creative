@@ -234,8 +234,9 @@ class FlowStore:
             connection.execute(
                 """
                 INSERT INTO motion_levels(
-                    id, project_id, shot_id, level, source, evidence_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    id, project_id, shot_id, level, source, evidence_json,
+                    evidence_artifact_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     level_id,
@@ -244,6 +245,7 @@ class FlowStore:
                     request.level,
                     request.source,
                     canonical_json(request.evidence),
+                    request.evidence_artifact_id,
                     now,
                 ),
             )
@@ -285,6 +287,7 @@ class FlowStore:
                     "level": row["level"],
                     "source": row["source"],
                     "evidence": json.loads(row["evidence_json"]),
+                    "evidence_artifact_id": row["evidence_artifact_id"],
                     "created_at": row["created_at"],
                 }
                 for row in rows

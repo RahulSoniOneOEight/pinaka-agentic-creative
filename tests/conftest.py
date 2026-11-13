@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 from decimal import Decimal
@@ -80,12 +81,45 @@ def complete_flow_ledger(controller: CreativeController, project_id: str) -> Non
         )
 
 
+def record_motion_evidence_stub(
+    controller: CreativeController,
+    project_id: str,
+    shot_id: str,
+    *,
+    level: str = "M3",
+) -> str:
+    """Write a passing motion-evidence artifact for gate tests."""
+
+    body = json.dumps(
+        {
+            "schema": "motion-evidence/v1",
+            "project_id": project_id,
+            "shot_id": shot_id,
+            "level": level,
+            "verdict": "pass",
+            "residual_ratio": 0.08,
+            "components": 3,
+        }
+    ).encode("utf-8")
+    artifact = controller.write_artifact(
+        project_id,
+        kind=ArtifactKind.DESIGN,
+        relative_path=f"motion/evidence-{shot_id}.json",
+        content=body,
+        operation={"type": "motion_evidence", "shot_id": shot_id, "level": level},
+    )
+    return artifact["id"]
+
+
 def complete_motion_levels(
     controller: CreativeController, project_id: str, *, level: str = "M3"
 ) -> None:
     """Give every shot a passing motion level before animatic approval."""
 
     for shot in controller.repository.list_shots(project_id):
+        evidence_id = record_motion_evidence_stub(
+            controller, project_id, shot["id"], level=level
+        )
         controller.record_motion_level(
             project_id,
             MotionLevelCreate(
@@ -93,6 +127,7 @@ def complete_motion_levels(
                 level=level,
                 source="composition",
                 evidence=(f"evidence://motion/{shot['stable_key']}",),
+                evidence_artifact_id=evidence_id,
             ),
         )
 

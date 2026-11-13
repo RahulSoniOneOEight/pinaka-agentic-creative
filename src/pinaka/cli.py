@@ -88,6 +88,8 @@ from .models import (
     ProjectCreate,
     ProviderModelProfileCreate,
     PublicationAuthorizationCreate,
+    ScriptApproval,
+    ScriptCreate,
     SegmentCreate,
     ShotElementBindingCreate,
     ShotMotionRequest,
@@ -115,6 +117,7 @@ from .preference import (
     select_route,
 )
 from .preflight import run_preflight
+from .production import ShotProductionCreate
 from .publication import (
     CHANNELS,
     PublicationAuthorization,
@@ -1450,6 +1453,44 @@ def cmd_record_effects_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 def cmd_effects_plan(args: argparse.Namespace) -> dict[str, Any]:
     return {"plan": _controller(args).current_effects_plan(args.project_id)}
+
+
+def cmd_plan_production(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).plan_production(args.project_id)
+
+
+def cmd_record_shot_production(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_shot_production(
+        args.project_id, ShotProductionCreate.model_validate(payload)
+    )
+
+
+def cmd_record_script(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_script(
+        args.project_id, ScriptCreate.model_validate(payload)
+    )
+
+
+def cmd_approve_script(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).approve_script(
+        args.project_id,
+        args.script_id,
+        ScriptApproval(approved_by=args.approved_by),
+    )
+
+
+def cmd_current_script(args: argparse.Namespace) -> dict[str, Any]:
+    return {"script": _controller(args).current_script(args.project_id)}
+
+
+def cmd_delivery_metadata(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).write_delivery_metadata(args.project_id)
+
+
+def cmd_style_query_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).write_style_query_plan(args.project_id, args.slot_id)
 
 
 def cmd_quality_bar(args: argparse.Namespace) -> dict[str, Any]:
@@ -3024,6 +3065,55 @@ def build_parser() -> argparse.ArgumentParser:
     )
     effects_show_parser.add_argument("project_id")
     effects_show_parser.set_defaults(handler=cmd_effects_plan)
+
+    plan_production_parser = subparsers.add_parser(
+        "plan-production",
+        help="Create shot production contracts and layer plans from the creative plan",
+    )
+    plan_production_parser.add_argument("project_id")
+    plan_production_parser.set_defaults(handler=cmd_plan_production)
+
+    shot_prod_parser = subparsers.add_parser(
+        "record-shot-production",
+        help="Record one shot's production contract",
+    )
+    shot_prod_parser.add_argument("project_id")
+    shot_prod_parser.add_argument("--file", required=True)
+    shot_prod_parser.set_defaults(handler=cmd_record_shot_production)
+
+    script_parser = subparsers.add_parser(
+        "record-script", help="Record the current narration script"
+    )
+    script_parser.add_argument("project_id")
+    script_parser.add_argument("--file", required=True)
+    script_parser.set_defaults(handler=cmd_record_script)
+
+    approve_script_parser = subparsers.add_parser(
+        "approve-script", help="Approve the current narration script"
+    )
+    approve_script_parser.add_argument("project_id")
+    approve_script_parser.add_argument("script_id")
+    approve_script_parser.add_argument("--by", required=True, dest="approved_by")
+    approve_script_parser.set_defaults(handler=cmd_approve_script)
+
+    current_script_parser = subparsers.add_parser(
+        "current-script", help="Show the current narration script"
+    )
+    current_script_parser.add_argument("project_id")
+    current_script_parser.set_defaults(handler=cmd_current_script)
+
+    delivery_meta_parser = subparsers.add_parser(
+        "delivery-metadata", help="Write CREDITS.txt and title/description metadata"
+    )
+    delivery_meta_parser.add_argument("project_id")
+    delivery_meta_parser.set_defaults(handler=cmd_delivery_metadata)
+
+    query_plan_parser = subparsers.add_parser(
+        "style-query-plan", help="Write the style-aware sourcing query plan for a slot"
+    )
+    query_plan_parser.add_argument("project_id")
+    query_plan_parser.add_argument("slot_id")
+    query_plan_parser.set_defaults(handler=cmd_style_query_plan)
 
     quality_parser = subparsers.add_parser(
         "quality-bar",

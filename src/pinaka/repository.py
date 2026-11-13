@@ -27,6 +27,7 @@ from .store.flow import FlowStore
 from .store.grounding import GroundingStore
 from .store.jobs import JobsStore
 from .store.planning import PlanningStore
+from .store.production import ProductionStore
 from .store.projects import ProjectsStore
 from .store.providers import ProvidersStore
 from .store.qa import QaStore
@@ -47,6 +48,7 @@ class Repository(
     FlowStore,
     CandidatesStore,
     ExperimentsStore,
+    ProductionStore,
     ApprovalsStore,
     ArtifactsStore,
     AssetsStore,

@@ -37,6 +37,8 @@ from .pilot import PilotScript as PilotScript
 from .pilot import PilotSegmentPlan as PilotSegmentPlan
 from .planning import BriefDecisionCreate as BriefDecisionCreate
 from .planning import CreativeElementCreate as CreativeElementCreate
+from .planning import ScriptApproval as ScriptApproval
+from .planning import ScriptCreate as ScriptCreate
 from .planning import ShotCreate as ShotCreate
 from .planning import ShotElementBindingCreate as ShotElementBindingCreate
 from .planning import ShotReferenceCreate as ShotReferenceCreate

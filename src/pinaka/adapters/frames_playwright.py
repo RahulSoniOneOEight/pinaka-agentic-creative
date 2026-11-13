@@ -12,7 +12,11 @@ async (seconds) => {
   if (!clips.length) return 0;
   await Promise.all(clips.map((video) => new Promise((resolve) => {
     const finish = () => { try { video.pause(); } catch (e) {} resolve(); };
-    const target = Math.min(seconds, video.duration || seconds);
+    const offset = Number.parseFloat(video.dataset.start || "0") || 0;
+    const target = Math.min(
+      Math.max(0, seconds - offset),
+      video.duration || Math.max(0, seconds - offset)
+    );
     if (video.readyState >= 2 && Math.abs((video.currentTime || 0) - target) < 0.05) {
       return finish();
     }

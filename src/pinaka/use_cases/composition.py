@@ -273,6 +273,12 @@ class CompositionUseCases:
                 ),
             ),
         )
+        # A new animatic render invalidates any active animatic approval.
+        self.repository.invalidate_active_approval(
+            project_id,
+            "animatic",
+            reason=f"New animatic render: {video['id']}",
+        )
         return {
             "video": video,
             "composition": artifact,

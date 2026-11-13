@@ -109,8 +109,8 @@ class ShotsStore:
                         id, project_id, shot_id, stable_key, role, identity_requirement,
                         fact_requirement, transformation_permission, text_zone,
                         approved_sources_json, treatment_ceiling, exactness,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        style_id, media_requirement, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         slot_id,
@@ -125,6 +125,8 @@ class ShotsStore:
                         canonical_json(request.approved_sources),
                         request.treatment_ceiling,
                         request.exactness,
+                        request.style_id,
+                        request.media_requirement,
                         now,
                         now,
                     ),
@@ -168,6 +170,8 @@ class ShotsStore:
                 "approved_sources": json.loads(row["approved_sources_json"]),
                 "treatment_ceiling": row["treatment_ceiling"],
                 "exactness": row["exactness"],
+                "style_id": row["style_id"],
+                "media_requirement": row["media_requirement"],
                 "version": row["version"],
             }
 
@@ -192,6 +196,8 @@ class ShotsStore:
                     "approved_sources": json.loads(row["approved_sources_json"]),
                     "treatment_ceiling": row["treatment_ceiling"],
                     "exactness": row["exactness"],
+                    "style_id": row["style_id"],
+                    "media_requirement": row["media_requirement"],
                     "version": row["version"],
                 }
                 for row in rows

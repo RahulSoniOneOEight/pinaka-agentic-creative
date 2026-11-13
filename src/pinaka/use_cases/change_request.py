@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from ..enums import ArtifactKind
-from ..utils import sha256_bytes
+from ..errors import ConflictError
+from ..utils import canonical_json, sha256_bytes
 
 CHANGE_TYPES = ["copy", "visual", "motion", "audio", "caption", "metadata", "other"]
 
@@ -145,6 +146,14 @@ class ChangeRequestUseCases:
                 for element in elements
             ],
             "slots": slot_entries,
+            "production": (
+                self.current_creative_plan(project_id)["plan"].production.model_dump(
+                    mode="json"
+                )
+                if self.current_creative_plan(project_id)
+                else None
+            ),
+            "shot_productions": self.repository.list_shot_productions(project_id),
             "deliverables": self._deliverables(project_id, artifacts),
             "change_request": dict(CHANGE_REQUEST_FIELDS),
             "allowed_change_types": CHANGE_TYPES,
@@ -314,3 +323,102 @@ class ChangeRequestUseCases:
             ]
         )
         return "\n".join(lines)
+
+    def write_delivery_metadata(self, project_id: str) -> dict[str, Any]:
+        """Write CREDITS.txt and title/description metadata for the delivery."""
+
+        project = self.repository.get_project(project_id)
+        credits: list[str] = []
+        sources: list[dict[str, Any]] = []
+        for assignment in self.repository.list_slot_assets(project_id):
+            artifact = self.repository.get_artifact(assignment["artifact_id"])
+            rights = (artifact.get("operation") or {}).get("rights") or {}
+            attribution = rights.get("attribution_text")
+            if (
+                rights.get("attribution_required")
+                and attribution
+                and attribution not in credits
+            ):
+                credits.append(attribution)
+            sources.append(
+                {
+                    "slot_id": assignment["slot_id"],
+                    "role": assignment["role"],
+                    "artifact_id": artifact["id"],
+                    "content_hash": artifact["content_hash"],
+                    "licence": rights.get("license_name"),
+                    "attribution": attribution,
+                }
+            )
+        title = project.name
+        description = (
+            f"{project.name}. {project.objective}. "
+            "Created with Pinaka; sources and hashes are recorded in the delivery packet."
+        )
+        metadata = {
+            "schema": "delivery-metadata/v1",
+            "project_id": project_id,
+            "title": title,
+            "description": description,
+            "credits": credits,
+            "sources": sources,
+        }
+        metadata_bytes = canonical_json(metadata).encode("utf-8")
+        metadata_hash = sha256_bytes(metadata_bytes)
+        metadata_artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"delivery/metadata-{metadata_hash[:12]}.json",
+            content=metadata_bytes,
+            operation={"type": "delivery_metadata", "format": "json"},
+        )
+        credits_text = "\n".join(credits) if credits else "No attribution required."
+        credits_artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"delivery/CREDITS-{metadata_hash[:12]}.txt",
+            content=(credits_text + "\n").encode("utf-8"),
+            operation={"type": "delivery_metadata", "format": "credits"},
+        )
+        return {
+            "metadata": metadata,
+            "metadata_hash": metadata_hash,
+            "metadata_artifact": metadata_artifact,
+            "credits_artifact": credits_artifact,
+            "credits": credits,
+        }
+
+    def require_delivery_metadata(self, project_id: str) -> dict[str, Any]:
+        artifacts = self.repository.list_artifacts(project_id)
+        metadata = [
+            artifact
+            for artifact in artifacts
+            if artifact["relative_path"].startswith("delivery/metadata-")
+            and artifact["relative_path"].endswith(".json")
+        ]
+        credits = [
+            artifact
+            for artifact in artifacts
+            if artifact["relative_path"].startswith("delivery/CREDITS-")
+        ]
+        if not metadata or not credits:
+            raise ConflictError(
+                "Delivery metadata and CREDITS.txt are required before final approval"
+            )
+        body = json.loads(
+            self.read_artifact_text(
+                max(metadata, key=lambda item: item["created_at"])["id"]
+            )
+        )
+        if any(
+            source.get("attribution")
+            for source in body.get("sources", [])
+            if source.get("attribution")
+        ) and not body.get("credits"):
+            raise ConflictError("Attribution-required sources have no credits")
+        return {
+            "metadata": body,
+            "credits": body.get("credits", []),
+            "metadata_artifact": max(metadata, key=lambda item: item["created_at"]),
+            "credits_artifact": max(credits, key=lambda item: item["created_at"]),
+        }

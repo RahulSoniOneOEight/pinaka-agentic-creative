@@ -24,7 +24,7 @@ from pinaka.models import (
 )
 from pinaka.recipes import build_plan
 
-from .conftest import create_project
+from .conftest import create_project, record_motion_evidence_stub
 from .test_creative_rules import make_profile
 
 
@@ -202,8 +202,11 @@ def test_persist_slots_materialises_slots_before_spend(controller):
         ),
     )
     assert result["slots"]
-    assert len(result["slots"]) == len(result["shots"])
-    assert result["slots"][0]["approved_sources"][-1] == "generated"
+    primary = [slot for slot in result["slots"] if slot["role"] == "primary_visual"]
+    assert len(primary) == len(result["shots"])
+    assert primary[0]["approved_sources"][-1] == "generated"
+    assert result["creative_plan"]["recipe_id"] == "animated-story"
+    assert result["production"]["preset_id"] == "storybook-motion-comic"
 
 
 def test_flow_completeness_needs_every_gate(controller):
@@ -291,13 +294,22 @@ def test_character_shots_cannot_stay_at_m0(controller):
     )
     shot = result["shots"][0]
     for entry in result["shots"]:
+        level = "M0" if entry["id"] == shot["id"] else "M1"
+        evidence_id = (
+            record_motion_evidence_stub(
+                controller, project.id, entry["id"], level=level
+            )
+            if level == "M1"
+            else None
+        )
         controller.record_motion_level(
             project.id,
             MotionLevelCreate(
                 shot_id=entry["id"],
-                level="M0" if entry["id"] == shot["id"] else "M1",
+                level=level,
                 source="composition",
-                evidence=("evidence://static-still",),
+                evidence=(f"evidence://{level}",),
+                evidence_artifact_id=evidence_id,
             ),
         )
     summary = controller.motion_levels(project.id)
@@ -306,6 +318,9 @@ def test_character_shots_cannot_stay_at_m0(controller):
     with pytest.raises(ConflictError, match="Stills must become motion"):
         controller.require_motion_levels(project.id)
 
+    evidence_id = record_motion_evidence_stub(
+        controller, project.id, shot["id"], level="M1"
+    )
     controller.record_motion_level(
         project.id,
         MotionLevelCreate(
@@ -313,6 +328,7 @@ def test_character_shots_cannot_stay_at_m0(controller):
             level="M1",
             source="composition",
             evidence=("evidence://animated-still",),
+            evidence_artifact_id=evidence_id,
         ),
     )
     assert controller.require_motion_levels(project.id)["complete"] is True

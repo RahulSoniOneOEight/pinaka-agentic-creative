@@ -105,6 +105,7 @@ class SourcingCandidateCreate(StrictModel):
     eligibility: Literal["eligible", "ineligible"]
     eligibility_reason: str | None = Field(default=None, max_length=1000)
     treatment: Treatment
+    asset_class: str | None = Field(default=None, max_length=100)
     evidence: tuple[str, ...] = ()
     metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
@@ -135,6 +136,7 @@ class MotionLevelCreate(StrictModel):
     level: MotionLevel
     source: Literal["composition", "generated_video", "stock_clip", "avatar", "manual"]
     evidence: tuple[str, ...] = Field(min_length=1)
+    evidence_artifact_id: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=1000)
 
 
