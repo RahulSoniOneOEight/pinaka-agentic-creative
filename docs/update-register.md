@@ -42,9 +42,9 @@ to bypass either. New real spend is **USD 0**.
 Detailed contract, baseline, request ID, exact refusal, test evidence, rollback and remaining
 limitations: [implementation/remaining-items.md](implementation/remaining-items.md).
 
-## Gap-register policy program (Revision 15)
+## Gap-register policy program (Revision 18)
 
-Source of record: `C:\Users\LENOVO\Desktop\pinaka-flow-gaps.txt` (Revision 15).
+Source of record: `C:\Users\LENOVO\Desktop\pinaka-flow-gaps.txt` (Revision 18).
 
 | Item | Status | Evidence |
 |---|---|---|
