@@ -17,3 +17,5 @@ workspace/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+tools/hyperframes/node_modules/

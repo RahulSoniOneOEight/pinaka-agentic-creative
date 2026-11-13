@@ -35,6 +35,8 @@ def verify_frames(
     components: list[int] = []
     centroids: list[tuple[float, float]] = []
     areas: list[float] = []
+    boxes: list[tuple[float, float, float, float]] = []
+    colours: list[tuple[float, float, float]] = []
     for previous, current in itertools.pairwise(frames):
         prev = _gray(previous).astype(np.float32)
         cur = _gray(current).astype(np.float32)
@@ -57,7 +59,7 @@ def verify_frames(
         area = threshold.shape[0] * threshold.shape[1]
         residual = float(np.count_nonzero(threshold)) / float(area or 1)
         residuals.append(residual)
-        count, _labels, stats, centroids_raw = cv2.connectedComponentsWithStats(
+        count, labels, stats, centroids_raw = cv2.connectedComponentsWithStats(
             threshold
         )
         moving = [
@@ -76,6 +78,17 @@ def verify_frames(
                 float(stats[largest, cv2.CC_STAT_AREA])
                 / float(threshold.shape[0] * threshold.shape[1])
             )
+            boxes.append(
+                (
+                    float(stats[largest, cv2.CC_STAT_LEFT]) / threshold.shape[1],
+                    float(stats[largest, cv2.CC_STAT_TOP]) / threshold.shape[0],
+                    float(stats[largest, cv2.CC_STAT_WIDTH]) / threshold.shape[1],
+                    float(stats[largest, cv2.CC_STAT_HEIGHT]) / threshold.shape[0],
+                )
+            )
+            component_mask = np.where(labels == largest, 255, 0).astype(np.uint8)
+            mean_bgr = cv2.mean(current, mask=component_mask)[:3]
+            colours.append((mean_bgr[2], mean_bgr[1], mean_bgr[0]))
 
     residual_ratio = float(sum(residuals) / len(residuals))
     max_components = max(components)
@@ -101,6 +114,18 @@ def verify_frames(
             else None
         ),
         "motion_area_ratio": (round(median(areas), 6) if areas else 0.0),
+        "bbox": (
+            tuple(round(median(item[index] for item in boxes), 4) for index in range(4))
+            if boxes
+            else None
+        ),
+        "dominant_color": (
+            tuple(
+                round(median(item[index] for item in colours), 2) for index in range(3)
+            )
+            if colours
+            else None
+        ),
     }
 
 
@@ -184,3 +209,24 @@ def verify_video_segment(
         min_residual=min_residual,
         min_components=min_components,
     )
+
+
+def loop_seam(path: str) -> dict[str, Any]:
+    """Compare the first and last frames for a loop-safe seam."""
+
+    capture = cv2.VideoCapture(path)
+    if not capture.isOpened():
+        return {"seam": None, "reason": f"cannot open video: {path}"}
+    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    ok_first, first = capture.read()
+    if total > 1:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, total - 1)
+    ok_last, last = capture.read()
+    capture.release()
+    if not (ok_first and ok_last):
+        return {"seam": None, "reason": "cannot read first and last frames"}
+    if first.shape != last.shape:
+        last = cv2.resize(last, (first.shape[1], first.shape[0]))
+    difference = cv2.absdiff(first, last)
+    seam = float(difference.mean()) / 255.0
+    return {"seam": round(seam, 6), "frames": total}

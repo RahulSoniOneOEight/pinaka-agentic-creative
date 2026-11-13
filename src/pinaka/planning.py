@@ -452,7 +452,11 @@ def build_profile_from_analysis(
         ),
         product_role="none",
         form=form,
-        structures=("linear",),
+        structures=(
+            ("loop",)
+            if re.search(r"\b(loop|seamless|repeat)\b", request.text, re.IGNORECASE)
+            else ("linear",)
+        ),
         subjects=subjects,
         tones=tone,
         primary_outcome=outcome,

@@ -1,0 +1,10 @@
+{
+  "name": "pinaka-hyperframes-pin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned HyperFrames renderer used for deterministic smoke renders and lint checks.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "hyperframes": "0.9.41"
+  }
+}

@@ -381,7 +381,11 @@ class ProjectsUseCases:
             )
             if self.repository.list_shot_productions(project_id):
                 self.require_final_motion(project_id, candidate["id"])
-                self.require_motion_continuity(project_id, candidate["id"])
+                self.require_motion_continuity(
+                    project_id,
+                    candidate["id"],
+                    loop_required=self.loop_is_required(project_id),
+                )
             self.require_flow_complete(project_id)
             if self.repository.list_ab_experiments(project_id):
                 self.require_ab_complete(project_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
 
@@ -9,7 +10,7 @@ from pinaka.contracts.planning import ScriptApproval, ScriptCreate, ShotCreate
 from pinaka.enums import ApprovalStage, ArtifactKind, ProjectStatus, SlotAssetRole
 from pinaka.errors import ApprovalRequiredError, ConflictError, IntegrityError
 from pinaka.models import ApprovalRequest, TextBriefRequest
-from pinaka.motion_verify import verify_frames
+from pinaka.motion_verify import loop_seam, verify_frames
 from pinaka.production import ReuseDecisionCreate, ReuseItem, ShotProductionCreate
 
 from .conftest import create_project
@@ -491,3 +492,51 @@ def test_imported_original_can_carry_provider_rights(controller, tmp_path):
     assert artifact["operation"]["rights"]["license_name"] == "CC BY 4.0"
     assert artifact["operation"]["size_bytes"] == len(b"provider-bytes")
     assert controller.verify_artifact(artifact["id"]) is True
+
+
+def test_motion_verifier_reports_bbox_and_dominant_colour():
+    frames = []
+    for index in range(6):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        frame[60:120, 40:100] = (0, 200, 0)
+        frame[60 + index * 3 : 120 + index * 3, 200:260] = (0, 255, 255)
+        frame[150:190, 120 + index * 5 : 180 + index * 5] = (255, 0, 0)
+        frames.append(frame)
+    report = verify_frames(frames)
+    assert report["verdict"] == "pass"
+    assert report["bbox"] is not None and len(report["bbox"]) == 4
+    assert report["dominant_color"] is not None
+    assert len(report["dominant_color"]) == 3
+
+
+def test_loop_seam_scores_identical_and_different_frames(tmp_path):
+    same = tmp_path / "same.mp4"
+    writer = cv2.VideoWriter(str(same), cv2.VideoWriter_fourcc(*"mp4v"), 12, (160, 120))
+    for _ in range(24):
+        writer.write(np.full((120, 160, 3), 40, dtype=np.uint8))
+    writer.release()
+    assert loop_seam(str(same))["seam"] == 0.0
+
+    different = tmp_path / "different.mp4"
+    writer = cv2.VideoWriter(
+        str(different), cv2.VideoWriter_fourcc(*"mp4v"), 12, (160, 120)
+    )
+    for index in range(24):
+        value = 0 if index < 12 else 255
+        writer.write(np.full((120, 160, 3), value, dtype=np.uint8))
+    writer.release()
+    assert loop_seam(str(different))["seam"] > 0.5
+
+
+def test_seamless_loop_recipe_requires_loop_continuity(controller):
+    project = create_project(controller)
+    plan = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(
+            text="Make a five second seamless loop about a duck on a pond",
+            duration_seconds=5,
+            persist_slots=True,
+        ),
+    )
+    assert plan["creative_plan"]["recipe_id"] == "seamless-loop"
+    assert controller.loop_is_required(project.id) is True

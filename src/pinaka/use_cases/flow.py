@@ -880,13 +880,20 @@ class FlowUseCases:
                 if motion_report["passed"]
                 else "final render failed motion verification",
             )
-            continuity = self.motion_continuity_report(project_id, artifact_id)
+            continuity = self.motion_continuity_report(
+                project_id,
+                artifact_id,
+                loop_required=self.loop_is_required(project_id),
+            )
             gate(
                 "motion_continuity",
                 continuity["passed"],
                 (
-                    f"drift {continuity['centroid_drift']}, "
-                    f"area ratio {continuity['area_ratio']}"
+                    f"position {continuity['checks']['position']['value']}, "
+                    f"scale {continuity['checks']['scale']['value']}, "
+                    f"colour {continuity['checks']['colour']['value']}, "
+                    f"identity {continuity['checks']['identity']['value']}, "
+                    f"loop {continuity['checks']['loop']['value'] if continuity['checks']['loop']['required'] else 'n/a'}"
                 )
                 if continuity["passed"]
                 else "motion continuity failed",
@@ -1017,39 +1024,155 @@ class FlowUseCases:
         return report
 
     def motion_continuity_report(
-        self, project_id: str, artifact_id: str
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        loop_required: bool = False,
     ) -> dict[str, Any]:
+        """Check identity, scale, position, colour and loop continuity."""
+
+        from math import dist
+
+        from ..motion_verify import loop_seam
+
         report = self.final_motion_report(project_id, artifact_id)
         rows = report["shots"]
+        missing = [
+            row["stable_key"]
+            for row in rows
+            if row.get("centroid") is None
+            or row.get("bbox") is None
+            or row.get("dominant_color") is None
+        ]
         centroids = [row.get("centroid") for row in rows]
-        areas = [row.get("motion_area_ratio") or 0.0 for row in rows]
-        missing = [row["stable_key"] for row in rows if row.get("centroid") is None]
+        boxes = [row.get("bbox") for row in rows]
+        colours = [row.get("dominant_color") for row in rows]
+
         drift = 0.0
-        if all(centroids) and len(centroids) > 1:
+        if len(centroids) > 1 and all(centroids):
             for index in range(1, len(centroids)):
                 dx = centroids[index][0] - centroids[index - 1][0]
                 dy = centroids[index][1] - centroids[index - 1][1]
                 drift = max(drift, (dx * dx + dy * dy) ** 0.5)
-        area_ratio = max(areas) / min(areas) if areas and min(areas) > 0 else 0.0
-        passed = not missing and drift <= 0.35 and area_ratio <= 5.0
+
+        box_areas = [box[2] * box[3] for box in boxes if box]
+        scale_ratio = (
+            max(box_areas) / min(box_areas) if box_areas and min(box_areas) > 0 else 0.0
+        )
+        aspects = [box[2] / box[3] for box in boxes if box and box[3] > 0]
+        aspect_delta = (
+            max(aspects) / min(aspects) if aspects and min(aspects) > 0 else 1.0
+        )
+
+        colour_distance = 0.0
+        if len(colours) > 1 and all(colours):
+            colour_distance = max(
+                dist(colours[left], colours[right]) / 441.67295593
+                for left in range(len(colours))
+                for right in range(left + 1, len(colours))
+            )
+
+        seam = (
+            loop_seam(
+                str(
+                    self.artifact_store.resolve(
+                        project_id,
+                        self.repository.get_artifact(artifact_id)["relative_path"],
+                    )
+                )
+            )
+            if loop_required
+            else {"seam": None}
+        )
+
+        checks = {
+            "position": {
+                "passed": drift <= 0.35,
+                "value": round(drift, 4),
+                "threshold": 0.35,
+            },
+            "scale": {
+                "passed": scale_ratio <= 3.0,
+                "value": round(scale_ratio, 4),
+                "threshold": 3.0,
+            },
+            "colour": {
+                "passed": colour_distance <= 0.22,
+                "value": round(colour_distance, 4),
+                "threshold": 0.22,
+            },
+            "identity": {
+                "passed": aspect_delta <= 1.35
+                and colour_distance <= 0.22
+                and scale_ratio <= 3.0,
+                "value": round(aspect_delta, 4),
+                "threshold": 1.35,
+                "components": {
+                    "aspect_delta": round(aspect_delta, 4),
+                    "colour_distance": round(colour_distance, 4),
+                    "scale_ratio": round(scale_ratio, 4),
+                },
+            },
+            "loop": {
+                "required": loop_required,
+                "passed": (
+                    None
+                    if not loop_required
+                    else seam.get("seam") is not None and seam["seam"] <= 0.12
+                ),
+                "value": seam.get("seam"),
+                "threshold": 0.12,
+            },
+        }
+        required_checks = ("position", "scale", "colour", "identity")
+        passed = (
+            not missing
+            and all(checks[name]["passed"] for name in required_checks)
+            and (not loop_required or bool(checks["loop"]["passed"]))
+        )
         return {
             "artifact_id": artifact_id,
             "shots": rows,
             "centroid_drift": round(drift, 4),
-            "area_ratio": round(area_ratio, 4),
+            "area_ratio": round(scale_ratio, 4),
+            "colour_distance": round(colour_distance, 4),
+            "loop_required": loop_required,
+            "checks": checks,
             "missing_motion": missing,
             "passed": passed,
         }
 
+    def loop_is_required(self, project_id: str) -> bool:
+        """A seamless-loop recipe makes the loop seam a release gate."""
+
+        creative = self.current_creative_plan(project_id)
+        if not creative:
+            return False
+        return creative["plan"].recipe_selection.recipe.id == "seamless-loop"
+
     def require_motion_continuity(
-        self, project_id: str, artifact_id: str
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        loop_required: bool = False,
     ) -> dict[str, Any]:
-        report = self.motion_continuity_report(project_id, artifact_id)
+        report = self.motion_continuity_report(
+            project_id, artifact_id, loop_required=loop_required
+        )
         if not report["passed"]:
+            failed = [
+                name
+                for name, check in report["checks"].items()
+                if check["passed"] is False
+            ]
             raise ApprovalRequiredError(
                 "Motion continuity failed: "
+                f"checks={failed}, "
                 f"drift={report['centroid_drift']}, "
                 f"area_ratio={report['area_ratio']}, "
+                f"colour={report['colour_distance']}, "
                 f"missing={report['missing_motion']}"
             )
         return report

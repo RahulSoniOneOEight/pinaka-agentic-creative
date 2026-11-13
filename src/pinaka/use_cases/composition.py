@@ -41,6 +41,13 @@ class CompositionUseCases:
 
         slots = {slot["id"]: slot for slot in self.repository.list_slots(project_id)}
         shots_by_id = {shot["id"]: shot for shot in shots}
+        z_by_slot: dict[str, int] = {}
+        for production in self.repository.list_shot_productions(project_id):
+            for layer in production.get("layers", ()):
+                slot_id = layer.get("slot_id")
+                z = layer.get("z")
+                if slot_id and isinstance(z, int):
+                    z_by_slot[slot_id] = z
         layers: dict[str, list[dict[str, Any]]] = {}
         skipped: list[dict[str, Any]] = []
         total = 0
@@ -70,6 +77,7 @@ class CompositionUseCases:
                         "kind": "video",
                         "mime": VIDEO_MIME[path.suffix.lower()],
                         "path": path.as_uri(),
+                        "z": z_by_slot.get(slot["id"], 10),
                     }
                 )
                 continue
@@ -99,6 +107,7 @@ class CompositionUseCases:
                     "role": slot["role"] or assignment["role"],
                     "mime": mime,
                     "data": base64.b64encode(data).decode("ascii"),
+                    "z": z_by_slot.get(slot["id"], 10),
                 }
             )
         return layers, skipped

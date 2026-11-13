@@ -50,6 +50,18 @@ def _layer_class(role: str) -> str:
     return "layer subject"
 
 
+def _layer_order(layer: dict[str, Any]) -> tuple[int, int]:
+    """Canonical paint order: LayerPlan.z, then the legacy role fallback."""
+
+    z = layer.get("z")
+    if isinstance(z, int):
+        return (z, 0)
+    role = str(layer.get("role", "")).lower()
+    if layer.get("kind") == "video" or role in FULL_BLEED_ROLES:
+        return (0, 1)
+    return (10, 1)
+
+
 def _subject_plan(shot: dict[str, Any]) -> dict[str, Any]:
     """Resolve the per-shot subject behaviour from the shot requirements."""
 
@@ -247,27 +259,26 @@ def build_composition(
         layer_html = []
         for layer in sorted(
             (layers or {}).get(shot["stable_key"], ()),
-            key=lambda item: (
-                0
-                if item.get("kind") == "video"
-                else 1
-                if str(item.get("role", "")).lower() not in FULL_BLEED_ROLES
-                else 0
-            ),
+            key=_layer_order,
         ):
             role = str(layer.get("role", "visual"))
+            track = layer.get("z")
+            if not isinstance(track, int):
+                track = 0 if role.lower() in FULL_BLEED_ROLES else 10
+            track_attr = f' data-track-index="{track}"'
             if layer.get("kind") == "video":
                 layer_html.append(
-                    f'<video class="layer clip" data-role="{_escape(role)}" '
-                    f'data-start="{start}" data-end="{end}" '
+                    f'<video class="layer clip" data-role="{_escape(role)}"'
+                    f'{track_attr} data-start="{start}" data-end="{end}" '
                     f'src="{layer["path"]}" muted playsinline '
                     f'preload="auto"></video>'
                 )
                 continue
             if role.lower() in FULL_BLEED_ROLES:
                 layer_html.append(
-                    f'<img class="{_layer_class(role)}" data-role="{_escape(role)}" '
-                    f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'
+                    f'<img class="{_layer_class(role)}" data-role="{_escape(role)}"'
+                    f'{track_attr} alt="" '
+                    f'src="data:{layer["mime"]};base64,{layer["data"]}">'
                 )
                 continue
             plan = _subject_plan(shot)
@@ -291,8 +302,9 @@ def build_composition(
                     f"data-path='{json.dumps(plan['path'])}' " if plan["path"] else ""
                 )
                 layer_html.append(
-                    f'<img class="layer subject" data-role="{_escape(role)}" '
-                    f'data-action="{plan["action"]}" data-copy="{copy_index}" '
+                    f'<img class="layer subject" data-role="{_escape(role)}"'
+                    f'{track_attr} data-action="{plan["action"]}" '
+                    f'data-copy="{copy_index}" '
                     f'data-count="{plan["count"]}" {path_attr}'
                     f'style="max-width:{per_scale * 100:.0f}%;'
                     f"max-height:{per_scale * 100:.0f}%;"
@@ -322,6 +334,8 @@ def build_composition(
             )
         scenes.append(
             f'  <section class="scene" data-shot="{_escape(shot["stable_key"])}" '
+            f'data-hf-scene="{_escape(shot["stable_key"])}" '
+            f"data-hf-scene-no-swap "
             f'data-start="{start}" data-end="{end}" data-duration="{duration}" '
             f'style="animation: scene-{index} {total}s linear infinite">\n'
             f'    <div class="layers" style="{camera_animation}">{image_layers_html}</div>\n'
@@ -407,7 +421,8 @@ body {{ font-family: "Segoe UI", system-ui, sans-serif; color: var(--fg); }}
 </style>
 </head>
 <body>
-<div class="stage" data-duration="{total}">
+<div class="stage" data-composition-id="pinaka-main"
+     data-width="{width}" data-height="{height}" data-duration="{total}">
 {chr(10).join(scenes)}
 </div>
 <script>
@@ -513,6 +528,13 @@ def validate_composition(html: str) -> dict[str, Any]:
         problems.append("missing inline style block")
     if 'class="stage"' not in html:
         problems.append("missing stage container")
+    if 'data-composition-id="pinaka-main"' not in html:
+        problems.append("missing HyperFrames composition id")
+    layer_count = html.count('<img class="layer') + html.count('<video class="layer')
+    if layer_count and not re.search(r'data-track-index="\d+"', html):
+        problems.append("missing HyperFrames track index")
+    if not re.search(r'data-hf-scene="[^"]+"', html):
+        problems.append("missing HyperFrames scene part")
     shots = SHOT_ATTR.findall(html)
     if not shots:
         problems.append("no shot scenes found")
@@ -531,7 +553,7 @@ def validate_composition(html: str) -> dict[str, Any]:
         "problems": problems,
         "shot_count": len(shots),
         "shots": shots,
-        "layer_count": html.count('<img class="layer'),
+        "layer_count": layer_count,
         "bytes": len(html.encode("utf-8")),
     }
 
