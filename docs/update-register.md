@@ -94,8 +94,8 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 | Item | Status | Evidence |
 |---|---|---|
 | Remaining gaps F13/F15/F20/F24/F26/F28/F29/F30/F32/F33/F36 | Closed | schema v25, 688 tests, 30/30 gates; `scripts/qc_complete_flow.py` |
-| USD 1.00 rhyme run | Closed | project `prj_be33a4c3f52943a98c652a3188cd7884`, archive `archive_e612b96250dc4300a21a12c7580092b7`, USD 0.00 spent |
-| A/B delivery | Closed | `A/`, `B/`, `experiment.json`, `metrics-plan.json`; manifest `1761856f...` |
-| Change request + revision | Closed | `crq_7f251020...` applied; revision `prj_903d7e7d...` linked; both ledger steps recorded |
-| Motion / captions / QA | Pass | M2 both shots; continuity passes; ASR coverage 1.0; QA 10/10; kids peak -4.45 dBTP vs -2.0 limit |
+| USD 1.00 rhyme run | Closed | project `prj_75ad612d53a9490ca81a13a389755c64`, archive `archive_683489ffd6c2401b81be64d3d78b2180`, USD 0.00 spent |
+| A/B delivery | Closed | `A/`, `B/`, `experiment.json`, `metrics-plan.json`; manifest `f88359d0...` |
+| Change request + revision | Closed | `crq_daffcf9d...` applied; revision `prj_066cc524...` linked; both ledger steps recorded |
+| Motion / captions / QA | Pass | M2 both shots; continuity passes; ASR coverage 1.0; QA 10/10; kids peak -4.39 dBTP vs -2.0 limit |
 | Live providers | Unchanged | P1 fal still not re-run; P2 Studio blocked at credits 0; Pexels still 403 |

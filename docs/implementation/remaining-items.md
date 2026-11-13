@@ -165,12 +165,12 @@ can actually proceed. Remote CI status is separate from the local test evidence 
 - Closed: F13 (ASR default), F15 (effect library), F20 (ownership auto-link), F24 (A/B packet),
   F26 (budget labels), F28 (intake), F29 (impact), F30 (revision link), F32 (slot coverage),
   F33 (Pexels evidence/unavailable) and F36 (caption coverage).
-- Run: `scripts/qc_complete_flow.py`, project `prj_be33a4c3f52943a98c652a3188cd7884`,
-  archive `archive_e612b96250dc4300a21a12c7580092b7`, 30/30 quality-bar gates, final QA pass,
-  ASR caption coverage 1.0, M2 motion and continuity pass, kids true peak -4.45 dBTP
+- Run: `scripts/qc_complete_flow.py`, project `prj_75ad612d53a9490ca81a13a389755c64`,
+  archive `archive_683489ffd6c2401b81be64d3d78b2180`, 30/30 quality-bar gates, final QA pass,
+  ASR caption coverage 1.0, M2 motion and continuity pass, kids true peak -4.39 dBTP
   against a -2.0 limit, USD 0.00 of the USD 1.00 cap.
-- A/B packet manifest `1761856f...`; change request `crq_7f251020...` applied to revision
-  `prj_903d7e7d...`; the child records both g0 and `change_request:<id>` ledger steps; g5
+- A/B packet manifest `f88359d0...`; change request `crq_daffcf9d...` applied to revision
+  `prj_066cc524...`; the child records both g0 and `change_request:<id>` ledger steps; g5
   records a local fallback of Studio with a trade-off.
 - Still external, not claimed as passed: P1 live fal still, P2 Studio video/avatar (credits 0),
   Pexels video evidence pages (HTTP 403).
