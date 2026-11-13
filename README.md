@@ -187,6 +187,21 @@ The controller now enforces the gap-register policies in code, not only in docum
 `quality-bar` is the release gate: it reports each gate as pass/fail and lists the failures. A
 technical QA pass alone does not pass the bar.
 
+### Verified policy run
+
+`workspace/rhyme-flow-qc` is one real 12-second rhyme production under these gates:
+
+- project `prj_75f91f43382d4b05bb3d501935d45de4`, archived, USD 1.00 cap, **USD 0.00 spent**;
+- 20 sourced candidates, three slots, a primary and backup bound for each;
+- 1080x1920 H.264/AAC output with local Kokoro narration and burned ASR captions;
+- A/B variants (ungraded and graded), production record and change-request packet;
+- `quality-bar` passed 10/10 gates and `flow-log` completed G0-G7;
+- motion is **M1** (camera moves on stock stills), not the preferred M3 character motion.
+
+The run found and fixed two gaps: full-bleed composition for `primary visual` layers and a
+change-request join that now shows bound slot artifacts and credits. A slot-coverage gate at final
+approval and a Pexels evidence fallback remain open.
+
 The archived 10-second pilot remains the verified production baseline.
 
 Local tools now include FFmpeg, ImageMagick, Playwright/Chromium, Blender, Inkscape, GIMP, Krita,
