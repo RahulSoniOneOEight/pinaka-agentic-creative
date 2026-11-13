@@ -89,7 +89,7 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 | Pexels evidence fallback | Closed | `archive_search_evidence` stores API responses; a 403 writes `provider_blocked` evidence and marks `asset-provider:pexels` unavailable; `tests/test_gap_completion.py` |
 | Caption coverage warning | Closed | ASR SRT pads the final cue to the runtime; complete-flow run reports 8.0/8.0 s, ratio 1.0, pass |
 
-## Complete implementation run (Revision 18, commits 2f6752c + 20c52f8 + 94589f4)
+## Complete implementation run (Revision 18, commits 2f6752c + 20c52f8 + 94589f4 + b72a09a)
 
 | Item | Status | Evidence |
 |---|---|---|

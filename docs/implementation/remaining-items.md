@@ -158,7 +158,7 @@ can actually proceed. Remote CI status is separate from the local test evidence 
 
 ### Gap-completion bundle (2026-11-13, schema v25)
 
-- Commits `2f6752c` + `20c52f8` + `94589f4`; 688 tests pass; `ruff check`/`format` clean; `mypy` clean (51 files).
+- Commits `2f6752c` + `20c52f8` + `94589f4` + `b72a09a`; 688 tests pass; `ruff check`/`format` clean; `mypy` clean (51 files).
 - Schema v25 is additive: budget A/B labels, project change-request link, flow execution
   ownership, change-request/event tables and A/B delivery ledger. A v24 database opens and
   migrates; `tests/test_gap_completion.py::test_schema_v24_migrates_to_v25` covers it.
