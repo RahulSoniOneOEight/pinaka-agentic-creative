@@ -85,6 +85,7 @@ from .models import (
     MotionLevelCreate,
     OverageReconcileCreate,
     PilotContract,
+    ProductionPlanCreate,
     ProjectCreate,
     ProviderModelProfileCreate,
     PublicationAuthorizationCreate,
@@ -1564,6 +1565,21 @@ def cmd_critique_status(args: argparse.Namespace) -> dict[str, Any]:
     return _controller(args).critique_summary(
         args.project_id, artifact_id=args.artifact
     )
+
+
+def cmd_record_production_plan(args: argparse.Namespace) -> dict[str, Any]:
+    payload = _load_json(args.file)
+    return _controller(args).record_production_plan(
+        args.project_id, ProductionPlanCreate.model_validate(payload)
+    )
+
+
+def cmd_production_plan(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).current_execution_plan(args.project_id)
+
+
+def cmd_production_plan_status(args: argparse.Namespace) -> dict[str, Any]:
+    return _controller(args).production_plan_status(args.project_id)
 
 
 def cmd_declare_ab(args: argparse.Namespace) -> dict[str, Any]:
@@ -3313,6 +3329,27 @@ def build_parser() -> argparse.ArgumentParser:
     critique_status_parser.add_argument("project_id")
     critique_status_parser.add_argument("--artifact")
     critique_status_parser.set_defaults(handler=cmd_critique_status)
+
+    record_plan_parser = subparsers.add_parser(
+        "record-production-plan",
+        help="Freeze the executable production plan (format, beats, shot directions, assets, rough cut)",
+    )
+    record_plan_parser.add_argument("project_id")
+    record_plan_parser.add_argument("--file", required=True)
+    record_plan_parser.set_defaults(handler=cmd_record_production_plan)
+
+    show_plan_parser = subparsers.add_parser(
+        "production-plan", help="Show the current production plan"
+    )
+    show_plan_parser.add_argument("project_id")
+    show_plan_parser.set_defaults(handler=cmd_production_plan)
+
+    plan_status_parser = subparsers.add_parser(
+        "production-plan-status",
+        help="Check whether the production plan is ready to execute",
+    )
+    plan_status_parser.add_argument("project_id")
+    plan_status_parser.set_defaults(handler=cmd_production_plan_status)
 
     ab_declare_parser = subparsers.add_parser(
         "declare-ab",

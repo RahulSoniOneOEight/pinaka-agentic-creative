@@ -63,6 +63,8 @@ from .production import ProviderModelProfileCreate as ProviderModelProfileCreate
 from .production import ShotMotionRequest as ShotMotionRequest
 from .production import ToolOperationRequest as ToolOperationRequest
 from .production import ToolProfileCreate as ToolProfileCreate
+from .production_plan import ProductionPlanCreate as ProductionPlanCreate
+from .production_plan import ShotDirection as ShotDirection
 from .projects import ApprovalRequest as ApprovalRequest
 from .projects import DeliverableCreate as DeliverableCreate
 from .projects import DeliverableRecord as DeliverableRecord

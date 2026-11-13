@@ -46,6 +46,7 @@ from .contracts import PilotDesignProfile as PilotDesignProfile
 from .contracts import PilotProviderPolicy as PilotProviderPolicy
 from .contracts import PilotScript as PilotScript
 from .contracts import PilotSegmentPlan as PilotSegmentPlan
+from .contracts import ProductionPlanCreate as ProductionPlanCreate
 from .contracts import ProjectCreate as ProjectCreate
 from .contracts import ProjectRecord as ProjectRecord
 from .contracts import ProviderComplianceRecord as ProviderComplianceRecord
@@ -58,6 +59,7 @@ from .contracts import ScriptApproval as ScriptApproval
 from .contracts import ScriptCreate as ScriptCreate
 from .contracts import SegmentCreate as SegmentCreate
 from .contracts import ShotCreate as ShotCreate
+from .contracts import ShotDirection as ShotDirection
 from .contracts import ShotElementBindingCreate as ShotElementBindingCreate
 from .contracts import ShotMotionRequest as ShotMotionRequest
 from .contracts import ShotReferenceCreate as ShotReferenceCreate

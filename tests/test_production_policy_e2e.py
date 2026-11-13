@@ -18,7 +18,11 @@ from pinaka.production import ReuseDecisionCreate, ReuseItem
 from pinaka.use_cases.critique import REQUIRED_CRITIQUE_STAGES
 from pinaka.use_cases.flow import REQUIRED_FLOW_STEPS
 
-from .conftest import create_project, record_motion_evidence_stub
+from .conftest import (
+    create_project,
+    record_minimal_production_plan,
+    record_motion_evidence_stub,
+)
 
 
 def test_the_full_policy_chain_passes_the_quality_bar(controller, tmp_path):
@@ -274,6 +278,7 @@ def test_the_full_policy_chain_passes_the_quality_bar(controller, tmp_path):
             ),
         )
 
+    record_minimal_production_plan(controller, project.id)
     bar = controller.quality_bar(project.id)
     assert bar["passed"] is True, bar["failed"]
     assert {item["gate"] for item in bar["gates"]} >= {

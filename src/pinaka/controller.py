@@ -54,6 +54,7 @@ from .use_cases.motion import MotionUseCases
 from .use_cases.narration import NarrationUseCases
 from .use_cases.planning import PlanningUseCases
 from .use_cases.production import ProductionUseCases
+from .use_cases.production_plan import ProductionPlanUseCases
 from .use_cases.projects import ProjectsUseCases
 from .use_cases.publication import PublicationUseCases
 from .use_cases.qa import QaUseCases
@@ -72,6 +73,7 @@ class CreativeController(
     ChangeRequestUseCases,
     ABDeliveryUseCases,
     CritiqueUseCases,
+    ProductionPlanUseCases,
     ProductionUseCases,
     SourcingUseCases,
     AssetsUseCases,

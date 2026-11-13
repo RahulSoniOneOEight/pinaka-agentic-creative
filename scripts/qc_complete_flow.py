@@ -34,6 +34,7 @@ from pinaka.models import (
     BudgetPlanItemCreate,
     FactSetCreate,
     Money,
+    ProductionPlanCreate,
     ProjectCreate,
     ScriptApproval,
     ScriptCreate,
@@ -391,6 +392,152 @@ for slot in controller.repository.list_slots(project.id):
         ),
     )
 
+asset_manifest = []
+seen_assets = set()
+shot_assets: dict[str, list[str]] = {}
+for shot in plan["shots"]:
+    pair = visuals[shot["stable_key"]]
+    ids = []
+    for key in ("background", "background_backup", "character", "character_backup"):
+        artifact = pair[key]
+        ids.append(artifact["id"])
+        if artifact["id"] in seen_assets:
+            continue
+        seen_assets.add(artifact["id"])
+        asset_manifest.append(
+            {
+                "asset_id": artifact["id"],
+                "kind": "image",
+                "description": f"{key} for {shot['stable_key']}",
+                "source": "owned",
+                "method": "layered_2d_animation",
+                "approval_status": "owned",
+                "fallback": "owned still",
+                "reuse": "single shot",
+            }
+        )
+    shot_assets[shot["stable_key"]] = ids
+
+beats = []
+timings = []
+shot_directions = []
+cursor = 0.0
+for index, shot in enumerate(plan["shots"], start=1):
+    shot_key = shot["stable_key"]
+    duration = float(SECONDS)
+    beats.append(
+        {
+            "beat_id": f"beat-{index:02d}",
+            "purpose": f"Deliver rhyme beat {index}",
+            "viewer_need": "understand",
+            "script_line": "Two little ducks. Mother duck said quack quack quack.",
+            "visual_action": "The duck swims across the pond",
+            "duration_seconds": duration,
+            "shot_keys": [shot_key],
+        }
+    )
+    timings.append(
+        {
+            "beat_id": f"beat-{index:02d}",
+            "start_seconds": cursor,
+            "end_seconds": cursor + duration,
+        }
+    )
+    shot_directions.append(
+        {
+            "shot_key": shot_key,
+            "purpose": "Carry the rhyme beat and keep the duck readable",
+            "timing_cue": f"{cursor:.2f}s-{cursor + duration:.2f}s",
+            "duration_seconds": duration,
+            "composition": {
+                "framing": "medium",
+                "angle": "eye level",
+                "subject_placement": "centre",
+                "focal_point": "duck",
+                "camera_movement": "push in",
+                "caption_room": "lower third",
+            },
+            "performance": {
+                "action_start": "duck enters frame",
+                "action_end": "duck holds centre",
+                "pause_or_reaction": "small bob",
+                "eyeline": "camera",
+            },
+            "lighting": {
+                "direction": "soft key",
+                "softness": "soft",
+                "contrast": "low",
+                "palette": ["green", "cream"],
+                "change": "none",
+            },
+            "graphics": {
+                "effects": ["particles"],
+                "trigger": "beat start",
+                "duration_seconds": 1.5,
+                "intensity": "subtle",
+                "placement": "around the duck",
+                "editable": True,
+            },
+            "audio": {
+                "narration": "rhyme line",
+                "music": None,
+                "ambience": "pond",
+                "sfx": [],
+                "silence": None,
+                "carry_over": None,
+            },
+            "asset_ids": shot_assets[shot_key],
+            "method": "layered_2d_animation",
+            "fallback": "owned still",
+            "acceptance_checks": ["duck visible", "captions readable"],
+            "reviewer_check": "Watch the beat and read the caption",
+        }
+    )
+    cursor += duration
+
+production_plan = controller.record_production_plan(
+    project.id,
+    ProductionPlanCreate.model_validate(
+        {
+            "production_format": "sing_along",
+            "visual_style": "flat_2d_cartoon",
+            "delivery_format": "vertical_reel",
+            "production_method": "layered_2d_animation",
+            "brief": {
+                "objective": project.objective,
+                "audience": project.audience,
+                "language": project.language,
+                "required_content": ["two ducks", "mother duck", "pond", "quack"],
+                "constraints": ["USD 1.00 cap"],
+                "assumptions": [],
+                "missing_inputs": [],
+            },
+            "treatment": {
+                "premise": "Two ducklings swim and answer the mother duck",
+                "emotional_progression": ["calm", "playful", "resolve"],
+                "visual_language": "flat vector pond with a clean duck cutout",
+                "pacing": "one beat every four seconds",
+                "sound": "narration with pond ambience",
+            },
+            "beats": beats,
+            "shot_directions": shot_directions,
+            "asset_manifest": asset_manifest,
+            "continuity_notes": ["same duck identity and palette across shots"],
+            "rough_cut": {
+                "duration_seconds": cursor,
+                "beat_timings": timings,
+                "audio_reference": "narration-v1",
+                "caption_notes": "phrase-level captions in the lower third",
+                "holds": ["hold the final frame"],
+            },
+        }
+    ),
+)
+print(
+    "production plan",
+    production_plan["status"]["ready"],
+    production_plan["status"]["issues"],
+)
 critique("assets")
 controller.approve(
     project.id,

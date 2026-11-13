@@ -26,6 +26,10 @@ The defects below are not polish; they are release blockers for a kids channel.
 | Item | Status | Evidence |
 |---|---|---|
 | Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 693 tests |
+| Executable production plan | **Implemented** | `ProductionPlanCreate` contract: format/style/delivery/method, seven-pass payload, shot directions, asset routes, rough cut; `production_plan` quality-bar gate |
+| Beat-to-delivery intent matrix | **Partial** | Beats link to shots and shot directions link to assets; a separate delivered-evidence matrix is not yet a gate |
+| Plan generator from a 50–100-word idea | **Open** | The contract accepts a complete plan; the planning agent that turns a raw idea into every field is not built |
+| Exact counts / product / claim binding | **Open** | Structural fields exist; automatic verification against approved copy/data is not wired |
 | Black cut | **Fixed** | Crossfade replaces stacked 1 s fades; latest run has luma 95.9–122.6, zero dark runs, 1080×1920/24 |
 | 1080×1920 / 24 fps delivery | **Fixed in fixture; partial in QA** | Latest render is 1080p24; `qa_render` still accepts caller-supplied expectations |
 | Character/world/motion/captions/audio | **Open** | Creative QC blocks the latest run on motion continuity/coverage and caption CPS |
@@ -96,6 +100,94 @@ motion continuity/coverage and caption speed.
 - Colour-script and rhythm review across the full 8 seconds.
 - A meaningful A/B axis (caption treatment or opening composition), not a grade-only variant.
 - Test title/end-card retention once the compliant master exists.
+
+## Planning framework review (implemented)
+
+The framework is now a frozen `production-plan/v1` artifact, not a prose
+brief. It separates the four decisions and carries the seven passes and the
+shot handoff fields.
+
+### Four decisions, kept independent
+
+| Decision | Field | Examples |
+|---|---|---|
+| Production format | `production_format` | cinematic_story, sing_along, narrative_brand_film, product_showcase, creator_ad, launch_promo, explainer, tutorial, documentary |
+| Visual style | `visual_style` | anime, flat_2d_cartoon, watercolor, stylized_3d, cinematic_live_action, studio_product, motion_graphics, mixed |
+| Delivery format | `delivery_format` | vertical_reel, widescreen_ad, square_social, episode |
+| Production method | `production_method` | real_footage, licensed_stock, layered_2d_animation, image_to_video, 3d_render, screen_capture, compositing, generated_image |
+
+A product ad can therefore open with an anime scene, cut to real product
+footage, and close with an approved pack shot without collapsing format,
+style, delivery and method into one label.
+
+### Seven passes captured in the plan
+
+| Pass | Contract section |
+|---|---|
+| 1. Interpret the idea | `brief`: objective, audience, language, required_content, constraints, assumptions, missing_inputs |
+| 2. Creative treatment | `treatment`: premise, emotional_progression, visual_language, pacing, sound |
+| 3. Script in beats | `beats`: beat_id, purpose, viewer_need (see/hear/understand/feel), script_line, visual_action, duration, shot_keys |
+| 4. Assets and continuity | `asset_manifest` + `continuity_notes`: asset_id, source, method, approval, fallback, reuse |
+| 5. Direct each shot | `shot_directions`: purpose, timing, composition, performance, lighting, graphics, audio, assets, method, fallback, acceptance checks, reviewer check |
+| 6. Timed rough cut | `rough_cut`: duration, beat timings, audio reference, caption notes, holds |
+| 7. Produce, assemble, review | Critiques + `creative_qc` + `production_plan` gate; final human review still open |
+
+### Shot record
+
+Every `ShotDirection` is required to carry:
+
+- purpose and timing cue
+- duration
+- composition: framing, angle, subject placement, focal point, camera movement, caption room
+- performance: action start, action end, pause/reaction, eyeline
+- lighting: direction, softness, contrast, palette, change
+- graphics: effects, trigger, duration, intensity, placement, editable
+- audio: dialogue, narration, music, ambience, SFX, silence, carry-over
+- asset IDs, production method and fallback
+- acceptance checks and a reviewer check
+
+A validator rejects unknown shot or asset IDs, duplicate IDs, missing beat
+timings and non-positive durations.
+
+### Asset routing and readiness
+
+- Each shot names the asset IDs it uses.
+- Each asset records source, method, approval status, fallback and reuse.
+- `production-plan-status` reports missing shots, missing assets, planned
+  assets, rough-cut duration mismatches and brief missing inputs.
+- The `production_plan` gate in `quality_bar` fails until the plan is
+  structurally ready.
+- `missing inputs` and `planned assets` are warnings, not silent passes; a
+  missing asset is a hard issue.
+
+### Commands and evidence
+
+```text
+record-production-plan <project> --file plan.json
+production-plan <project>
+production-plan-status <project>
+```
+
+- 693 tests pass.
+- The end-to-end policy test records a complete plan and passes the new gate.
+- The latest fixture records a plan; the gate is structurally ready, while
+  creative QC still blocks on motion and captions.
+
+### What this framework still does not prove
+
+1. **Idea-to-plan generation.** The contract accepts a complete plan; the
+   agent that expands a 50–100-word idea into every field is the next build.
+2. **Delivered intent matrix.** Beats link to shots and shots link to assets,
+   but there is no separate gate that says “this beat was actually delivered
+   on screen, in audio, and in the caption” with timestamped evidence.
+3. **Exact data binding.** Counts, prices, claims, product labels and offer
+   copy are structural fields; they are not yet verified against approved
+   copy or data.
+4. **Rough-cut proof.** The rough cut is a timed plan, not an automatically
+   validated render; reveal timing and counting pauses still need an animatic
+   or render check.
+5. **Human creative review.** The 1–5 rubric and review packet are not yet a
+   final-approval requirement.
 
 ## Stage-critique layer (implemented)
 
@@ -236,7 +328,10 @@ intent traceability, internal consistency and human/audience review.
    publication for fixtures at final approval.
 3. Bind `qa_render` to the frozen delivery contract instead of caller-supplied
    `expected_*` values.
-4. Add `CreativeQualityContract`, the intent matrix and the review packet;
-   require them in `creative_qc`.
-5. Re-run the $1 rhyme with a real character sheet, world, motion, music and
+4. Build the **plan generator** that expands a 50–100-word idea into the
+   production-plan contract, and the **intent matrix** that proves each beat
+   is delivered in picture, audio and captions.
+5. Bind exact counts, prices, claims, labels and offer copy to approved data;
+   add the human 1–5 review and review packet to final approval.
+6. Re-run the $1 rhyme with a real character sheet, world, motion, music and
    captions, then complete the human rubric.

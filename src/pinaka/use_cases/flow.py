@@ -949,6 +949,14 @@ class FlowUseCases:
             )
         except ApprovalRequiredError as error:
             gate("creative_qc", False, str(error))
+        plan_status = self.production_plan_status(project_id)
+        gate(
+            "production_plan",
+            plan_status["ready"],
+            "executable production plan is frozen and complete"
+            if plan_status["ready"]
+            else "; ".join(plan_status["issues"]),
+        )
         if artifact_id:
             checks = [
                 result
