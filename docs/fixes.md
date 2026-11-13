@@ -1,9 +1,11 @@
 # Pinaka — creative-quality fixes
 
 **Date:** 2026-11-13  
+**Updated:** 2026-11-14 — stage-critique layer implemented; latest run status  
 **Reviewed with:** GPT‑5.6 Sol (OpenAI)  
-**Scope:** the 8-second rhyme run at `prj_75ad612d53a9490ca81a13a389755c64`
-and the 30/30 quality-bar result.
+**Scope:** the 8-second rhyme fixture: the original 30/30 run
+(`prj_75ad612d53a9490ca81a13a389755c64`) and the latest 1080×1920 / 24 fps
+run (`prj_2b6fc3acc335480c803ca04c4e0fca55`).
 
 ## Verdict
 
@@ -18,7 +20,22 @@ It does **not** prove publication-grade creative quality.
 The run must be labelled a **flow-proof fixture**, not a publication candidate.
 The defects below are not polish; they are release blockers for a kids channel.
 
+## Implementation status (2026-11-14)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 693 tests |
+| Black cut | **Fixed** | Crossfade replaces stacked 1 s fades; latest run has luma 90–116, zero dark runs, 1080×1920/24 |
+| 1080×1920 / 24 fps delivery | **Fixed in fixture; partial in QA** | Latest render is 1080p24; `qa_render` still accepts caller-supplied expectations |
+| Character/world/motion/captions/audio | **Open** | Creative QC blocks the latest run on motion continuity/coverage and caption CPS |
+| Human creative review / review packet | **Open** | Rubric and review packet are specified, not yet wired to final approval |
+| Reference-independent quality model | **Documented; contract pending** | `docs/quality-model.md`; `CreativeQualityContract` and intent matrix not yet built |
+
 ## Defect classification
+
+The original 30/30 run used 540×960 / 12 fps. The latest fixture uses
+1080×1920 / 24 fps and a crossfade; the remaining creative findings are
+motion continuity/coverage and caption speed.
 
 | Observation | Class | Why |
 |---|---|---|
@@ -53,23 +70,23 @@ The defects below are not polish; they are release blockers for a kids channel.
 
 ### P0 — release blockers
 
-| Action | Implementation | Acceptance | Evidence |
-|---|---|---|---|
-| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | Manifest fields, approval refusal test, CLI report with both statuses. |
-| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6–8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | Frame-by-frame luma plot, boundary thumbnails, regression reproducing the old 3.25–4.25 s failure. |
-| Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | Standard vertical delivery refuses anything below 1080×1920 or 24 fps unless explicitly classified as a fixture/proxy. | Probe report plus negative tests for 540×960 and 12 fps. |
-| Add a publication review gate | Require named human creative approval after viewing the exact final hash with audio and captions. | No publication when any rubric dimension is below 3/5 or a hard check fails. | Signed review record, artifact hash, reviewer notes, preview contact sheet. |
+| Action | Implementation | Status | Acceptance | Evidence |
+|---|---|---|---|---|
+| Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Partial** — Creative QC gate implemented; fixture/publishable flags pending | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` gate blocks on missing/stale critiques or open high-impact actions; 693 tests |
+| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6–8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | Latest 1080p24 run: luma 90–116, zero dark runs, 192 frames |
+| Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | **Partial** — critique enforces 1080×1920/24; `qa_render` contract binding pending | Standard vertical delivery refuses anything below 1080×1920 or 24 fps unless explicitly classified as a fixture/proxy. | Latest render 1080×1920/24; visual critique passes resolution/fps |
+| Add a publication review gate | Require named human creative approval after viewing the exact final hash with audio and captions. | **Open** — rubric and review packet specified, not wired | No publication when any rubric dimension is below 3/5 or a hard check fails. | Human review record, artifact hash, reviewer notes, preview contact sheet |
 
 ### P1 — before the next creative run
 
-| Workstream | Steps | Acceptance |
-|---|---|---|
-| Story/shot contract | Convert the lyric into a beat matrix: required entities, action, setting, emotion and shot evidence. Mark **two ducklings**, **mother duck**, **pond**, **hill/far-away movement** and **quacking** as critical. | Every critical beat is visibly represented; a single duck cannot stand in for two. Human story score ≥4/5. |
-| Character/world | Build or source approved character sheets for two distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
-| Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, mother’s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects ≥0.5% of frame for ≥25% of the shot. |
-| Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1–3 s cue duration, ≤15 CPS, ≥52 px at 1080 width, safe margins, outline/backplate, contrast ≥4.5:1. | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
-| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | Narration intelligible; bed at least 8 dB below speech; −16 LUFS ±1; true peak ≤−2 dBTP; no clipping or unintended silence. |
-| Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | Review packet covers every shot and transition and is attached to approval. |
+| Workstream | Steps | Status | Acceptance |
+|---|---|---|---|
+| Story/shot contract | Convert the lyric into a beat matrix: required entities, action, setting, emotion and shot evidence. Mark **two ducklings**, **mother duck**, **pond**, **hill/far-away movement** and **quacking** as critical. | **Partial** — shots critique exists; intent matrix pending | Every critical beat is visibly represented; a single duck cannot stand in for two. Human story score ≥4/5. |
+| Character/world | Build or source approved character sheets for two distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Open** — fixture has one cleaner cutout duck, no cast/world | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
+| Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, mother’s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Partial** — motion critique catches failures; output still fails continuity/coverage | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects ≥0.5% of frame for ≥25% of the shot. |
+| Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1–3 s cue duration, ≤15 CPS, ≥52 px at 1080 width, safe margins, outline/backplate, contrast ≥4.5:1. | **Partial** — CPS improved 25 → 18.33; still over 15, and “quack” is split one word per cue | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
+| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Open** — narration only, no music/SFX | Narration intelligible; bed at least 8 dB below speech; −16 LUFS ±1; true peak ≤−2 dBTP; no clipping or unintended silence. |
+| Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Open** — visual QC metrics exist; review packet pending | Review packet covers every shot and transition and is attached to approval. |
 
 ### P2 — polish
 
@@ -78,6 +95,55 @@ The defects below are not polish; they are release blockers for a kids channel.
 - Colour-script and rhythm review across the full 8 seconds.
 - A meaningful A/B axis (caption treatment or opening composition), not a grade-only variant.
 - Test title/end-card retention once the compliant master exists.
+
+## Stage-critique layer (implemented)
+
+This is the critique part of the flow, now in code.
+
+### Stages and checks
+
+| Stage | Automated critique | Blocking examples |
+|---|---|---|
+| Script | script exists, approved, ≥8 words | no script, unapproved script |
+| Shots | shot count, duration, subject/action/camera, variety | no shots, shot with no subject/motion |
+| Style | preset/style IDs, style-fit per selected asset | missing preset/style, off-style picks |
+| Assets | resolution, alpha/cutout, sharpness, dark/blank, primary/backup presence | full-frame asset in a cutout slot, missing file, low resolution |
+| Motion | levels/evidence, final motion verdict, continuity, motion-area coverage | failed continuity, <0.5% motion coverage, missing evidence |
+| Visual | 1080×1920, 24 fps, luma continuity, dark/dead frames, letterbox, sharpness | any near-black gap, stale/high finding, soft render |
+| Captions | coverage, max cue, CPS, lines | coverage <90%, cue >4 s, >15 CPS, >2 lines |
+| Audio | loudness, true peak, audio presence, warnings/fails | failed loudness/peak, no audio QA |
+| Delivery | A/B completeness, A/B packet existence | missing A/B packet |
+
+### How the gate behaves
+
+- Each critique records `findings` with `severity` (`blocker`, `high`,
+  `medium`, `low`), evidence and a `corrective_action`.
+- Every open **blocker/high** finding creates a row in `corrective_actions`.
+- A stage gate fails if the critique is missing, stale for the final hash,
+  verdict is `block`, or any high-impact action is still open.
+- Closing an action requires evidence and a named closer; then the stage must
+  be re-critiqued. A pass critique cannot hide an open high finding.
+- The `creative_qc` gate requires all nine stages; a policy-only pass cannot
+  reach delivery.
+
+### Commands
+
+```text
+auto-critique <project> <stage> [--artifact ARTIFACT_ID]
+record-critique <project> --file critique.json
+close-corrective-action <action_id> --by NAME --result TEXT --evidence TEXT
+critique-status <project> [--artifact ARTIFACT_ID]
+```
+
+### Current evidence
+
+- Schema v26; 693 tests pass.
+- Latest render: 1080×1920, 24 fps, 192 frames, luma 90–116, no dark runs;
+  visual critique **passes**.
+- Latest creative QC: motion **revise** (continuity, low motion coverage) and
+  captions **revise** (18.33 CPS); all other stages pass.
+- The run is correctly blocked. The next step is to fix those two output
+  issues, close the actions, and re-critique — not to lower the gate.
 
 ## Revised quality model
 
@@ -162,8 +228,14 @@ intent traceability, internal consistency and human/audience review.
 
 ## Immediate next actions
 
-1. Add the luma-continuity regression and fix the fade/dissolve in `composition.py`.
-2. Add the `purpose` / `publication_allowed` fields and refuse publication on a fixture.
-3. Add the delivery-contract minimums (1080×1920, 24 fps) to QA.
-4. Build the Creative QC rubric and review packet.
-5. Re-run the $1 rhyme with a real character sheet, world, motion, music and captions.
+1. **Close the two open fixture findings:** fix motion continuity/coverage and
+   get captions to ≤15 CPS with phrase-level cues; re-critique and close the
+   actions.
+2. Add `purpose=flow_fixture` / `publication_allowed=false` and refuse
+   publication for fixtures at final approval.
+3. Bind `qa_render` to the frozen delivery contract instead of caller-supplied
+   `expected_*` values.
+4. Add `CreativeQualityContract`, the intent matrix and the review packet;
+   require them in `creative_qc`.
+5. Re-run the $1 rhyme with a real character sheet, world, motion, music and
+   captions, then complete the human rubric.
