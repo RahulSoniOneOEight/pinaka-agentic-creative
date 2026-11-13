@@ -155,3 +155,20 @@ Remaining acceptance blockers are **P1/P2 only**, with the exact Studio admissio
 above. Their budget approval does not expire into permission to spend on another route or default
 credit allowance. Membership/device/Full-access admission must also be rechecked when Studio creation
 can actually proceed. Remote CI status is separate from the local test evidence and is not presumed.
+
+### Gap-completion bundle (2026-11-13, schema v25)
+
+- Commit `2f6752c`; 688 tests pass; `ruff check`/`format` clean; `mypy` clean (51 files).
+- Schema v25 is additive: budget A/B labels, project change-request link, flow execution
+  ownership, change-request/event tables and A/B delivery ledger. A v24 database opens and
+  migrates; `tests/test_gap_completion.py::test_schema_v24_migrates_to_v25` covers it.
+- Closed: F13 (ASR default), F15 (effect library), F20 (ownership auto-link), F24 (A/B packet),
+  F26 (budget labels), F28 (intake), F29 (impact), F30 (revision link), F32 (slot coverage),
+  F33 (Pexels evidence/unavailable) and F36 (caption coverage).
+- Run: `scripts/qc_complete_flow.py`, project `prj_5af9fdf514b4451ea083828b466c7e31`,
+  archive `archive_b9af3a4a8fe44d8aa32f10bf3b5f4cf4`, 30/30 quality-bar gates, final QA pass,
+  ASR caption coverage 1.0, M2 motion and continuity pass, USD 0.00 of the USD 1.00 cap.
+- A/B packet manifest `bfefa3de...`; change request `crq_9e17a6ae...` applied to revision
+  `prj_2c39ecca...`; g5 records a local fallback of Studio with a trade-off.
+- Still external, not claimed as passed: P1 live fal still, P2 Studio video/avatar (credits 0),
+  Pexels video evidence pages (HTTP 403).

@@ -58,14 +58,14 @@ Source of record: `C:\Users\LENOVO\Desktop\pinaka-flow-gaps.txt` (Revision 15).
 | F7 full-bleed/no-text composition | Closed | `object-fit: cover`, camera-move support and validation that rejects baked text/letterboxing; `tests/test_composition.py` |
 | F8 caption alignment/language | Existing | ASR captions, drift gate and locale rules already shipped; not re-verified live in this bundle |
 | F9-F12 candidate ledger, scoring, 2-pick, element slots | Closed | `sourcing_candidates` schema v21, `pick-slot-assets`, `derive-element-slots`, final approval two-pick gate; `tests/test_sourcing_ledger.py` |
-| F13 ShortGPT defaults | Partial | ASR, background mode and segment-query code exists; ASR is not yet the forced default |
+| F13 ShortGPT defaults | Closed | `export-captions --source auto` uses narration ASR when present, records plan fallback otherwise; background/segment-query retained; `tests/test_gap_completion.py` |
 | F14 effects and sound plan | Closed | `record-effects-plan` validates cue rights, known shots and the flash-rate limit; quality bar gate |
-| F15 stills-to-motion library | Partial | Camera moves (push/pull/pan/parallax) render; light/blur/particle libraries are planned but not rendered |
+| F15 stills-to-motion library | Closed | Camera push/pull/pan/parallax plus light_glow, blur, particles, flash and fade/dissolve render as authored `data-effect` layers; true-peak limit threaded; `tests/test_gap_completion.py` |
 | F16 generation-last gate | Closed | Sourcing decision required before any creative generation reserve; `tests/test_flow_policy.py` |
 | F17 motion-level gate | Closed | `motion_levels` schema v22, M1 character minimum at animatic; `tests/test_flow_policy.py` |
-| F18-F21 flow ledger and production record | Closed | `flow_steps` schema v20, skip/blocked policy, `production-record` JSON+Markdown; `tests/test_production_policy_e2e.py` |
-| F22-F26 A/B | Closed | `ab_experiments`/`ab_variants` schema v23, distinct hashes, status and final gate when declared; `tests/test_sourcing_ledger.py` |
-| F27-F30 change-request template | Closed | `change-request` writes Markdown and YAML with element, slot and artifact hashes; delivered path recorded |
+| F18-F21 flow ledger, ownership and production record | Closed | `flow_steps` schema v20/v25; skip/blocked policy; `execution_owner`/`studio_role`/`fallback_of` with auto-link and trade-off; `production-record` JSON+Markdown; `tests/test_production_policy_e2e.py` |
+| F22-F26 A/B | Closed | `ab_experiments`/`ab_variants` schema v23; `<repo>/ab-delivery` writes A/, B/, experiment and metrics plan; budget items carry `variant_label`/`ab_experiment_id`; `tests/test_sourcing_ledger.py`, `tests/test_gap_completion.py` |
+| F27-F30 change-request template, intake, impact and revision | Closed | Template plus `submit-change-request` (hash/field validation), deterministic impact analysis and `create-revision --change_request_id`; request/event tables in schema v25; `tests/test_gap_completion.py` |
 | P2 live Studio / avatar / video | Blocked | Studio still rejects `credits: 0`; no accepted live job; no new spend |
 
 Verification for this bundle: 648 tests pass, `ruff check` clean, `ruff format` clean, `mypy`
@@ -85,5 +85,17 @@ unchanged. QC commands and evidence are recorded in the Desktop gap document.
 | Motion | **FAIL: M0 recorded as M1** | camera push/pan only; no character pixels move; motion gate trusts the declared level and has no frame verifier |
 | Composition full-bleed | Fixed | `FULL_BLEED_ROLES`; `tests/test_composition.py::test_primary_visual_layer_is_full_bleed` |
 | Change-request slot join | Fixed | `_bound_entry` reads slot assets; credits included |
-| Slot-coverage gate at final approval | Open | candidate picks pass before artifact coverage; run bound backups before archive manually |
-| Pexels evidence fallback | Open | item/licence pages return HTTP 403; API response evidence path not implemented |
+| Slot-coverage gate at final approval | Closed | `require_slot_coverage` runs at FINAL and `quality_bar` adds a `slot_coverage` gate; `tests/test_gap_completion.py` |
+| Pexels evidence fallback | Closed | `archive_search_evidence` stores API responses; a 403 writes `provider_blocked` evidence and marks `asset-provider:pexels` unavailable; `tests/test_gap_completion.py` |
+| Caption coverage warning | Closed | ASR SRT pads the final cue to the runtime; complete-flow run reports 8.0/8.0 s, ratio 1.0, pass |
+
+## Complete implementation run (Revision 18, commit 2f6752c)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Remaining gaps F13/F15/F20/F24/F26/F28/F29/F30/F32/F33/F36 | Closed | schema v25, 688 tests, 30/30 gates; `scripts/qc_complete_flow.py` |
+| USD 1.00 rhyme run | Closed | project `prj_5af9fdf514b4451ea083828b466c7e31`, archive `archive_b9af3a4a8fe44d8aa32f10bf3b5f4cf4`, USD 0.00 spent |
+| A/B delivery | Closed | `A/`, `B/`, `experiment.json`, `metrics-plan.json`; manifest `bfefa3de...` |
+| Change request + revision | Closed | `crq_9e17a6ae...` applied; revision `prj_2c39ecca...` linked |
+| Motion / captions / QA | Pass | M2 both shots; continuity passes; ASR coverage 1.0; QA 10/10 |
+| Live providers | Unchanged | P1 fal still not re-run; P2 Studio blocked at credits 0; Pexels still 403 |
