@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import wave
 from decimal import Decimal
 from pathlib import Path
 
@@ -410,7 +411,73 @@ def rights() -> dict:
     }
 
 
+def write_music_bed(path: Path, root: float, seconds: float = 10.0) -> None:
+    sample_rate = 24000
+    time = np.arange(int(seconds * sample_rate), dtype=np.float32) / sample_rate
+    signal = (
+        0.06 * np.sin(2 * np.pi * root * time)
+        + 0.035 * np.sin(2 * np.pi * root * 1.25 * time)
+        + 0.025 * np.sin(2 * np.pi * root * 1.5 * time)
+    )
+    fade = int(sample_rate * 0.35)
+    envelope = np.ones_like(signal)
+    envelope[:fade] = np.linspace(0, 1, fade)
+    envelope[-fade:] = np.linspace(1, 0, fade)
+    pcm = np.clip(signal * envelope * 32767, -32768, 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(pcm.tobytes())
+
+
 context = default_context(monetized=True)
+music_primary_path = BASE / "music-primary.wav"
+music_backup_path = BASE / "music-backup.wav"
+write_music_bed(music_primary_path, 261.63)
+write_music_bed(music_backup_path, 220.0)
+music_primary = controller.write_artifact(
+    project.id,
+    kind=ArtifactKind.AUDIO,
+    relative_path="audio/music-primary.wav",
+    content=music_primary_path.read_bytes(),
+    operation={
+        "type": "music_bed",
+        "rights": rights(),
+        "duration_seconds": 10,
+        "execution_owner": "local",
+        "studio_role": "none",
+    },
+)
+music_backup = controller.write_artifact(
+    project.id,
+    kind=ArtifactKind.AUDIO,
+    relative_path="audio/music-backup.wav",
+    content=music_backup_path.read_bytes(),
+    operation={
+        "type": "music_bed",
+        "rights": rights(),
+        "duration_seconds": 10,
+        "execution_owner": "local",
+        "studio_role": "none",
+    },
+)
+controller.assign_audio_bed(
+    project.id,
+    artifact_id=music_primary["id"],
+    role=SlotAssetRole.PRIMARY,
+    criteria=AssetCriteria(),
+    decided_by="producer",
+    context=context,
+)
+controller.assign_audio_bed(
+    project.id,
+    artifact_id=music_backup["id"],
+    role=SlotAssetRole.BACKUP,
+    criteria=AssetCriteria(),
+    decided_by="producer",
+    context=context,
+)
 visuals = {}
 for index, shot in enumerate(plan["shots"], start=1):
     background_path = BASE / f"background-{index}.png"

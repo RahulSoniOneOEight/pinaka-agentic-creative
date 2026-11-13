@@ -109,15 +109,15 @@ The original fixture had a ~1 s near-black cut, placeholder art, 540×960 at
 
 | Item | Result |
 |---|---|
-| Project / archive | `prj_93ab241405be456ab09eb35f16a9c32e` / `archive_715774cf204f4e8582492099f7256dd2` |
-| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, hash `f09140e6...` |
+| Project / archive | `prj_8f9c77253ecf4e2fbc8092238fed10f8` / `archive_aa4d1fa3c46f4db49a8316c7c3a7742a` |
+| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, hash `b3d36bba...` |
 | Quality bar | 33/33 gates pass; QA 13/13; quality readiness true |
 | Luma / motion | 141–184, no dark runs; continuity identity 1.0 |
-| Captions / audio | 0.994 coverage, 2 cues; −16.57 LUFS, −4.38 dBTP |
+| Captions / audio | 0.994 coverage, 2 cues; −16.74 LUFS, −4.38 dBTP; music bed primary + backup |
 | Budget | USD 1.00 cap, USD 0.00 spent |
 | Quality contract | `flow_fixture`, publication not allowed; intent beats delivered |
-| Review packet | `art_c807ba99...` (contact sheet + evidence) |
-| Change request / revision | `crq_9f9fb078...` / `prj_0e213405...` |
+| Review packet | `art_acf7f6cf...` (contact sheet + evidence) |
+| Change request / revision | `crq_006c81e0...` / `prj_6cd0c721...` |
 | Tests | 698 pass |
 
 This is a **flow fixture**, not a publishable creative. The contract blocks

@@ -35,8 +35,8 @@ The defects below are not polish; they are release blockers for a kids channel.
 | Exact counts / product / claim binding | **Open** | Structural fields exist; automatic verification against approved copy/data is not wired |
 | Black cut | **Fixed** | Latest 10 s run: luma 141â€“184, zero dark runs, 1080Ã—1920/24 |
 | Character/world | **Partial** | Fixture now has mother + five ducklings and a layered pond; still procedural, not final art |
-| Motion / captions / audio | **Partial** | Motion and captions pass on the 10 s fixture; no music/SFX yet |
-| 10-second counting rhyme run | **Pass** | `prj_93ab2414â€¦`, 33/33 gates, QA 13/13, quality readiness true, USD 0.00 spent |
+| Motion / captions / audio | **Partial** | Motion and captions pass; music bed added, no SFX |
+| 10-second counting rhyme run | **Pass** | `prj_8f9c7725â€¦`, 33/33 gates, QA 13/13, quality readiness true, USD 0.00 spent |
 | Review packet | **Implemented** | Contact sheet + luma/motion/QA/caption evidence packet for the exact hash |
 | Reference-independent quality model | **Implemented** | Contract + intent matrix + review + planning framework |
 
@@ -94,7 +94,7 @@ motion continuity/coverage and caption speed.
 | Character/world | Build or source approved character sheets for five distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Partial** â€” fixture has mother + five ducklings and a layered pond; still procedural | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
 | Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, motherâ€™s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Pass on fixture** â€” continuity identity 1.0006 | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects â‰¥0.5% of frame for â‰¥25% of the shot. |
 | Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1â€“3 s cue duration, â‰¤15 CPS, â‰¥52 px at 1080 width, safe margins, outline/backplate, contrast â‰¥4.5:1. | **Pass on fixture** â€” 2 cues, 0.994 coverage, â‰¤15 CPS | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
-| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** â€” narration only; âˆ’16.61 LUFS, âˆ’4.45 dBTP | Narration intelligible; bed at least 8 dB below speech; âˆ’16 LUFS Â±1; true peak â‰¤âˆ’2 dBTP; no clipping or unintended silence. |
+| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** — narration + music bed; −16.74 LUFS, −4.38 dBTP; no SFX | Narration intelligible; bed at least 8 dB below speech; −16 LUFS ±1; true peak ≤−2 dBTP; no clipping or unintended silence. |
 | Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Done** â€” contact sheet + metrics packet generated | Review packet covers every shot and transition and is attached to approval. |
 
 ### P2 â€” polish
@@ -412,23 +412,23 @@ cap and passes the policy, creative, plan and quality gates.
 
 | Item | Value |
 |---|---|
-| Project | `prj_93ab241405be456ab09eb35f16a9c32e` |
-| Archive | `archive_715774cf204f4e8582492099f7256dd2` |
-| Final artifact | `art_1b45d7a8d78a4e11a536ed2bca8cecf2` |
-| Hash | `f09140e639f6eea0ea005249d22d57be1530f4c186493ab55eebe26f3e193103` |
+| Project | `prj_8f9c77253ecf4e2fbc8092238fed10f8` |
+| Archive | `archive_aa4d1fa3c46f4db49a8316c7c3a7742a` |
+| Final artifact | `art_45950ef84bfe4cab8c7a0dde86703c08` |
+| Hash | `b3d36bbadb5c68544950fc9c92c27c94992a4ecdfca6e5f7d54cdce9a31328d5` |
 | Video | 1080Ã—1920, 24 fps, 10.0 s, 240 frames |
 | Quality bar | **33/33 gates pass, 0 failed** |
 | QA | 13 checks, 0 failing |
 | Luma | 141â€“184, zero dark runs, zero dead frames |
-| Motion | continuity identity 1.0006, scale 1.0006, colour 0.0057, position 0.0053 |
+| Motion | continuity identity 1.0, scale 1.0, colour 0.0053, position 0.0051 |
 | Captions | ASR, 2 cues, 9.94/10 s, ratio 0.994 |
 | Audio | âˆ’16.57 LUFS, âˆ’4.38 dBTP |
 | Budget | USD 1.00 cap, USD 0.00 spent; A/B labels 1/1 |
-| A/B packet | `40bcd5b7f8f3fa3a0ebef24052db39725e934075aa8e632fad8463ea6dbae304` |
+| A/B packet | `3831180021a8526d0a138af0f37e1c8d0d4554d90f509323b0ce5ec80a7199ec` |
 | Quality contract | `flow_fixture`; publication **not allowed**; intent beats delivered |
-| Review packet | `art_c807ba9964f34d40b11afe5940c4db41` (contact sheet + metrics) |
+| Review packet | `art_acf7f6cffe6f43a9bdbbfe28647abdb1` (contact sheet + metrics) |
 | Plan | generated from the shot plan and frozen |
-| Change request | `crq_9f9fb078...` â†’ revision `prj_0e213405...` |
+| Change request | `crq_006c81e0...` â†’ revision `prj_6cd0c721...` |
 | Flow / critiques | complete / complete |
 
 The output is a **flow fixture**, not a publication-quality creative. The
