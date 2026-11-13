@@ -5,7 +5,8 @@
 **Reviewed with:** GPT‑5.6 Sol (OpenAI)  
 **Scope:** the 8-second rhyme fixture: the original 30/30 run
 (`prj_75ad612d53a9490ca81a13a389755c64`) and the latest 1080×1920 / 24 fps
-run (`prj_2b6fc3acc335480c803ca04c4e0fca55`).
+run (`prj_71319ead9d694e6f8baed2e6ece5160d`,
+`renders/captioned-2916d6fc01ca.mp4`).
 
 ## Verdict
 
@@ -25,7 +26,7 @@ The defects below are not polish; they are release blockers for a kids channel.
 | Item | Status | Evidence |
 |---|---|---|
 | Per-stage critique layer | **Implemented** | Schema v26 `stage_critiques`/`corrective_actions`; `auto-critique`, `record-critique`, `close-corrective-action`, `critique-status`; `creative_qc` gate; 693 tests |
-| Black cut | **Fixed** | Crossfade replaces stacked 1 s fades; latest run has luma 90–116, zero dark runs, 1080×1920/24 |
+| Black cut | **Fixed** | Crossfade replaces stacked 1 s fades; latest run has luma 95.9–122.6, zero dark runs, 1080×1920/24 |
 | 1080×1920 / 24 fps delivery | **Fixed in fixture; partial in QA** | Latest render is 1080p24; `qa_render` still accepts caller-supplied expectations |
 | Character/world/motion/captions/audio | **Open** | Creative QC blocks the latest run on motion continuity/coverage and caption CPS |
 | Human creative review / review packet | **Open** | Rubric and review packet are specified, not yet wired to final approval |
@@ -73,7 +74,7 @@ motion continuity/coverage and caption speed.
 | Action | Implementation | Status | Acceptance | Evidence |
 |---|---|---|---|---|
 | Separate the two claims | Rename the existing result **Policy QC**. Add independent **Creative QC**. Both are required for `publishable=true`. Fixture runs carry `purpose=flow_fixture` and `publication_allowed=false`. | **Partial** — Creative QC gate implemented; fixture/publishable flags pending | A policy-only pass cannot receive final publication approval. This run is visibly non-publishable. | `creative_qc` gate blocks on missing/stale critiques or open high-impact actions; 693 tests |
-| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6–8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | Latest 1080p24 run: luma 90–116, zero dark runs, 192 frames |
+| Remove the black cut | Delete automatic `duration/4` scene fades. Use a direct cut or a true overlapping 6–8 frame crossfade. Never stack a scene fade with `transition_dissolve`. | **Done** | For this bright preset: no more than two consecutive frames with mean Y below 40; no cut-window dip greater than 35 luma levels against both adjacent 250 ms medians. | Latest 1080p24 run: luma 95.9–122.6, zero dark runs, 192 frames |
 | Bind QA to the delivery contract | Read resolution, fps, duration, orientation and audio from the frozen contract, not from caller-supplied `expected_*` values. | **Partial** — critique enforces 1080×1920/24; `qa_render` contract binding pending | Standard vertical delivery refuses anything below 1080×1920 or 24 fps unless explicitly classified as a fixture/proxy. | Latest render 1080×1920/24; visual critique passes resolution/fps |
 | Add a publication review gate | Require named human creative approval after viewing the exact final hash with audio and captions. | **Open** — rubric and review packet specified, not wired | No publication when any rubric dimension is below 3/5 or a hard check fails. | Human review record, artifact hash, reviewer notes, preview contact sheet |
 
@@ -138,8 +139,8 @@ critique-status <project> [--artifact ARTIFACT_ID]
 ### Current evidence
 
 - Schema v26; 693 tests pass.
-- Latest render: 1080×1920, 24 fps, 192 frames, luma 90–116, no dark runs;
-  visual critique **passes**.
+- Latest render (`prj_71319…`, `captioned-2916…`): 1080×1920, 24 fps,
+  192 frames, luma 95.9–122.6, no dark runs; visual critique **passes**.
 - Latest creative QC: motion **revise** (continuity, low motion coverage) and
   captions **revise** (18.33 CPS); all other stages pass.
 - The run is correctly blocked. The next step is to fix those two output
