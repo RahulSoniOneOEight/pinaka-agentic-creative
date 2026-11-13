@@ -784,10 +784,31 @@ class FlowUseCases:
             else "missing: " + ", ".join(missing_fallback),
         )
         try:
-            script = self.require_approved_script(project_id)
-            gate("script", True, f"approved script {script['content_hash'][:12]}")
+            script = self.require_script_binding(project_id)
+            gate(
+                "script",
+                True,
+                f"approved script {script['content_hash'][:12]} bound to "
+                f"brief {script['brief_id']}",
+            )
         except IntegrityError as error:
             gate("script", False, str(error))
+        if productions:
+            try:
+                self.require_motion_plan(project_id)
+                gate("motion_plan", True, "level, action, parts, secondary, camera")
+            except IntegrityError as error:
+                gate("motion_plan", False, str(error))
+            try:
+                budget = self.require_motion_budget(project_id)
+                gate(
+                    "motion_budget",
+                    True,
+                    f"{len(budget['motion_budget']['shots'])} shots, "
+                    f"{budget['motion_budget']['total_minor']} minor",
+                )
+            except IntegrityError as error:
+                gate("motion_budget", False, str(error))
         try:
             delivery = self.require_delivery_metadata(project_id)
             gate(

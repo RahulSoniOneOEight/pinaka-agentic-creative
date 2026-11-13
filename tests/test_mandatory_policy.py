@@ -5,7 +5,7 @@ import pytest
 
 from pinaka.assets import AssetCriteria
 from pinaka.contracts.flow import FlowStepCreate
-from pinaka.contracts.planning import ScriptApproval, ScriptCreate
+from pinaka.contracts.planning import ScriptApproval, ScriptCreate, ShotCreate
 from pinaka.enums import ArtifactKind, SlotAssetRole
 from pinaka.errors import ApprovalRequiredError, ConflictError, IntegrityError
 from pinaka.models import TextBriefRequest
@@ -320,3 +320,69 @@ def test_qa_pass_rejects_a_failing_animatic_check(controller):
     )
     with pytest.raises(ApprovalRequiredError, match="failing QA"):
         controller.require_qa_pass(project.id, render["id"])
+
+
+def test_motion_plan_requires_level_action_parts_secondary_camera(controller):
+    project = create_project(controller)
+    controller.add_shot(
+        project.id,
+        ShotCreate(
+            stable_key="shot-01",
+            ordinal=1,
+            beat="establish",
+            duration_seconds=4,
+            narrative="A duck on a pond",
+            requirements={"subject": {"action": "bob"}},
+        ),
+    )
+    with pytest.raises(IntegrityError, match="motion plan"):
+        controller.require_motion_plan(project.id)
+
+
+def test_motion_budget_records_route_and_cost_per_shot(controller):
+    project = create_project(controller)
+    plan = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(
+            text="Make an eight second rhyme about a duck on a pond",
+            duration_seconds=8,
+            persist_slots=True,
+        ),
+    )
+    controller.plan_production(project.id)
+    budget = controller.require_motion_budget(project.id)
+    rows = budget["motion_budget"]["shots"]
+    assert len(rows) == len(plan["shots"])
+    assert all(row["route"] for row in rows)
+    assert all(row["estimated_minor"] == 0 for row in rows)
+    assert budget["motion_budget"]["total_minor"] == 0
+
+
+def test_script_is_bound_to_the_current_brief(controller):
+    project = create_project(controller)
+    plan = controller.plan_from_text(
+        project.id,
+        TextBriefRequest(
+            text="Make a five second rhyme about a duck", persist_slots=True
+        ),
+    )
+    script = controller.record_script(
+        project.id, ScriptCreate(text="Five little ducks went swimming one day.")
+    )
+    assert script["brief_id"] == plan["brief"]["id"]
+    controller.approve_script(
+        project.id, script["id"], ScriptApproval(approved_by="producer")
+    )
+    bound = controller.require_script_binding(project.id)
+    assert bound["id"] == script["id"]
+
+    controller.plan_from_text(
+        project.id,
+        TextBriefRequest(
+            text="Make a six second rhyme about a goose on a lake",
+            duration_seconds=6,
+            create_plan=False,
+        ),
+    )
+    with pytest.raises(IntegrityError, match="stale brief"):
+        controller.require_script_binding(project.id)

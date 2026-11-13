@@ -328,6 +328,8 @@ class ProjectsUseCases:
             if self.repository.list_shot_productions(project_id):
                 self.require_creative_plan(project_id)
                 self.require_reuse_decision(project_id)
+                self.require_motion_plan(project_id)
+                self.require_motion_budget(project_id)
                 self.require_shot_productions(project_id)
             self.require_motion_levels(project_id)
             render_id = request.scope.get("render")
@@ -397,7 +399,9 @@ class ProjectsUseCases:
             if self.repository.list_shot_productions(project_id):
                 self.require_creative_plan(project_id)
                 self.require_reuse_decision(project_id)
-                self.require_approved_script(project_id)
+                self.require_script_binding(project_id)
+                self.require_motion_plan(project_id)
+                self.require_motion_budget(project_id)
                 self.require_shot_productions(project_id)
             animatic = self.repository.active_approval(project_id, "animatic")
             if animatic and animatic.get("scope", {}).get("render"):

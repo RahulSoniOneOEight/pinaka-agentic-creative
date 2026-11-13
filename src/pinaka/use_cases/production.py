@@ -6,6 +6,15 @@ from ..contracts.planning import ScriptApproval, ScriptCreate
 from ..enums import ArtifactKind
 from ..errors import ConflictError, IntegrityError
 from ..models import SlotCreate
+from ..motion import (
+    DEFAULT_MODEL as DEFAULT_MOTION_MODEL,
+)
+from ..motion import (
+    DEFAULT_RESOLUTION as DEFAULT_MOTION_RESOLUTION,
+)
+from ..motion import (
+    estimate_minor as estimate_motion_minor,
+)
 from ..production import (
     PRESETS,
     STYLES,
@@ -89,6 +98,10 @@ class ProductionUseCases:
         return ProductionPlan.model_validate(raw)
 
     def record_script(self, project_id: str, request: ScriptCreate) -> dict[str, Any]:
+        if request.brief_id is None:
+            brief = self.repository.latest_workable_brief(project_id)
+            if brief:
+                request = request.model_copy(update={"brief_id": brief["id"]})
         content_hash = sha256_bytes(request.text.encode("utf-8"))
         return self.repository.record_script(
             project_id, request, content_hash=content_hash
@@ -106,6 +119,157 @@ class ProductionUseCases:
 
     def require_approved_script(self, project_id: str) -> dict[str, Any]:
         return self.repository.require_approved_script(project_id)
+
+    def require_script_binding(self, project_id: str) -> dict[str, Any]:
+        """The approved script must be bound to the current workable brief."""
+
+        script = self.require_approved_script(project_id)
+        brief = self.repository.latest_workable_brief(project_id)
+        if not brief:
+            raise IntegrityError("A script binding requires a workable brief")
+        if not script.get("brief_id"):
+            raise IntegrityError(
+                "The approved script is not bound to a brief; re-record it"
+            )
+        if script["brief_id"] != brief["id"]:
+            raise IntegrityError(
+                "The approved script is bound to a stale brief; re-record and "
+                "re-approve it"
+            )
+        return script
+
+    def require_motion_plan(self, project_id: str) -> list[dict[str, Any]]:
+        """Every character shot must carry a complete motion plan."""
+
+        rows: list[dict[str, Any]] = []
+        invalid: list[str] = []
+        for shot in self.repository.list_shots(project_id):
+            requirements = shot.get("requirements") or {}
+            if not requirements.get("subject"):
+                continue
+            motion = requirements.get("motion") or {}
+            parts = motion.get("parts") or ()
+            complete = (
+                motion.get("level") in {"M1", "M2", "M3", "M4", "M5"}
+                and bool(motion.get("action"))
+                and len(parts) >= 2
+                and bool(motion.get("secondary"))
+                and bool(motion.get("camera"))
+                and float(shot["duration_seconds"]) > 0
+            )
+            if not complete:
+                invalid.append(shot["stable_key"])
+            rows.append(
+                {
+                    "shot_id": shot["id"],
+                    "stable_key": shot["stable_key"],
+                    "motion": motion,
+                    "complete": complete,
+                }
+            )
+        if invalid:
+            raise IntegrityError(
+                "Character shots need level, action, two parts, secondary and "
+                "camera in the motion plan: " + ", ".join(invalid)
+            )
+        return rows
+
+    def plan_motion_budget(self, project_id: str) -> dict[str, Any]:
+        """Record the motion route and cost per shot before any spend."""
+
+        productions = self.repository.list_shot_productions(project_id)
+        if not productions:
+            raise IntegrityError("A motion budget requires shot productions")
+        shots = {shot["id"]: shot for shot in self.repository.list_shots(project_id)}
+        project = self.repository.get_project(project_id)
+        rows = []
+        total_minor = 0
+        for production in productions:
+            shot = shots.get(production["shot_id"])
+            if not shot:
+                raise IntegrityError(
+                    f"Shot {production['shot_id']} is missing from the project"
+                )
+            method = production["method"]
+            if method == "image_to_video":
+                estimated_minor = estimate_motion_minor(
+                    DEFAULT_MOTION_MODEL,
+                    seconds=float(shot["duration_seconds"]),
+                    resolution=DEFAULT_MOTION_RESOLUTION,
+                )
+                route = "fal.video"
+            else:
+                estimated_minor = 0
+                route = {
+                    "cutout_rig": "owned_rig",
+                    "composite": "owned_composite",
+                    "kinetic_type": "deterministic",
+                    "still_camera": "deterministic",
+                }.get(method, "owned_clip")
+            total_minor += estimated_minor
+            rows.append(
+                {
+                    "shot_id": shot["id"],
+                    "stable_key": shot["stable_key"],
+                    "method": method,
+                    "route": route,
+                    "estimated_minor": estimated_minor,
+                }
+            )
+        body = {
+            "schema": "motion-budget/v1",
+            "project_id": project_id,
+            "currency": project.max_budget.currency,
+            "shots": rows,
+            "total_minor": total_minor,
+        }
+        content = canonical_json(body).encode("utf-8")
+        digest = sha256_bytes(content)
+        artifact = self.write_artifact(
+            project_id,
+            kind=ArtifactKind.DESIGN,
+            relative_path=f"plans/motion-budget-{digest[:12]}.json",
+            content=content,
+            operation={
+                "type": "motion_budget",
+                "total_minor": total_minor,
+                "shot_count": len(rows),
+            },
+        )
+        return {
+            "motion_budget": body,
+            "artifact": artifact,
+            "budget_hash": digest,
+        }
+
+    def require_motion_budget(self, project_id: str) -> dict[str, Any]:
+        artifacts = [
+            artifact
+            for artifact in self.repository.list_artifacts(project_id)
+            if (artifact.get("operation") or {}).get("type") == "motion_budget"
+        ]
+        if not artifacts:
+            raise IntegrityError("A motion budget is required before production")
+        import json
+
+        artifact = max(artifacts, key=lambda item: item["created_at"])
+        body = json.loads(self.read_artifact_text(artifact["id"]))
+        covered = {row["shot_id"] for row in body.get("shots", ())}
+        missing = [
+            production["shot_id"]
+            for production in self.repository.list_shot_productions(project_id)
+            if production["shot_id"] not in covered
+        ]
+        if missing:
+            raise IntegrityError(
+                "Motion budget is missing shots: " + ", ".join(missing)
+            )
+        if any(
+            row["method"] == "image_to_video" and row["estimated_minor"] <= 0
+            for row in body["shots"]
+        ):
+            raise IntegrityError("Image-to-video shots need a non-zero cost estimate")
+        return {"motion_budget": body, "artifact": artifact}
 
     def write_style_query_plan(self, project_id: str, slot_id: str) -> dict[str, Any]:
         slot = self.repository.get_slot(slot_id)
@@ -239,12 +403,14 @@ class ProductionUseCases:
             for slot in (background, primary):
                 if slot.get("style_id"):
                     self.write_style_query_plan(project_id, slot["id"])
+        motion_budget = self.plan_motion_budget(project_id)
         return {
             "project_id": project_id,
             "preset_id": plan.production.preset_id,
             "style_id": plan.production.style_id,
             "productions": productions,
             "created_slots": created_slots,
+            "motion_budget": motion_budget["motion_budget"],
         }
 
     def record_reuse_decision(
