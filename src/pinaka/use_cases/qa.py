@@ -45,12 +45,25 @@ class QaUseCases:
         expected_fps: float | None = None,
         expect_audio: bool = True,
         captions_artifact_id: str | None = None,
-        max_true_peak_dbtp: float = -1.0,
+        max_true_peak_dbtp: float | None = None,
         probe: Any | None = None,
         measure_loudness: Any | None = None,
     ) -> dict[str, Any]:
         """Technical QA on a rendered deliverable, recorded per check."""
 
+        true_peak_limit = max_true_peak_dbtp
+        if true_peak_limit is None:
+            true_peak_limit = -1.0
+            creative = self.current_creative_plan(project_id)
+            if creative:
+                subjects = {
+                    str(subject).casefold()
+                    for subject in creative["plan"].profile.subjects
+                }
+                if "kids" in subjects or "children" in subjects:
+                    from ..kids import KIDS_TRUE_PEAK_DBTP
+
+                    true_peak_limit = KIDS_TRUE_PEAK_DBTP
         artifact = self.repository.get_artifact(artifact_id)
         if artifact["project_id"] != project_id:
             raise ConflictError("Artifact belongs to a different project")
@@ -175,18 +188,18 @@ class QaUseCases:
                 if peak is not None:
                     peak_status = (
                         "pass"
-                        if peak <= max_true_peak_dbtp
+                        if peak <= true_peak_limit
                         else "warn"
-                        if peak <= max_true_peak_dbtp + 1.0
+                        if peak <= true_peak_limit + 1.0
                         else "fail"
                     )
                     record(
                         "audio.true_peak",
                         peak_status,
-                        f"true peak {peak:.1f} dBTP (limit {max_true_peak_dbtp:.1f})",
+                        f"true peak {peak:.1f} dBTP (limit {true_peak_limit:.1f})",
                         {
                             "true_peak_dbtp": peak,
-                            "limit_dbtp": max_true_peak_dbtp,
+                            "limit_dbtp": true_peak_limit,
                         },
                     )
         if captions_artifact_id:

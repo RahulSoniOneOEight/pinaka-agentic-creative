@@ -2972,8 +2972,8 @@ def build_parser() -> argparse.ArgumentParser:
     qa_render_parser.add_argument(
         "--max-true-peak",
         type=float,
-        default=-1.0,
-        help="True-peak ceiling in dBTP (kids profiles use -2.0)",
+        default=None,
+        help="True-peak ceiling in dBTP; default is -1.0, or -2.0 for kids profiles",
     )
     qa_render_parser.set_defaults(handler=cmd_qa_render)
 
