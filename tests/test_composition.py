@@ -138,3 +138,24 @@ def test_baked_text_is_rejected_by_validation():
     report = validate_composition(tampered)
     assert report["valid"] is False
     assert any("baked text" in problem for problem in report["problems"])
+
+
+def test_primary_visual_layer_is_full_bleed():
+    import base64
+
+    html = build_composition(
+        title="x",
+        width=1080,
+        height=1920,
+        shots=SHOTS,
+        layers={
+            "shot-01": [
+                {
+                    "role": "primary visual",
+                    "mime": "image/png",
+                    "data": base64.b64encode(b"png").decode("ascii"),
+                }
+            ]
+        },
+    )
+    assert 'class="layer background" data-role="primary visual"' in html

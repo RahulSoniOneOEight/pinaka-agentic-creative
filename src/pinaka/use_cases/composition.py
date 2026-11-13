@@ -45,6 +45,10 @@ class CompositionUseCases:
         skipped: list[dict[str, Any]] = []
         total = 0
         for assignment in self.repository.list_slot_assets(project_id):
+            # The master render uses the primary asset only; backups and A/B
+            # variants are deliberate alternates, not extra layers.
+            if assignment.get("role") != "primary":
+                continue
             slot = slots.get(assignment["slot_id"])
             if not slot:
                 continue

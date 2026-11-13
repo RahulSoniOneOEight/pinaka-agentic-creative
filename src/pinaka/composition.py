@@ -35,11 +35,19 @@ def _escape(value: str) -> str:
 
 
 BACKGROUND_ROLES = {"background", "world", "location", "environment"}
+FULL_BLEED_ROLES = BACKGROUND_ROLES | {
+    "visual",
+    "primary visual",
+    "hero visual",
+    "hero image",
+}
 SUBJECT_ACTIONS = {"swim", "bob", "wave", "count", "enter", "still"}
 
 
 def _layer_class(role: str) -> str:
-    return "layer background" if role.lower() in BACKGROUND_ROLES else "layer subject"
+    if role.lower() in FULL_BLEED_ROLES:
+        return "layer background"
+    return "layer subject"
 
 
 def _subject_plan(shot: dict[str, Any]) -> dict[str, Any]:
@@ -244,7 +252,7 @@ def build_composition(
                 0
                 if item.get("kind") == "video"
                 else 1
-                if str(item.get("role", "")).lower() not in BACKGROUND_ROLES
+                if str(item.get("role", "")).lower() not in FULL_BLEED_ROLES
                 else 0
             ),
         ):
@@ -257,7 +265,7 @@ def build_composition(
                     f'preload="auto"></video>'
                 )
                 continue
-            if role.lower() in BACKGROUND_ROLES:
+            if role.lower() in FULL_BLEED_ROLES:
                 image_layers.append(
                     f'<img class="{_layer_class(role)}" data-role="{_escape(role)}" '
                     f'alt="" src="data:{layer["mime"]};base64,{layer["data"]}">'

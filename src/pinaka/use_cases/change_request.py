@@ -76,19 +76,29 @@ class ChangeRequestUseCases:
         picks = {
             item["slot_id"]: item for item in self.repository.slot_picks(project_id)
         }
+        assignments: dict[str, dict[str, dict[str, Any]]] = {}
+        for assignment in self.repository.list_slot_assets(project_id):
+            assignments.setdefault(assignment["slot_id"], {})[assignment["role"]] = (
+                assignment
+            )
         flow = self.flow_completeness(project_id)
 
         slot_entries = []
         for slot in slots:
             pick = picks.get(slot["id"], {})
+            roles = assignments.get(slot["id"], {})
             slot_entries.append(
                 {
                     "slot_id": slot["id"],
                     "stable_key": slot["stable_key"],
                     "role": slot["role"],
                     "treatment_ceiling": slot.get("treatment_ceiling"),
-                    "primary": self._pick_entry(pick.get("primary"), artifacts),
-                    "backup": self._pick_entry(pick.get("backup"), artifacts),
+                    "primary": self._bound_entry(
+                        roles.get("primary"), pick.get("primary"), artifacts
+                    ),
+                    "backup": self._bound_entry(
+                        roles.get("backup"), pick.get("backup"), artifacts
+                    ),
                 }
             )
 
@@ -135,17 +145,7 @@ class ChangeRequestUseCases:
                 for element in elements
             ],
             "slots": slot_entries,
-            "deliverables": [
-                {
-                    "artifact_id": artifact["id"],
-                    "path": artifact["relative_path"],
-                    "hash": artifact["content_hash"],
-                    "kind": artifact["kind"],
-                }
-                for artifact in artifacts.values()
-                if artifact["kind"] in {"render", "derivative"}
-                and artifact.get("is_current", True)
-            ],
+            "deliverables": self._deliverables(project_id, artifacts),
             "change_request": dict(CHANGE_REQUEST_FIELDS),
             "allowed_change_types": CHANGE_TYPES,
         }
@@ -186,24 +186,72 @@ class ChangeRequestUseCases:
         }
 
     @staticmethod
-    def _pick_entry(candidate: dict[str, Any] | None, artifacts: dict[str, Any]) -> Any:
-        if not candidate:
+    def _bound_entry(
+        assignment: dict[str, Any] | None,
+        candidate: dict[str, Any] | None,
+        artifacts: dict[str, Any],
+    ) -> Any:
+        if not assignment and not candidate:
             return None
-        artifact_id = candidate.get("artifact_id")
-        return {
-            "candidate_id": candidate["id"],
-            "provider": candidate["provider"],
-            "provider_asset_id": candidate["provider_asset_id"],
-            "licence": candidate["licence"],
-            "treatment": candidate["treatment"],
-            "score": candidate["score"],
+        artifact_id = (assignment or {}).get("artifact_id") or (candidate or {}).get(
+            "artifact_id"
+        )
+        artifact = artifacts.get(artifact_id or "")
+        rights = (artifact or {}).get("operation", {}).get("rights") or {}
+        entry: dict[str, Any] = {
             "artifact_id": artifact_id,
-            "artifact_hash": (
-                artifacts[artifact_id]["content_hash"]
-                if artifact_id in artifacts
-                else None
-            ),
+            "artifact_hash": artifact["content_hash"] if artifact else None,
+            "attribution": rights.get("attribution_text"),
         }
+        if candidate:
+            entry.update(
+                {
+                    "candidate_id": candidate["id"],
+                    "provider": candidate["provider"],
+                    "provider_asset_id": candidate["provider_asset_id"],
+                    "licence": candidate["licence"],
+                    "treatment": candidate["treatment"],
+                    "score": candidate["score"],
+                }
+            )
+        return entry
+
+    def _deliverables(
+        self, project_id: str, artifacts: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        selected: list[str] = []
+        for approval in self.repository.list_approvals(project_id):
+            if approval["stage"] == "final" and approval["output_hash"]:
+                artifact = self.repository.artifact_by_content_hash(
+                    project_id, approval["output_hash"]
+                )
+                if artifact:
+                    selected.append(artifact["id"])
+        for experiment in self.repository.list_ab_experiments(project_id):
+            for variant in self.repository.list_ab_variants(experiment["id"]):
+                selected.append(variant["artifact_id"])
+        if not selected:
+            selected = [
+                artifact["id"]
+                for artifact in artifacts.values()
+                if artifact["kind"] == "render"
+            ]
+        seen: set[str] = set()
+        rows = []
+        for artifact_id in selected:
+            if artifact_id in seen or artifact_id not in artifacts:
+                continue
+            seen.add(artifact_id)
+            artifact = artifacts[artifact_id]
+            rows.append(
+                {
+                    "artifact_id": artifact["id"],
+                    "path": artifact["relative_path"],
+                    "hash": artifact["content_hash"],
+                    "kind": artifact["kind"],
+                }
+            )
+        return rows
 
     @staticmethod
     def _markdown(body: dict[str, Any]) -> str:
@@ -238,7 +286,8 @@ class ChangeRequestUseCases:
                 f"`{primary.get('artifact_hash') or ''}`, "
                 f"backup `{backup.get('artifact_id') or 'none'}` "
                 f"`{backup.get('artifact_hash') or ''}`, "
-                f"ceiling {slot['treatment_ceiling']}"
+                f"ceiling {slot['treatment_ceiling']}, "
+                f"credit {primary.get('attribution') or 'none'}"
             )
         lines.extend(["", "## Deliverables", ""])
         for artifact in body["deliverables"]:
