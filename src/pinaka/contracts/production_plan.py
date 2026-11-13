@@ -132,6 +132,7 @@ class AssetRoute(StrictModel):
     approval_status: AssetApproval
     fallback: str = Field(min_length=1, max_length=1000)
     reuse: str = Field(min_length=1, max_length=1000)
+    openmontage_capability: str | None = Field(default=None, max_length=120)
 
 
 class ShotDirection(StrictModel):
@@ -149,6 +150,7 @@ class ShotDirection(StrictModel):
     fallback: str = Field(min_length=1, max_length=1000)
     acceptance_checks: tuple[str, ...] = Field(min_length=1)
     reviewer_check: str = Field(min_length=1, max_length=1000)
+    openmontage_capability: str | None = Field(default=None, max_length=120)
 
 
 class BeatTiming(StrictModel):

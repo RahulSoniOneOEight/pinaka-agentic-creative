@@ -188,6 +188,88 @@ production-plan-status <project>
    or render check.
 5. **Human creative review.** The 1–5 rubric and review packet are not yet a
    final-approval requirement.
+6. **Studio capability routing.** `openmontage_capability` is a planning field;
+   live Studio discovery, cost quoting and automated production routing are
+   not yet wired.
+
+## OpenMontage capability integration (planning → production)
+
+OpenMontage is not a single production method. It is a studio service with a
+capability library. Planning chooses a **capability**; production executes it
+through Studio or a recorded fallback. The production method stays independent.
+
+### Planning phase
+
+1. **Discover, do not assume.** Load Studio bootstrap/orchestration and read
+   account readiness, credits, provider connections and the current capability
+   library. Costs and availability change.
+2. **Choose a capability per beat/shot.** Record it on
+   `ShotDirection.openmontage_capability` or
+   `AssetRoute.openmontage_capability`.
+3. **Record the production contract for that capability:** required inputs,
+   output spec, cost/credit range, provider/account, rights and consent, AI
+   labelling, delivery format and fallback.
+4. **Budget it.** Studio credits and own-provider dollars are separate.
+   Pinaka's funded budget, approval and one-take guards still apply.
+5. **Define the fallback before production.** If Studio is unavailable or the
+   budget is refused, the shot uses the recorded local/stock/owned route, not
+   an unapproved retry.
+
+### Capability map (representative)
+
+| Capability | Planning use | Production method | Studio route | Fallback |
+|---|---|---|---|---|
+| Cinematic shots | Chases, frozen moments, scale reveals | generated / image-to-video | opening still → shot plan → clips | stock + local compositing |
+| AI presenter | Split-screen host, consistent presenter | generated image + video + TTS | reference sheet → clips → captions | human presenter or VO + stock |
+| Impossible one-take | Continuous world-change shot | image-to-video | one unbroken camera plan | layered composition / cuts |
+| 3D worlds | Character/world film, editable scene | 3d_render | Meshy + Blender | 2D layers / stock |
+| Product explode | Product photo → parts → reassemble | image-to-video | first/last frame product shot | product stills + compositing |
+| Motion graphics | Data, type, particles, simulations | motion_graphics / compositing | code-drawn animation | local HTML/CSS/Remotion |
+| UGC ads | Creator-style vertical ad | generated image + video + TTS | creator sheet → clips → captions/price | actor + phone footage |
+| Product commercials | Macro, light, end card | image-to-video + graphics | shot plan + end card | product photography + edit |
+| Narrated story | Painted storybook, narration, score | generated images + audio | images → camera moves → voice/music | illustration/stock + VO |
+| Pixar-style animation | Character short | image-to-video + audio | character consistency → clips | 2D/3D animation |
+| Documentary | Stock footage, maps, timeline | licensed_stock + compositing | script → stock → maps/timeline | archive/owned footage |
+| Explainer | Document → charts | screen_capture / motion_graphics | read document → charts → narration | manual charts / slides |
+| Hand-drawn anime | Title/sequence with on-model characters | image-to-video | character sheet → shots | 2D frame animation |
+| Grade / recolour / key / swap / track | Post-production look and compositing | compositing | local Studio tools | manual VFX |
+| Voice / languages / lip-sync | Multilingual presenter or narration | TTS / avatar | translate → voice → lips | recorded VO + subtitles |
+| Sound / music / captions / edit | Mix, SFX, styled captions, beat cuts, reframe, upscale | audio / compositing | local Studio tools | library/owned assets + manual edit |
+
+### Production phase
+
+- Use Studio through its MCP tools: bootstrap/orchestration, account/connections,
+  production create/invoke, jobs read/wait, workspace publish/import.
+- Use one stable request ID per accepted job; never repeat a render to retrieve
+  a result; never retry a refused submission without the person's explicit ask.
+- Import finished media into the Pinaka artifact store with hashes, provider job
+  records, receipts, credits and the AI-generated label.
+- Record Studio vs local ownership in the flow step (`execution_owner`,
+  `studio_role`, `fallback_of`, `trade_off`).
+- If Studio is unavailable, record `BLOCKED` with the exact reason and execute
+  the plan's fallback.
+- Pinaka remains the system of record. Studio is the renderer/service; it does
+  not own approvals, budgets, rights or the archive.
+
+### Rules
+
+- A capability choice never overrides rights, consent, claims or brand approval.
+- Do not infer an unsupported capability; discover it.
+- Do not copy reference numbers, prices or claims; use approved data.
+- Do not bypass a refused sign-in, membership, budget or consent with another
+  route or credential.
+- Keep `production_format`, `visual_style`, `delivery_format` and
+  `production_method` independent of the capability name.
+
+### Current status
+
+- `ShotDirection.openmontage_capability` and
+  `AssetRoute.openmontage_capability` are implemented as optional planning
+  fields.
+- The Studio MCP tools are available but were not invoked for this fixture;
+  Studio is in private alpha and no credits or provider spend were used.
+- Capability discovery snapshot, cost estimation and automated
+  capability-to-production routing are still open.
 
 ## Stage-critique layer (implemented)
 
@@ -331,7 +413,9 @@ intent traceability, internal consistency and human/audience review.
 4. Build the **plan generator** that expands a 50–100-word idea into the
    production-plan contract, and the **intent matrix** that proves each beat
    is delivered in picture, audio and captions.
-5. Bind exact counts, prices, claims, labels and offer copy to approved data;
+5. Add Studio bootstrap/orchestration discovery, a capability/cost snapshot and
+   the capability-to-production router, with the plan's fallback enforced.
+6. Bind exact counts, prices, claims, labels and offer copy to approved data;
    add the human 1–5 review and review packet to final approval.
-6. Re-run the $1 rhyme with a real character sheet, world, motion, music and
+7. Re-run the $1 rhyme with a real character sheet, world, motion, music and
    captions, then complete the human rubric.
