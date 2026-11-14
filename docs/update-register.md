@@ -105,21 +105,40 @@ items; it does not certify creative quality. The 30/30 result is Policy QC.
 The original fixture had a ~1 s near-black cut, placeholder art, 540×960 at
 12 fps and no music/SFX. Creative QC remains open; see [fixes.md](fixes.md).
 
-## 10-second counting rhyme fixture (2026-11-14)
+## 10-second counting rhyme runs (2026-11-14)
+
+### Pinaka flow fixture
 
 | Item | Result |
 |---|---|
 | Project / archive | `prj_6118755d98124c8eb9afc5b56969826e` / `archive_9d46af3b850a47a4bd9dcc1d55951da9` |
-| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, hash `d275712f...` |
+| Delivery | 1080x1920, 24 fps, 10.0 s, 240 frames, hash `d275712f...` |
 | Quality bar | 33/33 gates pass; QA 13/13; quality readiness true |
-| Luma / motion | 141–184, no dark runs; continuity identity 1.0 |
-| Captions / audio | 0.992 coverage, 2 cues; −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
+| Luma / motion | 141-184, no dark runs; continuity identity 1.0 |
+| Captions / audio | 0.992 coverage, 2 cues; -16.84 LUFS, -4.04 dBTP; music bed + 2 SFX cues |
 | Budget | USD 1.00 cap, USD 0.00 spent |
-| Quality contract | archived run `flow_fixture`; production contract recorded; publication pending human review |
+| Quality contract | archived run `flow_fixture` |
 | Review packet | `art_571faf6a...` (contact sheet + evidence) |
 | Change request / revision | `crq_a4741041...` / `prj_f1a66ab6...` |
 | Tests | 701 pass |
 
-The archived run is a **flow fixture**; a production contract was recorded on the same exact hash. Publication is allowed by that contract but readiness fails on the human review (model review is `revise`, average 3.22). Live Studio routing falls back because `account_ready=false` (private alpha, no account/credits). Final character art is still procedural. Data binding, SFX, the plan generator and the Studio routing interface are implemented.
-publication; production-grade character art, music/SFX, the plan generator,
-exact data binding and Studio routing remain open.
+### OpenMontage Studio production
+
+| Item | Result |
+|---|---|
+| Studio project | `0200006d-22f9-434f-a34f-e24d844ae4c5` |
+| Final artifact / hash | `756da93b-...` / `1693eed692ccb50d7c76b8caddce0835e13453a56ecb7a6d3cf4162d53aef7c5` |
+| Delivery | 1080x1920, 24 fps, 10.0 s, 240 frames, H.264/AAC |
+| Composition check | lint 0, runtime 0, layout 0, contrast 20/20 |
+| Audio | -17.1 LUFS, -3.4 dBTP; Google TTS narration + cleared catalogue bed |
+| Studio budget | 1 credit / USD 1.00; 0 credits, provider spend up to USD 0.58 |
+| Pinaka import | `art_9a97f28bca2848ceb34e642954356c33`, same hash |
+| Review packet | `art_1a60ea2c2b8041ac9b5d00e03a587e59` |
+| Pinaka readiness | false; only issue: no creative review for the exact final artifact |
+
+Studio is connected (`account_ready=true`), and Pinaka now routes
+`motion_graphics`, `cinematic_shots` and `narration` to Studio. The production is
+finished and the final is published. The archived Pinaka run remains a
+non-publishable flow proof. The Studio final is the current production
+candidate; it needs a named human 1-5 review before publication. A designed
+character sheet and a bespoke nursery score would still improve the art.

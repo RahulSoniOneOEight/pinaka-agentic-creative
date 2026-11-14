@@ -36,8 +36,9 @@ The defects below are not polish; they are release blockers for a kids channel.
 | Black cut | **Fixed** | Latest 10 s run: luma 141â€“184, zero dark runs, 1080Ã—1920/24 |
 | Character/world | **Partial** | Fixture now has mother + five ducklings and a layered pond; still procedural, not final art |
 | Motion / captions / audio | **Partial** | Motion and captions pass; music bed + 2 SFX cues; no final character art |
-| 10-second counting rhyme run | **Pass (fixture); production pending sign-off** | `prj_6118755d…`, 33/33 gates, QA 13/13, USD 0.00 spent |
-| Review packet | `art_571faf6af8a141f3a9fae9a6d4cd3c1b` (contact sheet + metrics) |
+| 10-second counting rhyme run | **Pass (fixture); Studio cut published; human review pending** | `prj_6118755d…`, 33/33 gates, QA 13/13; Studio final `1693eed6…` |
+| OpenMontage Studio production | **Implemented** | Studio 0.1.8 authored/rendered/published the 10 s rhyme; 0 credits, provider spend up to USD 0.58 |
+| Review packet | **Implemented** | Contact sheet + luma/motion/QA/caption evidence packet for the exact hash |
 | Reference-independent quality model | **Implemented** | Contract + intent matrix + review + planning framework |
 
 ## Defect classification
@@ -94,7 +95,7 @@ motion continuity/coverage and caption speed.
 | Character/world | Build or source approved character sheets for five distinguishable ducklings and a mother duck: front/side poses, palette, expressions, silhouette, scale, layered parts. Build pond, reeds, hill, sky, foreground foliage, reflections, texture and lighting layers. | **Partial** â€” fixture has mother + five ducklings and a layered pond; still procedural | Identity stable across shots; silhouettes readable at phone size; foreground/midground/background depth present. |
 | Perceived motion | Use a layered M2 rig or approved motion source. Animate swim translation, head turns, wing flap, motherâ€™s beak/quack, water ripples, reed sway and parallax. Measure the character ROI, not whole-frame residuals. | **Pass on fixture** â€” continuity identity 1.0006 | Each character shot has a readable action; subject travel or articulated-part travel reaches at least 2% of frame dimension; at least two independently moving character parts; secondary motion affects â‰¥0.5% of frame for â‰¥25% of the shot. |
 | Captions | Generate phrase-level cues, then apply a kids preset: max two lines, ~32 characters per line, one phrase per cue, 1â€“3 s cue duration, â‰¤15 CPS, â‰¥52 px at 1080 width, safe margins, outline/backplate, contrast â‰¥4.5:1. | **Pass on fixture** â€” 2 cues, 0.994 coverage, â‰¤15 CPS | No orphan words, clause overload, action obstruction, unsafe placement or drift >100 ms. |
-| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
+| Audio | Source licensed/owned light music, quack, splash and ambience; record rights and backups. Duck the bed under narration and sync cues to action. | **Partial** - narration + music bed; -16.84 LUFS, -4.04 dBTP; no SFX | Narration intelligible; bed at least 8 dB below speech; -16 LUFS +/-1; true peak <=-2 dBTP; no clipping or unintended silence. |
 | Review tooling | Produce contact sheets, boundary strips, motion overlays, caption-safe-area previews and luma/audio plots for the exact final artifact. | **Done** â€” contact sheet + metrics packet generated | Review packet covers every shot and transition and is attached to approval. |
 
 ### P2 â€” polish
@@ -270,10 +271,16 @@ through Studio or a recorded fallback. The production method stays independent.
 - `ShotDirection.openmontage_capability` and
   `AssetRoute.openmontage_capability` are implemented as optional planning
   fields.
-- The Studio MCP tools are available but were not invoked for this fixture;
-  Studio is in private alpha and no credits or provider spend were used.
-- Capability discovery snapshot, cost estimation and automated
-  capability-to-production routing are still open.
+- `record-capabilities`, `capabilities` and `route-capability` are implemented;
+  the snapshot records account readiness, credits, providers, cost hints and
+  fallbacks, and the router returns Studio or the recorded fallback.
+- Studio 0.1.8 was invoked end to end: authored composition, check, narration,
+  music fit, audio mix, three shot frames, 10-second render and final publish.
+  No OpenMontage credits were spent; provider spend was up to USD 0.58.
+- The current Studio snapshot marks `motion_graphics`, `cinematic_shots` and
+  `narration` ready and routes all three to Studio.
+- Automated cost estimation inside the production plan and automatic fallback
+  execution (rather than a recorded route decision) are still open.
 
 ## Stage-critique layer (implemented)
 
@@ -290,7 +297,7 @@ This is the critique part of the flow, now in code.
 | Motion | levels/evidence, final motion verdict, continuity, motion-area coverage | failed continuity, <0.5% motion coverage, missing evidence |
 | Visual | 1080Ã—1920, 24 fps, luma continuity, dark/dead frames, letterbox, sharpness | any near-black gap, stale/high finding, soft render |
 | Captions | coverage, max cue, CPS, lines | coverage <90%, cue >4 s, >15 CPS, >2 lines |
-| Audio | −16.84 LUFS, −4.04 dBTP; music bed + 2 SFX cues |
+| Audio | -16.84 LUFS, -4.04 dBTP; music bed + 2 SFX cues | clipping, unintended silence, bed over speech |
 | Delivery | A/B completeness, A/B packet existence | missing A/B packet |
 
 ### How the gate behaves
@@ -431,21 +438,72 @@ cap and passes the policy, creative, plan and quality gates.
 | Change request | `crq_a4741041...` → revision `prj_f1a66ab6...` |
 | Flow / critiques | complete / complete |
 
-The archived run is a **flow fixture**, but a production contract was recorded on the same exact hash. Publication is allowed by that contract; readiness fails only on the creative review: the recorded review is a model review (`revise`, average 3.22), and the contract requires a human reviewer.
+The archived Pinaka run is a **flow fixture**. A production contract is now bound
+to the OpenMontage Studio final (hash `1693eed6…`) with an intent matrix and a
+review packet. Readiness for that candidate fails on exactly one issue:
+**"no creative review for the exact final artifact"**. A named human 1–5 review
+is the remaining manual step. OpenMontage Studio is connected
+(`account_ready=true`); the Pinaka capability snapshot now routes
+`motion_graphics`, `cinematic_shots` and `narration` to Studio.
 
-Production readiness after promotion: `passed=false`; issues: "creative review verdict is revise" and "creative review requires a human reviewer". This is the human sign-off blocker. OpenMontage routing also falls back (`account_ready=false`) because Studio is private alpha and no account/credits are connected.
-quality contract makes that explicit; publication authorization refuses it.
-The remaining gaps are creative production, not software gates.
+## OpenMontage Studio production (2026-11-14)
+
+Studio 0.1.8 produced and published the 10-second vertical rhyme. The production
+used an authored HTML/SVG composition rendered by HyperFrames, Google Gemini TTS
+narration, and a cleared music bed from Studio's included catalogue. No
+OpenMontage credits were spent.
+
+| Item | Value |
+|---|---|
+| Studio project | `0200006d-22f9-434f-a34f-e24d844ae4c5` |
+| Title | Five Little Ducks — 10s Rhyme |
+| Final artifact | `756da93b-2018-4e94-9ed5-75a742a071d9` |
+| Hash | `1693eed692ccb50d7c76b8caddce0835e13453a56ecb7a6d3cf4162d53aef7c5` |
+| Delivery | 1080×1920, 24 fps, 10.0 s, 240 frames, H.264/AAC |
+| Composition check | lint 0, runtime 0, layout 0, contrast 20/20 |
+| Render verification | clean full decode, 240/240 frames |
+| Narration | Google Gemini 3.8 Flash TTS, voice Achernar, 8.8 s WAV |
+| Music | `figures-accumulating`, cleared Studio catalogue, fitted to 10 s at −10.9 dB |
+| Audio master | −17.1 LUFS, −3.4 dBTP |
+| Studio budget | 1 credit / USD 1.00; **0 credits**, provider spend **up to USD 0.58** |
+| Pinaka import | `art_9a97f28bca2848ceb34e642954356c33`, same hash |
+| Review packet | `art_1a60ea2c2b8041ac9b5d00e03a587e59` |
+| Pinaka readiness | false; only issue: **no creative review for the exact final artifact** |
+
+The video is at
+`...\five-little-ducks-10s-rhyme\deliverables\five-little-ducks-10s.mp4`.
+The Studio production is finished (`state=completed`). The Pinaka production
+contract on this hash requires a named human 1–5 review; that record is the only
+remaining publication blocker.
+
+### What Studio produced
+
+- five ducklings, Mother Duck and a layered pond in one continuous scene
+- three storyboard shots (wide pond, quack, count 1–5) with frames; the render
+  is one continuous scene
+- count numerals synchronized to the spoken count (`1` 3.44 s … `5` 7.78 s)
+- phrase captions at 58 px with a dark title band and AA contrast
+- gentle bobbing, water ripples, Mother Duck drift/beak quack, final fade
+- 1080×1920 / 24 fps / 10 s with AAC stereo audio
+
+### Honest limitations
+
+- the art is clean vector illustration, not a designed character sheet
+- the music bed is a generic bright catalogue cue, not a bespoke nursery score
+- no separate quack/splash SFX; the quack is in the narration
+- Studio's paid music routes failed (Google Lyria free-tier quota, OpenRouter
+  audio balance); the free cleared catalogue succeeded, and no retry was forced
 
 ## Immediate next actions
 
-1. Add Studio bootstrap/orchestration discovery, a capability/cost snapshot and
-   the capability-to-production router, with the plan's fallback enforced.
-2. Bind exact counts, prices, claims, labels and offer copy to approved data.
-3. Replace the fixture family/pond with a real character sheet and world, add
-   music/SFX, and produce a 1080p24 counting rhyme that is worth publishing.
-4. Complete the human 1â€“5 review for a production contract; the fixture uses a
-   model review and blocks publication.
-5. Publish only from a `purpose=production` contract with human review and
-   `publication_allowed=true`.
+1. Complete the human 1-5 review for the Studio final
+   (`1693eed692ccb50d7c76b8caddce0835e13453a56ecb7a6d3cf4162d53aef7c5`) and
+   record it with `creative-review`; no dimension below 3 and average >=4.0 for
+   a pass.
+2. Publish only from a `purpose=production` contract with a passing human review
+   and `publication_allowed=true`.
+3. If a designed character sheet or bespoke nursery score is wanted, produce it
+   and re-run the Studio cut; the current art is clean vector, not final art.
+4. Keep the Studio capability snapshot and provider readiness current when
+   accounts, credits or providers change.
 
